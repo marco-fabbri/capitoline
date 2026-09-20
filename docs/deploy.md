@@ -273,14 +273,18 @@ stay disabled until `settings.json` locks it again.
 
 ```sh
 mkdir -p /etc/capitoline
-sudo -u capitoline git clone <repo url> /var/lib/capitoline/app
+sudo -Hu capitoline git clone <repo url> /var/lib/capitoline/app
 cd /var/lib/capitoline/app
-sudo -u capitoline npm ci
-sudo -u capitoline npm run build
+sudo -Hu capitoline npm ci
+sudo -Hu capitoline npm run build
 cp config/capitoline.yaml /etc/capitoline/capitoline.yaml
 chown root:capitoline /etc/capitoline/capitoline.yaml
 chmod 0640 /etc/capitoline/capitoline.yaml
 ```
+
+`-H` matters: without it `sudo` keeps root's `HOME`, npm looks for its cache
+in `/root/.npm` and `npm ci` fails with `EACCES`. With it the cache lands in
+`/var/lib/capitoline/.npm`.
 
 Edit `/etc/capitoline/capitoline.yaml`:
 
@@ -421,19 +425,31 @@ mechanism (rsync to the Mac, or a bucket).
 
 ## 12. Smoke test
 
-One real call per provider with its `health_model`. On the host:
+One real call per provider with its `health_model`, read from the same
+configuration the service uses. The script needs `curl` and `jq` on the
+machine it runs from.
+
+Before §9 (Access not yet configured, `server.access.team_domain` empty),
+on the host:
 
 ```sh
-cd /var/lib/capitoline/app && scripts/smoke.sh http://127.0.0.1:8080
+cd /var/lib/capitoline/app && CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml scripts/smoke.sh http://127.0.0.1:8080
 ```
 
-With Access enabled (§9) the local call needs the service token too. From
-the Mac, against the public hostname:
+Once §9 is done the loopback form no longer authenticates: the gateway
+accepts only the `Cf-Access-Jwt-Assertion` header (or the `CF_Authorization`
+cookie), which the Cloudflare edge issues after checking the service token,
+and a call to `127.0.0.1:8080` never passes through the edge. Every line
+would be `401`. From then on the smoke test goes through the tunnel, from
+the Mac or from the host alike:
 
 ```sh
 CF_ACCESS_CLIENT_ID=<id> CF_ACCESS_CLIENT_SECRET=<secret> \
   scripts/smoke.sh https://api.example.com
 ```
+
+(on the host, prefix `CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml` as
+above so the model list matches the production configuration.)
 
 Expected: three lines with status `200`, a short answer and a token count;
 exit code 0. Run it again after every CLI update (`docs/update-clis.md`).

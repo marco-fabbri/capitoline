@@ -37,7 +37,7 @@ Any OpenAI-compatible client works by setting its base URL to `/v1` (Open WebUI,
 
 MCP: `POST /mcp` (streamable HTTP) with tools `list_models` and `ask_model`. Registration from Claude Code is in `docs/deploy.md` §10.
 
-After updating a CLI, run `scripts/smoke.sh` (see `docs/update-clis.md`).
+After updating a CLI, run `scripts/smoke.sh` (see `docs/update-clis.md`); it needs `curl` and `jq` on the machine it runs from.
 
 ## Principles
 

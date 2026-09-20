@@ -27,15 +27,19 @@ On the host, as root:
    exit
    ```
 
-2. Run the smoke test against the running service:
+2. Run the smoke test against the running service (`curl` and `jq` must be
+   installed where it runs). With Cloudflare Access enabled (`docs/deploy.md`
+   §9) the loopback address answers `401` to every call, so the test goes
+   through the tunnel with the service token, from the host or from the Mac:
 
    ```sh
-   cd /var/lib/capitoline/app && scripts/smoke.sh http://127.0.0.1:8080
+   cd /var/lib/capitoline/app && CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml \
+     CF_ACCESS_CLIENT_ID=<id> CF_ACCESS_CLIENT_SECRET=<secret> \
+     scripts/smoke.sh https://api.example.com
    ```
 
-   (with Cloudflare Access enabled, set `CF_ACCESS_CLIENT_ID` and
-   `CF_ACCESS_CLIENT_SECRET` first, or run it from the Mac against the
-   public hostname; see `docs/deploy.md` §12).
+   Only while `server.access.team_domain` is still empty can it run locally:
+   `scripts/smoke.sh http://127.0.0.1:8080` (see `docs/deploy.md` §12).
 
 3. If the updated CLI's line is not `200`:
    - compare the CLI's `--help` with its `args` in `config/capitoline.yaml`
