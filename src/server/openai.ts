@@ -14,8 +14,23 @@ const Body = z.object({
   reasoning_effort: EffortSchema.optional(),
 }).passthrough();
 
+// Fields the gateway honors. Everything else in the body is either a feature we
+// cannot provide (REJECT, 400 when actually requested) or a tuning knob we
+// silently drop and report in X-Capitoline-Ignored (spec 6.1: "ignore with a
+// warning"), including keys we have never heard of.
+const HONORED = new Set(["model", "messages", "stream", "reasoning_effort", "n"]);
 const REJECT = ["tools", "tool_choice", "functions", "function_call", "logprobs", "top_logprobs", "response_format"];
-const IGNORE = ["temperature", "top_p", "max_tokens", "max_completion_tokens", "presence_penalty", "frequency_penalty", "stop", "seed", "user"];
+
+// A REJECT field only counts as requested when its value asks for the feature:
+// logprobs:false, tools:[], tool_choice:"none"/"auto" and response_format
+// {type:"text"} are the gateway's own defaults, and clients send them routinely.
+function requested(v: unknown): boolean {
+  if (v === undefined || v === null || v === false) return false;
+  if (Array.isArray(v)) return v.length > 0;
+  if (v === "none" || v === "auto") return false;
+  if (typeof v === "object" && (v as { type?: unknown }).type === "text") return false;
+  return true;
+}
 
 export interface Converted { req: InternalRequest; ignored: string[] }
 
@@ -23,9 +38,9 @@ export function convertChatRequest(body: unknown): Converted {
   const parsed = Body.safeParse(body);
   if (!parsed.success) throw new CapitolineError("bad_request", parsed.error.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; "));
   const b = parsed.data as Record<string, unknown> & z.infer<typeof Body>;
-  for (const f of REJECT) if (f in b && b[f] !== undefined && b[f] !== null) throw new CapitolineError("bad_request", `"${f}" is not supported by this gateway`);
-  if ("n" in b && b.n !== undefined && b.n !== 1) throw new CapitolineError("bad_request", `"n" must be 1`);
-  const ignored = IGNORE.filter((f) => f in b && b[f] !== undefined && b[f] !== null);
+  for (const f of REJECT) if (f in b && requested(b[f])) throw new CapitolineError("bad_request", `"${f}" is not supported by this gateway`);
+  if ("n" in b && b.n !== undefined && b.n !== null && b.n !== 1) throw new CapitolineError("bad_request", `"n" must be 1`);
+  const ignored = Object.keys(b).filter((f) => !HONORED.has(f) && !REJECT.includes(f) && b[f] !== undefined && b[f] !== null);
 
   const messages: Message[] = [];
   const attachments: Attachment[] = [];
@@ -55,7 +70,11 @@ export function httpStatus(e: CapitolineError | ErrorKind): { status: number; re
     case "unknown_model": return { status: 404 };
     case "rate_limited": return { status: 429, retryAfterS: retry ?? 60 };
     case "queue_full": return { status: 503, retryAfterS: retry ?? 30 };
-    case "auth_expired": case "model_unavailable": return { status: 503, retryAfterS: 300 };
+    // A request that hit an expired login is a server-side failure worth
+    // retrying later; a model already known to be unavailable is simply not
+    // offered (it is missing from /v1/models too), so spec 6.1/8.3 say 404.
+    case "auth_expired": return { status: 503, retryAfterS: 300 };
+    case "model_unavailable": return { status: 404 };
     case "timeout": return { status: 504 };
     default: return { status: 502 };
   }

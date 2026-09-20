@@ -1,4 +1,4 @@
-import express, { type Request, type RequestHandler, type Response } from "express";
+import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import type { Core } from "../core/core.js";
 import { CapitolineError, type Usage } from "../core/types.js";
 import type { Logger } from "../log.js";
@@ -12,6 +12,11 @@ const CLIENT_MESSAGE: Record<string, string> = {
   cli_crashed: "the provider process failed",
   bad_output: "the provider returned unreadable output",
 };
+
+function beginSse(res: Response) {
+  res.status(200).setHeader("Content-Type", "text/event-stream").setHeader("Cache-Control", "no-cache");
+  res.flushHeaders?.();
+}
 
 function sendError(res: Response, e: unknown, log: Logger) {
   const err = e instanceof CapitolineError ? e : new CapitolineError("bad_output", "internal error");
@@ -53,14 +58,15 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
       for await (const ev of core.execute(conv.req, { signal: ac.signal, source: "http" })) {
         if (ev.type === "text") {
           if (conv.req.stream) {
-            if (!started) { res.status(200).setHeader("Content-Type", "text/event-stream").setHeader("Cache-Control", "no-cache"); res.flushHeaders?.(); res.write(sseChunk(conv.req.model, id, { role: "assistant", content: "" }, null)); started = true; }
+            if (!started) { beginSse(res); res.write(sseChunk(conv.req.model, id, { role: "assistant", content: "" }, null)); started = true; }
             res.write(sseChunk(conv.req.model, id, { content: ev.delta }, null));
           } else text += ev.delta;
         } else if (ev.type === "done") usage = ev.usage;
         else if (ev.type === "error") { opts.log.warn({ kind: ev.kind, detail: ev.detail.slice(-2000) }, "provider error"); throw new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind]); }
       }
+      if (ac.signal.aborted) return; // client went away: nothing left to answer
       if (conv.req.stream) {
-        if (!started) { res.status(200).setHeader("Content-Type", "text/event-stream"); res.write(sseChunk(conv.req.model, id, { role: "assistant", content: "" }, null)); }
+        if (!started) { beginSse(res); res.write(sseChunk(conv.req.model, id, { role: "assistant", content: "" }, null)); }
         res.write(sseChunk(conv.req.model, id, {}, "stop", usage));
         res.write("data: [DONE]\n\n");
         res.end();
@@ -69,10 +75,27 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
       if (res.headersSent) {
         const err = e instanceof CapitolineError ? e : new CapitolineError("bad_output", "internal error");
         opts.log.warn({ kind: err.kind }, "error after stream started");
-        res.write(`data: ${JSON.stringify({ error: { message: err.kind, code: err.kind } })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: { message: err.message, type: "server_error", code: err.kind } })}\n\n`);
         res.end();
       } else sendError(res, e, opts.log);
     }
+  });
+
+  // Errors raised before a route runs (express.json on a malformed or oversized
+  // body) would otherwise fall into Express's default handler, which answers in
+  // HTML with a stack trace full of local paths. Keep the spec 8.3 error shape.
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) return next(err);
+    const e = err as { type?: string; status?: number } | undefined;
+    if (e?.type === "entity.too.large" || e?.status === 413) {
+      res.status(413).json({ error: { message: "request body too large", type: "invalid_request_error", code: "bad_request" } });
+      return;
+    }
+    if (typeof e?.status === "number" && e.status >= 400 && e.status < 500) {
+      sendError(res, new CapitolineError("bad_request", "invalid JSON body"), opts.log);
+      return;
+    }
+    sendError(res, err, opts.log);
   });
 
   return app;

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import request from "supertest";
+import type { AddressInfo } from "node:net";
 import { createApp } from "../src/server/app.js";
 import { Core } from "../src/core/core.js";
 import { UsageStore } from "../src/usage/store.js";
@@ -10,10 +11,14 @@ import type { ProviderEvent } from "../src/core/types.js";
 const OK: ProviderEvent[] = [{ type: "text", delta: "hel" }, { type: "text", delta: "lo" }, { type: "done", usage: { input: 3, output: 2 } }];
 function make(script: ProviderEvent[] = OK) {
   const p = new FakeProvider("claude", ["claude-opus"], script, 1);
-  const core = new Core([p], new UsageStore(":memory:"), { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
-  return { p, app: createApp(core, { log: createLogger("t") }) };
+  const usage = new UsageStore(":memory:");
+  const core = new Core([p], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+  const outcomes = () => (usage as unknown as { db: { prepare(q: string): { all(): { outcome: string }[] } } }).db
+    .prepare("SELECT outcome FROM calls WHERE source = 'http' ORDER BY id").all().map((r) => r.outcome);
+  return { p, core, outcomes, app: createApp(core, { log: createLogger("t") }) };
 }
 const body = (extra: object = {}) => ({ model: "claude-opus", messages: [{ role: "user", content: "hi" }], ...extra });
+const sseLines = (text: string) => text.split("\n\n").filter(Boolean).map((l) => l.replace(/^data: /, ""));
 
 describe("GET /v1/models", () => {
   it("lists available models with owned_by", async () => {
@@ -40,7 +45,7 @@ describe("POST /v1/chat/completions", () => {
     const r = await request(app).post("/v1/chat/completions").send(body({ stream: true }));
     expect(r.status).toBe(200);
     expect(r.headers["content-type"]).toMatch(/text\/event-stream/);
-    const chunks = r.text.split("\n\n").filter(Boolean).map((l) => l.replace(/^data: /, ""));
+    const chunks = sseLines(r.text);
     expect(chunks.at(-1)).toBe("[DONE]");
     const parsed = chunks.slice(0, -1).map((c) => JSON.parse(c));
     expect(parsed[0].choices[0].delta.role).toBe("assistant");
@@ -48,9 +53,9 @@ describe("POST /v1/chat/completions", () => {
     expect(parsed.at(-1).choices[0].finish_reason).toBe("stop");
     expect(parsed.at(-1).usage.total_tokens).toBe(5);
   });
-  it("flattens multi-turn history and extracts the system prompt", async () => {
+  it("passes the full message history through, mapping developer to system", async () => {
     const { app, p } = make();
-    await request(app).post("/v1/chat/completions").send(body({ messages: [{ role: "system", content: "S" }, { role: "user", content: "a" }, { role: "assistant", content: "b" }, { role: "user", content: "c" }] }));
+    await request(app).post("/v1/chat/completions").send(body({ messages: [{ role: "developer", content: "S" }, { role: "user", content: "a" }, { role: "assistant", content: "b" }, { role: "user", content: "c" }] }));
     expect(p.calls[0].messages).toEqual([{ role: "system", text: "S" }, { role: "user", text: "a" }, { role: "assistant", text: "b" }, { role: "user", text: "c" }]);
   });
   it("decodes data-URL images into attachments", async () => {
@@ -69,9 +74,49 @@ describe("POST /v1/chat/completions", () => {
     expect(r.status).toBe(400);
     expect(r.body.error.message).toMatch(re);
   });
+  it.each([
+    [{ logprobs: false }], [{ tool_choice: "none" }], [{ tools: [] }], [{ response_format: { type: "text" } }], [{ n: 1 }],
+  ])("accepts %j, the gateway default, with 200", async (extra) => {
+    const { app } = make();
+    const r = await request(app).post("/v1/chat/completions").send(body(extra));
+    expect(r.status).toBe(200);
+    expect(r.headers["x-capitoline-ignored"]).toBeUndefined();
+  });
+  it("lists unknown parameters in X-Capitoline-Ignored", async () => {
+    const { app } = make();
+    const r = await request(app).post("/v1/chat/completions").send(body({ stream_options: { include_usage: true }, max_tokens: 10 }));
+    expect(r.status).toBe(200);
+    expect(r.headers["x-capitoline-ignored"].split(",").sort()).toEqual(["max_tokens", "stream_options"]);
+  });
+  it("answers a malformed JSON body with a 400 JSON error and no stack trace", async () => {
+    const { app } = make();
+    const r = await request(app).post("/v1/chat/completions").set("Content-Type", "application/json").send("{not json");
+    expect(r.status).toBe(400);
+    expect(r.headers["content-type"]).toMatch(/application\/json/);
+    expect(r.body.error.code).toBe("bad_request");
+    expect(r.text).not.toContain("node_modules");
+  });
+  it("answers an oversized body with a 413 JSON error and no stack trace", async () => {
+    const { app } = make();
+    const r = await request(app).post("/v1/chat/completions").send(body({ pad: "x".repeat(21 * 1024 * 1024) }));
+    expect(r.status).toBe(413);
+    expect(r.headers["content-type"]).toMatch(/application\/json/);
+    expect(r.body.error.code).toBe("bad_request");
+    expect(r.text).not.toContain("node_modules");
+  });
   it("returns 404 for an unknown model", async () => {
     const { app } = make();
     expect((await request(app).post("/v1/chat/completions").send(body({ model: "nope" }))).status).toBe(404);
+  });
+  it("returns 404 without Retry-After for a declared model whose provider is unhealthy", async () => {
+    const { app, p, core } = make();
+    p.healthResult = { ok: false, kind: "auth_expired", detail: "expired", checkedAt: 0 };
+    await core.checkHealth();
+    const r = await request(app).post("/v1/chat/completions").send(body());
+    expect(r.status).toBe(404);
+    expect(r.headers["retry-after"]).toBeUndefined();
+    expect(r.body.error.code).toBe("model_unavailable");
+    expect(p.calls).toHaveLength(0);
   });
   it.each([
     ["auth_expired", 503], ["rate_limited", 429], ["timeout", 504], ["cli_crashed", 502], ["bad_output", 502],
@@ -81,6 +126,41 @@ describe("POST /v1/chat/completions", () => {
     expect(r.status).toBe(status);
     expect(r.body.error.code).toBe(kind);
     expect(JSON.stringify(r.body)).not.toContain("secret stderr");
+  });
+  it("reports a provider error after output started as an SSE error line and ends without [DONE]", async () => {
+    const { app } = make([{ type: "text", delta: "par" }, { type: "error", kind: "cli_crashed", detail: "secret stderr" }]);
+    const r = await request(app).post("/v1/chat/completions").send(body({ stream: true }));
+    expect(r.status).toBe(200);
+    expect(r.headers["content-type"]).toMatch(/text\/event-stream/);
+    const chunks = sseLines(r.text);
+    expect(chunks).not.toContain("[DONE]");
+    const last = JSON.parse(chunks.at(-1)!);
+    expect(last.error.code).toBe("cli_crashed");
+    expect(last.error.message).toBe("the provider process failed");
+    expect(r.text).not.toContain("secret stderr");
+  });
+  it("aborts the provider run when the client disconnects mid-stream", async () => {
+    const script: ProviderEvent[] = Array.from({ length: 20 }, () => ({ type: "text", delta: "x" } as ProviderEvent)).concat([{ type: "done", usage: { input: 1, output: 20 } }]);
+    const { app, p, outcomes } = make(script);
+    p.delayMs = 20;
+    const server = app.listen(0);
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const ac = new AbortController();
+      const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body({ stream: true })), signal: ac.signal,
+      });
+      expect(res.status).toBe(200);
+      const reader = res.body!.getReader();
+      await reader.read(); // first chunk: the stream is live
+      ac.abort();
+      await expect(reader.read()).rejects.toThrow();
+      const deadline = Date.now() + 2000;
+      while (outcomes().length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+      expect(outcomes()).toEqual(["aborted"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
 
