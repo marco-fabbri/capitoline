@@ -7,6 +7,7 @@
 //   crash          : print "boom" to stderr, exit 2
 //   secret-stderr  : print a fake secret to stderr, then exit 0 with no stdout
 //   cwd            : print {"cwd": process.cwd(), "files": [...]}
+//   big-stderr     : write ~200 KiB to stderr (last line is "END"), exit 0
 import { readFileSync, readdirSync } from "node:fs";
 const argv = process.argv.slice(2);
 const modeIdx = argv.indexOf("--mode");
@@ -46,6 +47,13 @@ switch (mode) {
   case "cwd":
     process.stdout.write(JSON.stringify({ cwd: process.cwd(), files: readdirSync(".") }) + "\n");
     break;
+  case "big-stderr": {
+    // 20 000 lines of 10 bytes each = ~200 KiB; exit naturally so the pipe is flushed.
+    let buf = "";
+    for (let i = 0; i < 20_000; i++) buf += String(i).padStart(9, "0") + "\n";
+    process.stderr.write(buf + "END\n");
+    break;
+  }
   default:
     process.stderr.write(`unknown mode ${mode}\n`);
     process.exit(3);

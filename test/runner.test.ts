@@ -51,6 +51,41 @@ describe("runner", () => {
     await collect(h.lines);
     const r = await h.result;
     expect(r.aborted).toBe(true);
+    expect(existsSync(h.sandboxDir)).toBe(false);
+  });
+  it("does not run the process when the signal is already aborted", async () => {
+    const t0 = Date.now();
+    const ac = new AbortController();
+    ac.abort();
+    const h = await runner.run({ binary: FAKE, args: ["--mode", "hang"], stdin: null, timeoutMs: 10000, signal: ac.signal });
+    expect(await collect(h.lines)).toEqual([]);
+    const r = await h.result;
+    expect(r.aborted).toBe(true);
+    expect(r.timedOut).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(existsSync(h.sandboxDir)).toBe(false);
+  });
+  it("keeps lines emitted before the consumer starts iterating", async () => {
+    const h = await runner.run({ binary: FAKE, args: ["--mode", "slow"], stdin: null, timeoutMs: 5000 });
+    await new Promise((r) => setTimeout(r, 450));
+    const lines = await collect(h.lines);
+    await h.result;
+    expect(lines).toEqual(['{"i":0}', '{"i":1}', '{"i":2}', '{"i":3}', '{"i":4}']);
+  });
+  it("rejects attachment names that escape the sandbox", async () => {
+    await expect(
+      runner.run({ binary: FAKE, args: ["--mode", "cwd"], stdin: null, timeoutMs: 5000, files: [{ name: "../evil.txt", bytes: Buffer.from("x") }] }),
+    ).rejects.toThrow(/invalid attachment name/);
+    expect(existsSync(join(root, "..", "evil.txt"))).toBe(false);
+  });
+  it("keeps only the last 64 KiB of stderr", async () => {
+    const h = await runner.run({ binary: FAKE, args: ["--mode", "big-stderr"], stdin: null, timeoutMs: 5000 });
+    await collect(h.lines);
+    const r = await h.result;
+    expect(r.exitCode).toBe(0);
+    expect(r.stderr.length).toBe(64 * 1024);
+    expect(r.stderr.endsWith("000019999\nEND\n")).toBe(true);
+    expect(r.stderr).not.toContain("000000000\n");
   });
   it("reports exit code and captured stderr on crash", async () => {
     const h = await runner.run({ binary: FAKE, args: ["--mode", "crash"], stdin: null, timeoutMs: 5000 });
