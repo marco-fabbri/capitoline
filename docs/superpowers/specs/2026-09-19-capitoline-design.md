@@ -53,7 +53,10 @@ Flags, model names and output formats change almost monthly. Everything that dep
 
 ## 4. Hosting
 
-- **Unprivileged Debian 13 LXC** on Proxmox. 2 vCPU, 4 GB RAM, 20 GB disk. Unprivileged because the processes receive input from the internet.
+Capitoline targets **any Debian or Ubuntu host**: a VM on Nutanix AHV, a Proxmox LXC, a bare-metal box. The runbook is written for the distribution, not for a hypervisor; the owner's first deployment is an unprivileged LXC on Proxmox.
+
+- **Host**: Debian 13 or Ubuntu 24.04, 2 vCPU, 4 GB RAM, 20 GB disk. If it is a container, unprivileged, because the processes receive input from the internet.
+- **Two natures, two deployment shapes.** With the subscription CLIs (this spec) the host must be persistent: refreshed credentials on disk, a keyring for Antigravity, two Linux users. With API providers only (an OpenAI-compatible adapter for the platform, Ollama, vLLM, OpenRouter; phase 2 backlog) the process is stateless and runs anywhere, including Kubernetes/NKP next to the platform. Heroku-style ephemeral platforms fit only the second shape.
 - **Cloudflare Tunnel** (`cloudflared` as a service in the LXC) to `localhost:8080`. No inbound ports open. The tunnel creates the DNS record `api.example.com` in the zone already on Cloudflare.
 - **Cloudflare Access**, free Zero Trust plan. Two policies: email login for the owner (browser), service token for apps and for Claude Code.
 - **The gateway verifies the Access JWT** on every request (`Cf-Access-Jwt-Assertion`). Anyone reaching port 8080 from inside the Proxmox network without going through Cloudflare is rejected. On the corporate Proxmox the network is not the owner's: twenty lines of verification are worth the guarantee.
@@ -253,7 +256,7 @@ providers:
 
 The real file with verified values for the three CLIs is `config/capitoline.yaml`. Antigravity encodes effort in the model id (`gemini-3.8-flash-low`), hence `effort_suffix`.
 
-## 9. Deployment in the LXC
+## 9. Deployment on the host
 
 **Separate Linux users:**
 
@@ -310,7 +313,7 @@ Council as virtual model `capitoline`, initial strategy from karpathy/llm-counci
 | Decision | Discarded alternative | Why |
 |---|---|---|
 | CLIs as processes | reuse of OAuth tokens | forbidden by Anthropic, actively blocked |
-| Proxmox LXC + Tunnel | Cloudflare Workers/Containers | no processes / ephemeral |
+| Debian/Ubuntu host + Tunnel | Cloudflare Workers/Containers | no processes / ephemeral |
 | OpenAI-compatible API, subset | custom API | loses Open WebUI, SDKs, LiteLLM |
 | No multi-turn sessions | mapping CLI sessions | not needed by the council; fragile |
 | Build from scratch, reading Conclave | fork of Conclave | it is a Go TUI without HTTP; single-stage council |
