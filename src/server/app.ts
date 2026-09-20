@@ -26,7 +26,7 @@ function sendError(res: Response, e: unknown, log: Logger) {
   res.status(status).json({ error: { message: err.message, type: status >= 500 ? "server_error" : "invalid_request_error", code: err.kind } });
 }
 
-export function createApp(core: Core, opts: { access?: RequestHandler; log: Logger }): express.Express {
+export function createApp(core: Core, opts: { access?: RequestHandler; log: Logger; mcp?: RequestHandler }): express.Express {
   const app = express();
   app.disable("x-powered-by");
   // Access runs first, app-wide, so an unauthenticated caller gets a 401 before
@@ -85,6 +85,11 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
       } else sendError(res, e, opts.log);
     }
   });
+
+  // The MCP handler is mounted inside createApp so the Access middleware above
+  // protects it like every other route. express.json() has already parsed the
+  // body, which is why the handler passes req.body to the SDK transport.
+  if (opts.mcp) app.all("/mcp", opts.mcp);
 
   // Errors raised before a route runs (express.json on a malformed or oversized
   // body) would otherwise fall into Express's default handler, which answers in
