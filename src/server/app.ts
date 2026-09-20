@@ -29,8 +29,13 @@ function sendError(res: Response, e: unknown, log: Logger) {
 export function createApp(core: Core, opts: { access?: RequestHandler; log: Logger }): express.Express {
   const app = express();
   app.disable("x-powered-by");
+  // Access runs first, app-wide, so an unauthenticated caller gets a 401 before
+  // any body is buffered and any route added later is protected by default.
+  // /health is the one deliberate exemption: it serves the local monitor on
+  // 127.0.0.1 and never reaches the CLIs (spec 4).
+  const access = opts.access;
+  if (access) app.use((req, res, next) => (req.path === "/health" ? next() : access(req, res, next)));
   app.use(express.json({ limit: "20mb" }));
-  if (opts.access) app.use(["/v1", "/mcp"], opts.access);
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, providers: core.providerStates(), models: core.listModels() });

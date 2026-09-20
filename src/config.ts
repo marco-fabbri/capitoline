@@ -42,6 +42,13 @@ export const ConfigSchema = z
     providers: z.record(z.string().min(1), ProviderSchema),
   })
   .superRefine((cfg, ctx) => {
+    // Access is on or off as a pair: with only team_domain the gateway would
+    // verify against an empty audience and reject every token with a 401
+    // that says nothing about the configuration.
+    const { team_domain, audience } = cfg.server.access;
+    if (!!team_domain !== !!audience) {
+      ctx.addIssue({ code: "custom", path: ["server", "access", team_domain ? "audience" : "team_domain"], message: "server.access.team_domain and server.access.audience must be set together (both empty disables Access verification)" });
+    }
     const seen = new Map<string, string>();
     for (const [id, p] of Object.entries(cfg.providers)) {
       if (!(p.health_model in p.models)) {

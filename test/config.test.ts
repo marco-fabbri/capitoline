@@ -39,4 +39,16 @@ runner: { sandbox_root: /tmp/x }
 `;
     expect(() => parseConfig(text)).toThrow(/reserved/);
   });
+  it("rejects server.access with only one of team_domain and audience", () => {
+    const provider = `
+providers:
+  x: { binary: x, concurrency: 1, timeout_s: 1, budget: {window_5h_tokens: 0, window_7d_tokens: 0},
+       health_model: a, models: { a: {cli_model: a} }, effort: {}, args: [], system_prompt_flag: null, prompt_via: stdin }
+runner: { sandbox_root: /tmp/x }
+`;
+    expect(() => parseConfig(`server: { access: { team_domain: t.cloudflareaccess.com } }\n${provider}`)).toThrow(/server\.access\.audience/);
+    expect(() => parseConfig(`server: { access: { audience: abc } }\n${provider}`)).toThrow(/server\.access\.team_domain/);
+    expect(parseConfig(`server: { access: { team_domain: t.cloudflareaccess.com, audience: abc } }\n${provider}`).server.access.audience).toBe("abc");
+    expect(parseConfig(provider).server.access).toEqual({ team_domain: "", audience: "" });
+  });
 });
