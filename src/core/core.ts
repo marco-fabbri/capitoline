@@ -13,7 +13,7 @@ export interface CoreOptions { maxWaitMs: number; budgets: Record<string, { wind
 
 const H5 = 5 * 3600_000, D7 = 7 * 24 * 3600_000;
 
-interface State { provider: Provider; sem: Semaphore; health: HealthStatus | null; pausedUntil: number | null; strikes: number; windowOverBudget: boolean }
+interface State { provider: Provider; sem: Semaphore; health: HealthStatus | null; pausedUntil: number | null; strikes: number }
 
 export class Core {
   private readonly states = new Map<string, State>();
@@ -23,19 +23,30 @@ export class Core {
   constructor(providers: Provider[], private readonly usage: UsageStore, private readonly opts: CoreOptions) {
     this.now = opts.now ?? Date.now;
     for (const p of providers) {
-      this.states.set(p.id, { provider: p, sem: new Semaphore(p.concurrencyLimit), health: null, pausedUntil: null, strikes: 0, windowOverBudget: false });
+      this.states.set(p.id, { provider: p, sem: new Semaphore(p.concurrencyLimit), health: null, pausedUntil: null, strikes: 0 });
       for (const m of p.models()) this.modelIndex.set(m.name, { provider: p, model: m });
     }
   }
 
+  private isPaused(s: State): boolean { return s.pausedUntil !== null && s.pausedUntil > this.now(); }
+
+  private pausedError(id: string, s: State): CapitolineError {
+    const retry = Math.ceil((s.pausedUntil! - this.now()) / 1000);
+    return new CapitolineError("rate_limited", `provider ${id} is paused after a rate limit`, retry);
+  }
+
   private unavailableReason(s: State): string | undefined {
     if (s.health && !s.health.ok) return s.health.kind ?? "unhealthy";
-    if (s.pausedUntil !== null && s.pausedUntil > this.now()) return "rate_limited";
+    if (this.isPaused(s)) return "rate_limited";
     return undefined;
   }
 
-  private overBudget(id: string, s: State): boolean {
-    if (s.windowOverBudget) return true;
+  // Over budget never blocks a request: it is informational (spec 7.1). The
+  // rate-limit windows come from the store so the flag survives a restart and
+  // a partial rate_limit event (one window only) cannot clear the other one.
+  private overBudget(id: string): boolean {
+    const w = this.usage.windows(id);
+    if ((w.five_hour?.utilization ?? 0) >= 1 || (w.seven_day?.utilization ?? 0) >= 1) return true;
     const b = this.opts.budgets[id];
     if (!b) return false;
     const now = this.now();
@@ -47,15 +58,18 @@ export class Core {
     const out: ModelInfo[] = [];
     for (const [id, s] of this.states) {
       const reason = this.unavailableReason(s);
-      const overBudget = this.overBudget(id, s);
+      const overBudget = this.overBudget(id);
       for (const m of s.provider.models()) out.push({ name: m.name, provider: id, available: reason === undefined, reason, overBudget });
     }
     return out;
   }
 
+  // The health `detail` carries raw CLI stderr and must never reach a client
+  // (/health is unauthenticated): only the classification is exposed.
   providerStates(): ProviderState[] {
     return [...this.states].map(([id, s]) => ({
-      id, health: s.health, pausedUntil: s.pausedUntil, strikes: s.strikes, overBudget: this.overBudget(id, s),
+      id, health: s.health ? { ok: s.health.ok, kind: s.health.kind, checkedAt: s.health.checkedAt } : null,
+      pausedUntil: s.pausedUntil, strikes: s.strikes, overBudget: this.overBudget(id),
       windows: this.usage.windows(id), active: s.sem.active, waiting: s.sem.waiting,
     }));
   }
@@ -63,29 +77,40 @@ export class Core {
   async *execute(req: InternalRequest, ctx: { signal?: AbortSignal; source: "http" | "mcp" }): AsyncIterable<ProviderEvent> {
     const entry = this.modelIndex.get(req.model);
     if (!entry) throw new CapitolineError("unknown_model", `unknown model "${req.model}"`);
-    const s = this.states.get(entry.provider.id)!;
-    if (s.pausedUntil !== null && s.pausedUntil > this.now()) {
-      const retry = Math.ceil((s.pausedUntil - this.now()) / 1000);
-      throw new CapitolineError("rate_limited", `provider ${entry.provider.id} is paused after a rate limit`, retry);
-    }
+    const id = entry.provider.id;
+    const s = this.states.get(id)!;
+    if (this.isPaused(s)) throw this.pausedError(id, s);
     const reason = this.unavailableReason(s);
     if (reason) throw new CapitolineError("model_unavailable", `model "${req.model}" unavailable: ${reason}`);
 
     const release = await s.sem.acquire(this.opts.maxWaitMs);
+    // A pause installed while this request sat in the queue must still stop it
+    // (spec 7.1: queued requests get 429 immediately).
+    if (this.isPaused(s)) { release(); throw this.pausedError(id, s); }
+
     const started = this.now();
     let outcome: "ok" | ErrorKind = "bad_output";
     let usage = { input: 0, output: 0 };
+    let sawTerminal = false;
+    let phase: "running" | "ended" | "threw" = "running";
     try {
       for await (const ev of entry.provider.execute(req, entry.model, ctx.signal)) {
-        if (ev.type === "done") { outcome = "ok"; usage = ev.usage ?? usage; s.strikes = 0; s.pausedUntil = null; }
-        else if (ev.type === "error") { outcome = ev.kind; this.onError(entry.provider.id, s, ev.kind); }
-        else if (ev.type === "rate_limit") this.onRateLimit(entry.provider.id, s, ev);
+        if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; s.strikes = 0; }
+        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, ev.kind); }
+        else if (ev.type === "rate_limit") this.onRateLimit(id, ev);
         yield ev;
       }
+      phase = "ended";
+    } catch (e) {
+      phase = "threw";
+      throw e;
     } finally {
       release();
-      this.usage.record({ provider: entry.provider.id, model: req.model, inputTokens: usage.input, outputTokens: usage.output,
-        durationMs: this.now() - started, outcome, source: ctx.source, ts: this.now() });
+      // No terminal event and no provider failure: the caller gave up, either
+      // through its signal or by stopping the iteration (client disconnected).
+      const aborted = !sawTerminal && phase !== "threw" && (phase === "running" || ctx.signal?.aborted === true);
+      this.usage.record({ provider: id, model: req.model, inputTokens: usage.input, outputTokens: usage.output,
+        durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, ts: this.now() });
     }
   }
 
@@ -101,19 +126,20 @@ export class Core {
     }
   }
 
-  private onRateLimit(id: string, s: State, ev: Extract<ProviderEvent, { type: "rate_limit" }>) {
+  private onRateLimit(id: string, ev: Extract<ProviderEvent, { type: "rate_limit" }>) {
     if (ev.fiveHour) this.usage.setWindow(id, "five_hour", ev.fiveHour, this.now());
     if (ev.sevenDay) this.usage.setWindow(id, "seven_day", ev.sevenDay, this.now());
-    s.windowOverBudget = (ev.fiveHour?.utilization ?? 0) >= 1 || (ev.sevenDay?.utilization ?? 0) >= 1;
   }
 
   async checkHealth(providerId?: string): Promise<void> {
-    const targets = providerId ? [this.states.get(providerId)!] : [...this.states.values()];
+    const one = providerId ? this.states.get(providerId) : undefined;
+    if (providerId && !one) throw new CapitolineError("unknown_model", `unknown provider "${providerId}"`);
+    const targets = one ? [one] : [...this.states.values()];
     await Promise.all(targets.map(async (s) => {
       try { s.health = await s.provider.health(); }
       catch (e) { s.health = { ok: false, kind: "cli_crashed", detail: String(e), checkedAt: this.now() }; }
       this.usage.record({ provider: s.provider.id, model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: s.health.ok ? "ok" : (s.health.kind ?? "cli_crashed"), source: "health", ts: this.now() });
-      this.opts.log.info({ provider: s.provider.id, ok: s.health.ok, kind: s.health.kind }, "health check");
+      this.opts.log.info({ provider: s.provider.id, ok: s.health.ok, kind: s.health.kind, detail: s.health.detail }, "health check");
     }));
   }
 

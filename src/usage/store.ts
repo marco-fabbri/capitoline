@@ -3,7 +3,7 @@ import type { ErrorKind, RateLimitWindow } from "../core/types.js";
 
 export interface CallRecord {
   provider: string; model: string; inputTokens: number; outputTokens: number; durationMs: number;
-  outcome: "ok" | ErrorKind; source: "http" | "mcp" | "health"; ts?: number;
+  outcome: "ok" | ErrorKind | "aborted"; source: "http" | "mcp" | "health"; ts?: number;
 }
 export interface Totals { calls: number; inputTokens: number; outputTokens: number }
 export type WindowName = "five_hour" | "seven_day";

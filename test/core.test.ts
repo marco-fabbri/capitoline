@@ -77,11 +77,83 @@ describe("Core", () => {
     a.script = [{ type: "rate_limit", fiveHour: { utilization: 1, resetsAt: 5 }, sevenDay: { utilization: 0.2, resetsAt: 9 } }, ...OK];
     await drain(core.execute(req("a-1"), { source: "http" }));
     expect(usage.windows("a").five_hour!.utilization).toBe(1);
-    expect(core.listModels().find((m) => m.name === "a-1")!.overBudget).toBe(true);
+    expect(core.listModels().find((m) => m.name === "a-1")).toMatchObject({ overBudget: true, available: true });
+  });
+  it("keeps over budget from the stored windows when a later event reports only the other window", async () => {
+    const { core, a, usage } = make();
+    a.script = [{ type: "rate_limit", sevenDay: { utilization: 1, resetsAt: 9 } }, ...OK];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    a.script = [{ type: "rate_limit", fiveHour: { utilization: 0.5, resetsAt: 5 } }, ...OK];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(usage.windows("a").seven_day!.utilization).toBe(1);
+    expect(core.providerStates().find((p) => p.id === "a")!.overBudget).toBe(true);
   });
   it("flags over budget from configured token budgets", async () => {
     const { core } = make({ budgets: { a: { window5h: 3, window7d: 0 } } });
     await drain(core.execute(req("a-1"), { source: "http" }));
-    expect(core.listModels().find((m) => m.name === "a-1")!.overBudget).toBe(true);
+    expect(core.listModels().find((m) => m.name === "a-1")).toMatchObject({ overBudget: true, available: true });
+  });
+  it("rejects a request that was queued when the pause landed", async () => {
+    const { core, a } = make();
+    a.delayMs = 30;
+    a.script = [{ type: "error", kind: "rate_limited", detail: "429" }];
+    const first = drain(core.execute(req("a-1"), { source: "http" }));
+    await new Promise((r) => setTimeout(r, 10));
+    const queued = drain(core.execute(req("a-1"), { source: "http" }));
+    await expect(queued).rejects.toMatchObject({ kind: "rate_limited" });
+    await first;
+    expect(a.calls.length).toBe(1);                       // the queued request never hit the provider
+    expect(core.providerStates().find((p) => p.id === "a")).toMatchObject({ active: 0, waiting: 0 });
+  });
+  it("does not lift an active pause when an in-flight request completes", async () => {
+    let t = 1_000_000;
+    const { core, b } = make({ now: () => t });
+    b.delayMs = 20;
+    b.script = () => (b.calls.length === 1 ? [{ type: "error", kind: "rate_limited", detail: "429" }] : OK);
+    const limited = drain(core.execute(req("b-1"), { source: "http" }));
+    await new Promise((r) => setTimeout(r, 5));
+    const fine = drain(core.execute(req("b-1"), { source: "http" }));   // concurrency 2: runs alongside
+    expect(core.providerStates().find((p) => p.id === "b")).toMatchObject({ active: 2, waiting: 0 });
+    await limited;
+    expect(await fine).toEqual(OK);                       // done arrives after the pause was installed
+    expect(core.providerStates().find((p) => p.id === "b")).toMatchObject({ pausedUntil: t + 60_000, strikes: 0 });
+    await expect(drain(core.execute(req("b-1"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited" });
+  });
+  it("exposes the health classification but never its detail", async () => {
+    const { core, a } = make();
+    a.healthResult = { ok: false, kind: "cli_crashed", detail: "/Users/someone/.config secret stderr", checkedAt: 0 };
+    await core.checkHealth("a");
+    const state = core.providerStates().find((p) => p.id === "a")!;
+    expect(state.health).toEqual({ ok: false, kind: "cli_crashed", checkedAt: expect.any(Number) });
+    expect(state.health).not.toHaveProperty("detail");
+    expect(JSON.stringify(core.providerStates())).not.toContain("secret");
+  });
+  it("rejects a health check for an unknown provider", async () => {
+    const { core } = make();
+    await expect(core.checkHealth("zzz")).rejects.toMatchObject({ kind: "unknown_model" });
+  });
+  it("records a client abort as aborted, not as a provider failure", async () => {
+    const { core, a, usage } = make();
+    const outcomes = () => (usage as unknown as { db: { prepare(q: string): { all(): { outcome: string }[] } } }).db
+      .prepare("SELECT outcome FROM calls WHERE provider = 'a' ORDER BY id").all().map((r) => r.outcome);
+    const ac = new AbortController();
+    ac.abort();
+    expect(await drain(core.execute(req("a-1"), { signal: ac.signal, source: "http" }))).toEqual([]);
+    for await (const ev of core.execute(req("a-1"), { source: "http" })) { if (ev.type === "text") break; }  // consumer walks away
+    a.script = [{ type: "error", kind: "cli_crashed", detail: "boom" }];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(outcomes()).toEqual(["aborted", "aborted", "cli_crashed"]);
+  });
+  it("runs health checks periodically until stopped", async () => {
+    const { core, a } = make();
+    let checks = 0;
+    a.health = async () => { checks++; return { ok: true, checkedAt: Date.now() }; };
+    const stop = core.startHealthLoop(10);
+    await new Promise((r) => setTimeout(r, 35));
+    stop();
+    const afterStop = checks;
+    expect(afterStop).toBeGreaterThanOrEqual(2);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(checks).toBe(afterStop);
   });
 });
