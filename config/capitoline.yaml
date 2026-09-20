@@ -16,6 +16,9 @@ runner:
   sandbox_root: /var/lib/capitoline/sandboxes
   kill_grace_s: 5         # SIGTERM → SIGKILL delay
 
+usage:
+  db_path: capitoline.sqlite   # relative to the working directory of the service
+
 providers:
   claude:
     binary: claude
