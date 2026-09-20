@@ -4,6 +4,7 @@
 //   stdin-len      : read all stdin, print {"stdin_length": N}
 //   slow           : print 5 JSON lines, one every 200 ms
 //   hang           : read stdin, then sleep forever (ignores SIGTERM for 10 s)
+//   replay-linger <file> : like replay, then stay alive 10 s (exits on SIGTERM)
 //   crash          : print "boom" to stderr, exit 2
 //   secret-stderr  : print a fake secret to stderr, then exit 0 with no stdout
 //   cwd            : print {"cwd": process.cwd(), "files": [...]}
@@ -38,6 +39,11 @@ switch (mode) {
     process.on("SIGTERM", () => {});
     await sleep(10_000);
     break;
+  case "replay-linger": {
+    for (const line of readFileSync(file, "utf8").split("\n")) if (line.trim()) process.stdout.write(line + "\n");
+    await sleep(10_000);
+    break;
+  }
   case "crash":
     process.stderr.write("boom\n");
     process.exit(2);
