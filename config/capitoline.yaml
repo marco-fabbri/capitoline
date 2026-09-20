@@ -45,6 +45,9 @@ providers:
       - none
     system_prompt_flag: --system-prompt
     prompt_via: stdin
+    # Production adds:  --settings /home/runner/.claude/capitoline.json
+    # That file (owned by runner, mode 0600) holds {"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}.
+    # --settings applies even with --setting-sources "", so the gateway process never sees the token.
 
   codex:
     binary: codex
