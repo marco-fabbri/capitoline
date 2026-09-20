@@ -1,11 +1,11 @@
 # Capitoline — Phase 1 design
 
 Date: 2026-09-19
-Status: approved section by section in conversation, pending final review
+Status: approved section by section in conversation; amended 2026-09-20 with spike results (see `docs/spike-2026-09.md`)
 
 ## 1. Purpose
 
-Capitoline is a self-hosted personal AI gateway. It exposes an OpenAI-compatible HTTP API and an MCP server, and behind them it runs the official Claude Code, Codex and Gemini CLIs, authenticated with the owner's personal subscriptions (Claude Max, ChatGPT Pro, Google AI Pro). Personal apps (for example FoodBrain) and Claude Code itself talk to a single private endpoint instead of integrating three providers.
+Capitoline is a self-hosted personal AI gateway. It exposes an OpenAI-compatible HTTP API and an MCP server, and behind them it runs the official Claude Code, Codex and Antigravity (`agy`, Google's successor to Gemini CLI) CLIs, authenticated with the owner's personal subscriptions (Claude Max, ChatGPT Pro, Google AI Pro). Personal apps (for example FoodBrain) and Claude Code itself talk to a single private endpoint instead of integrating three providers.
 
 Phase 1 (this document): gateway to single models.
 Phase 2 (only sketched here): council, i.e. deliberation between several models with a judge.
@@ -23,7 +23,7 @@ Phase 2 (only sketched here): council, i.e. deliberation between several models 
 - **Capitoline**: the project, the systemd service, the repository.
 - **`capitoline`**, **`capitoline-fast`**, **`capitoline-fast-2`**: the virtual council models (phase 2). Convention `<strategy>[-variant][-version]`. The unnumbered name is the latest stable version; a version number appears when the behavior of a name already in use changes.
 - **`capitoline`**: also the name of the proprietary field added to responses (council member details and rankings, warnings).
-- Single models keep descriptive names: `claude-opus`, `claude-sonnet`, `codex-gpt-5`, `gemini-pro`, `gemini-flash` (final list in the configuration file, verified in the spike).
+- Single models keep descriptive names, prefixed by provider: `claude-opus`, `claude-sonnet`, `claude-haiku`, `codex-gpt-6-astra`, `codex-gpt-5.5`, `agy-gemini-pro`, `agy-gemini-flash`, `agy-claude-opus`. The list lives in `config/capitoline.yaml`. Note that Antigravity also serves Claude and GPT-OSS models under the Google subscription.
 - Internal modules have descriptive names (`server`, `mcp`, `core`, `providers`, `runner`, `usage`, `council`). No lore names in code.
 - Public host: `api.example.com` (a single subdomain level: Cloudflare's free certificate covers `*.example.com` but not two levels).
 
@@ -33,11 +33,11 @@ Phase 2 (only sketched here): council, i.e. deliberation between several models 
 
 The CLIs are used **as processes**, through their official non-interactive commands. The gateway does not read, copy or reuse the CLIs' OAuth tokens. This is an architectural constraint, not just a policy: the adapters have no access to the credential files (see §9, separate users).
 
-State of knowledge as of 2026-09-19, **to be verified in the initial spike (§11)** provider by provider:
+Verified 2026-09-20 (sources in `docs/spike-2026-09.md` §1):
 
-- Anthropic forbids using the OAuth token outside Claude Code; `claude -p` is Claude Code, hence inside the perimeter. High-volume automated use is a gray area.
-- OpenAI officially supports ChatGPT login in Codex CLI.
-- Google AI Pro includes raised limits for Gemini CLI.
+- Anthropic: OAuth tokens from Pro/Max may be used only in Claude.ai and Claude Code; `claude -p` is Claude Code. The June 2026 plan to bill `claude -p` from a separate credit pool was paused: it still draws from the subscription limits.
+- OpenAI: ChatGPT Plus/Pro include Codex CLI. Docs recommend API keys for CI and treat `auth.json` as a password, but do not forbid ChatGPT-login automation.
+- Google: AI Pro gives `agy` a 5-hour quota with a weekly cap. Headless use is documented only with a paid API key; subscription auth uses the OS keyring, which is the main deployment risk (§9).
 
 Mitigations: personal volumes, usage counter (§7.1), Provider abstraction that allows replacing a CLI adapter with an API-key one without touching the rest.
 
@@ -45,7 +45,7 @@ No multiple accounts of the same provider. Account pools violate explicit clause
 
 ### 3.2 The CLIs are agents
 
-Claude Code, Codex and Gemini CLI can read files, run commands and write to disk. In the gateway they are **always** launched through the runner (§8.4): tools disabled, empty temporary directory per request, unprivileged Linux user, timeout, termination if the client disconnects. Adapters never call `spawn` directly.
+Claude Code, Codex and Antigravity can read files, run commands, browse the web and write to disk. In the gateway they are **always** launched through the runner (§8.4): tools disabled, empty temporary directory per request, unprivileged Linux user, timeout, termination if the client disconnects. Adapters never call `spawn` directly.
 
 ### 3.3 The CLIs change
 
@@ -144,7 +144,7 @@ InternalRequest {
 
 ### 6.4 Available models: declared plus verified
 
-The CLIs offer no reliable queryable list (to be confirmed in the spike, including testing the `/model` and `/models` commands in headless mode). Therefore:
+Spike result: Claude answers `/model` in `-p` mode with its alias list, and `agy models` prints a list; Codex has no list command. Discovery is therefore possible for two of three, but the declared list stays the source of truth for phase 1 (it also carries the public name and effort mapping). Therefore:
 
 - the configuration file declares the models per provider (source of truth);
 - each provider's `health()` verifies at startup and hourly, with a minimal request on the cheapest model, that the provider responds;
@@ -167,8 +167,8 @@ The CLIs offer no reliable queryable list (to be confirmed in the spike, includi
 
 Three lines of defense against subscription rate limits (5-hour and weekly windows, opaque):
 
-1. **Concurrency per provider**: in-memory queue, initial limits Claude 2, Codex 1, Gemini 1. Configurable maximum wait, then 503. Queued requests are lost on restart: the client gets a connection error and retries.
-2. **Indicative budget per window** in configuration. When exceeded the gateway **does not block**: it marks the provider "over budget" in `/v1/models`, `/health` and the logs. No automatic blocking: real limits are opaque and blocking on a wrong estimate would deny a paid service.
+1. **Concurrency per provider**: in-memory queue, initial limits Claude 2, Codex 1, Antigravity 1. Configurable maximum wait, then 503. Queued requests are lost on restart: the client gets a connection error and retries.
+2. **Real or indicative budget per window.** Claude Code reports the real subscription windows in every `stream-json` run (`rate_limit_event` with 5-hour and 7-day utilization and reset times); `usage` stores the latest values and exposes them. For Codex and Antigravity the windows are opaque, so configuration holds an indicative token budget. When a window is exhausted or a budget exceeded the gateway **does not block**: it marks the provider "over budget" in `/v1/models`, `/health` and the logs. No automatic blocking: blocking on a wrong estimate would deny a paid service.
 3. **Pause on real rate limit**: on `rate_limited` the provider is paused with backoff from 1 to 30 minutes; queued requests get 429 immediately; when the pause ends the first request acts as a probe.
 
 ## 8. Providers and runner
@@ -177,7 +177,7 @@ Three lines of defense against subscription rate limits (5-hour and weekly windo
 
 ```
 interface Provider {
-  id: "claude" | "codex" | "gemini"
+  id: "claude" | "codex" | "antigravity"
   models(): ModelSpec[]                       // from configuration
   concurrencyLimit: number                    // from configuration
   execute(req: InternalRequest, sandbox: Sandbox): AsyncIterable<ProviderEvent>
@@ -221,7 +221,9 @@ For each execution:
 - a new, empty temporary directory as working directory (the CLIs read context from the cwd: it must be empty);
 - attachments written inside it, paths passed to the CLI;
 - execution as user `runner` through `sudo` limited to the CLI binaries only;
-- CLI tools/permissions disabled with each CLI's flags (verified in the spike);
+- CLI tools disabled with each CLI's flags, verified in the spike: Claude `--tools "" --strict-mcp-config --disable-slash-commands --setting-sources ""`; Codex `-s read-only -c features.shell_tool=false -c web_search="disabled" --ignore-user-config --ephemeral`; Antigravity has no flag, so the `runner` user's `settings.json` sets `toolPermission: "strict"`, `enableTerminalSandbox: true`, `allowNonWorkspaceAccess: false`, which makes any tool call stall until our timeout kills it;
+- prompt written to stdin for all three (Codex `exec -`; Antigravity `--input-format stream-json` with a `{"event":"user","message":{...}}` line); stdin is always either written or closed, because Codex blocks reading a non-TTY stdin;
+- the runner's own timeout is the only reliable one: Antigravity's `--print-timeout` does not fire on a stalled tool call;
 - per-request timeout from configuration; on expiry SIGTERM then SIGKILL;
 - process termination if the client disconnects;
 - directory removal in `finally`, always.
@@ -235,27 +237,21 @@ server:
     team_domain: <team>.cloudflareaccess.com
     audience: <aud of the Access app>
 providers:
-  claude:
-    binary: claude
-    concurrency: 2
-    timeout_s: 600
-    budget:
-      window_5h_tokens: 0        # 0 = no budget declared
-      window_7d_tokens: 0
+  <id>:
+    binary: <executable>
+    concurrency: <n>
+    timeout_s: <s>
+    budget: { window_5h_tokens: 0, window_7d_tokens: 0 }   # 0 = not declared
+    health_model: <public model name used by health()>
     models:
-      claude-opus:   { cli_model: opus }
-      claude-sonnet: { cli_model: sonnet }
-    effort:
-      low: <flag/value>
-      medium: <flag/value>
-      high: <flag/value>
-  codex:
-    ...
-  gemini:
-    ...   # effort translated into model choice, no dedicated flag
+      <public name>: { cli_model: <alias passed to the CLI>, effort_suffix?: bool, efforts?: [..] }
+    effort: { low: <v>, medium: <v>, high: <v> }
+    args: [<fixed sandbox and output flags>]
+    system_prompt_flag: <flag> | null      # null = prepended to the prompt with a role marker
+    prompt_via: stdin
 ```
 
-Exact values of `cli_model`, `effort` and sandbox flags: spike results, not assumptions.
+The real file with verified values for the three CLIs is `config/capitoline.yaml`. Antigravity encodes effort in the model id (`gemini-3.8-flash-low`), hence `effort_suffix`.
 
 ## 9. Deployment in the LXC
 
@@ -270,7 +266,7 @@ Effect: a bug in the web server does not expose the tokens, because they belong 
 
 - Claude: long-lived token from `claude setup-token`, in a service environment variable (not in the configuration file, not in the repo).
 - Codex: device login, code confirmed from the Mac.
-- Gemini: URL to open on the Mac, code pasted into the LXC.
+- Antigravity: over SSH the CLI prints a URL; sign in on the Mac, paste the code back. Credentials go to the Linux Secret Service keyring, which an LXC lacks by default: run `gnome-keyring-daemon` headless for `runner`, or fall back to `GEMINI_API_KEY` (paid). Settled during deployment; see `docs/spike-2026-09.md` §2.
 
 **Service**: systemd, `Restart=always`, logs to journald. Node LTS from NodeSource. CLIs installed globally with npm, updated by hand followed by the smoke test.
 
@@ -289,9 +285,9 @@ Effect: a bug in the web server does not expose the tokens, because they belong 
 
 Fixtures age: the smoke test is the countermeasure.
 
-## 11. Initial spike (before code)
+## 11. Initial spike
 
-One day of checks, with results written to `docs/spike-2026-09.md` and poured into the configuration file:
+Done 2026-09-20 on the Mac for items 1 and 3 to 9; results in `docs/spike-2026-09.md` and `config/capitoline.yaml`, raw outputs in `test/fixtures/`. Item 2 and the open items listed in that document need the LXC. Original checklist:
 
 1. **Terms of service** provider by provider: what they say today about headless subscription use and automation. Outcome: proceed / proceed with limits / replace adapter.
 2. **Headless login** of the three CLIs as user `runner`: actual procedure, where credentials end up, file permissions.
@@ -319,7 +315,7 @@ Council as virtual model `capitoline`, initial strategy from karpathy/llm-counci
 | No multi-turn sessions | mapping CLI sessions | not needed by the council; fragile |
 | Build from scratch, reading Conclave | fork of Conclave | it is a Go TUI without HTTP; single-stage council |
 | MCP over HTTP in the same process | local stdio server | second program without benefits |
-| Declared + verified models | dynamic discovery | CLIs expose no lists (to be confirmed) |
+| Declared + verified models | dynamic discovery | only two of three CLIs expose a list; config also carries names and effort mapping |
 | Indicative budget without blocking | automatic blocking | opaque limits, blocking on a wrong estimate |
 | Descriptive names in code | lore names for every module | friction for readers |
 | `api.example.com` | `api.capitoline.example.com` | two levels = 10 $/month certificate |
