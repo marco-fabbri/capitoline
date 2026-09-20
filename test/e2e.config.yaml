@@ -1,0 +1,103 @@
+# End-to-end test configuration: a copy of config/capitoline.yaml where every
+# provider binary is a fake CLI that replays a recorded fixture. Never used in
+# production.
+
+server:
+  port: 0
+  access:
+    # Cloudflare Access application. Empty = JWT verification disabled (local dev only).
+    team_domain: ""
+    audience: ""
+  queue:
+    max_wait_s: 120
+
+runner:
+  user: null
+  sandbox_root: /tmp/capitoline-e2e
+  kill_grace_s: 5         # SIGTERM → SIGKILL delay
+
+usage:
+  db_path: ":memory:"
+
+providers:
+  claude:
+    binary: test/fake-cli/fake-claude.sh
+    concurrency: 2
+    timeout_s: 10
+    budget: { window_5h_tokens: 0, window_7d_tokens: 0 }   # 0 = not declared; real windows come from rate_limit_event
+    health_model: claude-haiku
+    models:
+      claude-opus:   { cli_model: opus }
+      claude-sonnet: { cli_model: sonnet }
+      claude-haiku:  { cli_model: haiku }
+    effort: { low: low, medium: medium, high: high }        # --effort value
+    args:
+      - -p
+      - --output-format
+      - stream-json
+      - --verbose
+      - --include-partial-messages
+      - --tools
+      - ""
+      - --strict-mcp-config
+      - --disable-slash-commands
+      - --setting-sources
+      - ""
+      - --no-session-persistence
+      - --permission-prompts
+      - none
+    system_prompt_flag: --system-prompt
+    prompt_via: stdin
+    # Production adds:  --settings /home/runner/.claude/capitoline.json
+    # That file (owned by runner, mode 0600) holds {"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}.
+    # --settings applies even with --setting-sources "", so the gateway process never sees the token.
+
+  codex:
+    binary: test/fake-cli/fake-codex.sh
+    concurrency: 1
+    timeout_s: 10
+    budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
+    health_model: codex-gpt-5.5
+    models:
+      codex-gpt-6-astra: { cli_model: gpt-6-astra }
+      codex-gpt-5.6-sol: { cli_model: gpt-5.6-sol }
+      codex-gpt-5.5:     { cli_model: gpt-5.5 }
+    effort: { low: low, medium: medium, high: high }        # -c model_reasoning_effort="<v>"
+    args:
+      - exec
+      - --json
+      - --ephemeral
+      - --skip-git-repo-check
+      - --ignore-user-config
+      - -s
+      - read-only
+      - -c
+      - features.shell_tool=false
+      - -c
+      - web_search="disabled"
+    system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"
+    prompt_via: stdin                                # codex exec -
+
+  antigravity:
+    binary: test/fake-cli/fake-agy.sh
+    concurrency: 1
+    timeout_s: 10
+    budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
+    health_model: agy-gemini-flash
+    models:
+      # effort is part of the model id: <base>-<effort>
+      agy-gemini-flash:  { cli_model: gemini-3.8-flash, effort_suffix: true }
+      agy-gemini-pro:    { cli_model: gemini-3.1-pro,   effort_suffix: true, efforts: [low, high] }
+      agy-claude-sonnet: { cli_model: claude-sonnet-4-6 }
+      agy-claude-opus:   { cli_model: claude-opus-4-6-thinking }
+    effort: { low: low, medium: medium, high: high }
+    args:
+      - --output-format
+      - stream-json
+      - --input-format
+      - stream-json
+      - --disable-slash-commands
+      - --sandbox
+      - -p=
+    system_prompt_flag: null                         # none: prepended to the prompt with a role marker
+    prompt_via: stdin                                # {"event":"user","message":{"role":"user","content":...}}
