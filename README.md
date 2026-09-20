@@ -18,10 +18,26 @@ Triad: every member answers, every member judges the others without knowing
 who wrote what, and a judge synthesizes. As in the Temple, the value is not
 in the agreement but in hearing the dissent before deciding.
 
-## Status
+## Run it
 
-Design stage. The phase 1 spec is in
-[`docs/superpowers/specs/2026-09-19-capitoline-design.md`](docs/superpowers/specs/2026-09-19-capitoline-design.md).
+Requirements: Node 24+, and the CLIs `claude`, `codex`, `agy` installed and logged in for the user that runs them.
+
+    npm ci && npm run build
+    node dist/main.js                      # reads config/capitoline.yaml, listens on 127.0.0.1:8080
+
+Production deployment on any Debian/Ubuntu host (a Nutanix AHV VM, a Proxmox LXC, bare metal), with a separate `runner` user and Cloudflare Tunnel + Access: see `docs/deploy.md`. An OpenAI-compatible API adapter (a company inference platform, Ollama, vLLM) is planned next, which also makes a stateless Kubernetes/NKP deployment possible.
+
+## Use it
+
+    curl http://127.0.0.1:8080/v1/models
+    curl http://127.0.0.1:8080/v1/chat/completions -H 'content-type: application/json' \
+      -d '{"model":"codex-gpt-5.5","reasoning_effort":"low","messages":[{"role":"user","content":"Reply with the single word: ok"}]}'
+
+Any OpenAI-compatible client works by setting its base URL to `/v1` (Open WebUI, the official SDKs, LiteLLM). Supported: `model`, `messages` (text and base64 image parts), `stream`, `reasoning_effort`. Rejected with 400: `tools`, `n>1`, `logprobs`, `response_format`. Ignored with the `X-Capitoline-Ignored` header: `temperature`, `top_p`, `max_tokens` and other sampling knobs. Responses carry an extra `capitoline` field.
+
+MCP: `POST /mcp` (streamable HTTP) with tools `list_models` and `ask_model`. Registration from Claude Code is in `docs/deploy.md` §10.
+
+After updating a CLI, run `scripts/smoke.sh` (see `docs/update-clis.md`).
 
 ## Principles
 
