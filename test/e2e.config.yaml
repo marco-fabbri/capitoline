@@ -30,6 +30,7 @@ providers:
       claude-opus:   { cli_model: opus }
       claude-sonnet: { cli_model: sonnet }
       claude-haiku:  { cli_model: haiku }
+      claude-fable:  { cli_model: fable }
     effort: { low: low, medium: medium, high: high }        # --effort value
     args:
       - -p
