@@ -1,10 +1,10 @@
 import type { Logger } from "../log.js";
-import type { HealthStatus, ModelSpec, Provider } from "../providers/adapter.js";
+import type { HealthStatus, ModelKind, ModelSpec, Provider } from "../providers/adapter.js";
 import type { UsageStore } from "../usage/store.js";
 import { Semaphore } from "./semaphore.js";
-import { CapitolineError, type ErrorKind, type InternalRequest, type ProviderEvent } from "./types.js";
+import { CapitolineError, type ErrorKind, type ImageRequest, type InternalRequest, type ProviderEvent } from "./types.js";
 
-export interface ModelInfo { name: string; provider: string; available: boolean; reason?: string; overBudget: boolean }
+export interface ModelInfo { name: string; provider: string; kind: ModelKind; available: boolean; reason?: string; overBudget: boolean }
 export interface ProviderState {
   id: string; health: HealthStatus | null; pausedUntil: number | null; strikes: number; overBudget: boolean;
   windows: ReturnType<UsageStore["windows"]>; active: number; waiting: number;
@@ -14,10 +14,12 @@ export interface CoreOptions { maxWaitMs: number; budgets: Record<string, { wind
 const H5 = 5 * 3600_000, D7 = 7 * 24 * 3600_000;
 
 interface State { provider: Provider; sem: Semaphore; health: HealthStatus | null; pausedUntil: number | null; strikes: number }
+interface Entry { provider: Provider; model: ModelSpec }
+interface Context { signal?: AbortSignal; source: "http" | "mcp" }
 
 export class Core {
   private readonly states = new Map<string, State>();
-  private readonly modelIndex = new Map<string, { provider: Provider; model: ModelSpec }>();
+  private readonly modelIndex = new Map<string, Entry>();
   private readonly now: () => number;
 
   constructor(providers: Provider[], private readonly usage: UsageStore, private readonly opts: CoreOptions) {
@@ -59,7 +61,7 @@ export class Core {
     for (const [id, s] of this.states) {
       const reason = this.unavailableReason(s);
       const overBudget = this.overBudget(id);
-      for (const m of s.provider.models()) out.push({ name: m.name, provider: id, available: reason === undefined, reason, overBudget });
+      for (const m of s.provider.models()) out.push({ name: m.name, provider: id, kind: m.kind, available: reason === undefined, reason, overBudget });
     }
     return out;
   }
@@ -74,14 +76,36 @@ export class Core {
     }));
   }
 
-  async *execute(req: InternalRequest, ctx: { signal?: AbortSignal; source: "http" | "mcp" }): AsyncIterable<ProviderEvent> {
-    const entry = this.modelIndex.get(req.model);
-    if (!entry) throw new CapitolineError("unknown_model", `unknown model "${req.model}"`);
+  private lookup(model: string): Entry {
+    const entry = this.modelIndex.get(model);
+    if (!entry) throw new CapitolineError("unknown_model", `unknown model "${model}"`);
+    return entry;
+  }
+
+  // The kind check comes before the provider state: a request for the wrong
+  // endpoint is a client error whatever the provider is doing right now.
+  async *execute(req: InternalRequest, ctx: Context): AsyncIterable<ProviderEvent> {
+    const entry = this.lookup(req.model);
+    if (entry.model.kind !== "text") throw new CapitolineError("bad_request", `model "${req.model}" generates images: use the images endpoint`);
+    yield* this.guarded(entry, req.model, ctx, () => entry.provider.execute(req, entry.model, ctx.signal));
+  }
+
+  async *generateImage(req: ImageRequest, ctx: Context): AsyncIterable<ProviderEvent> {
+    const entry = this.lookup(req.model);
+    if (entry.model.kind !== "image") throw new CapitolineError("bad_request", `model "${req.model}" is a text model: use the chat endpoint`);
+    const generate = entry.provider.generateImage?.bind(entry.provider);
+    if (!generate) throw new CapitolineError("bad_request", `provider ${entry.provider.id} cannot generate images`);
+    yield* this.guarded(entry, req.model, ctx, () => generate(req, entry.model, ctx.signal));
+  }
+
+  // Everything both request kinds share: pause and health gates, the
+  // provider's concurrency slot, strike/pause bookkeeping and the usage record.
+  private async *guarded(entry: Entry, modelName: string, ctx: Context, produce: () => AsyncIterable<ProviderEvent>): AsyncIterable<ProviderEvent> {
     const id = entry.provider.id;
     const s = this.states.get(id)!;
     if (this.isPaused(s)) throw this.pausedError(id, s);
     const reason = this.unavailableReason(s);
-    if (reason) throw new CapitolineError("model_unavailable", `model "${req.model}" unavailable: ${reason}`);
+    if (reason) throw new CapitolineError("model_unavailable", `model "${modelName}" unavailable: ${reason}`);
 
     const release = await s.sem.acquire(this.opts.maxWaitMs);
     // A pause installed while this request sat in the queue must still stop it
@@ -94,9 +118,9 @@ export class Core {
     let sawTerminal = false;
     let phase: "running" | "ended" | "threw" = "running";
     try {
-      for await (const ev of entry.provider.execute(req, entry.model, ctx.signal)) {
+      for await (const ev of produce()) {
         if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; s.strikes = 0; }
-        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, ev.kind); }
+        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, ev.kind, ev.retryAfterS); }
         else if (ev.type === "rate_limit") this.onRateLimit(id, ev);
         yield ev;
       }
@@ -109,17 +133,23 @@ export class Core {
       // No terminal event and no provider failure: the caller gave up, either
       // through its signal or by stopping the iteration (client disconnected).
       const aborted = !sawTerminal && phase !== "threw" && (phase === "running" || ctx.signal?.aborted === true);
-      this.usage.record({ provider: id, model: req.model, inputTokens: usage.input, outputTokens: usage.output,
+      this.usage.record({ provider: id, model: modelName, inputTokens: usage.input, outputTokens: usage.output,
         durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, ts: this.now() });
     }
   }
 
-  private onError(id: string, s: State, kind: ErrorKind) {
+  // An explicit retry-after (the quota reset the CLI reported) replaces the
+  // backoff: waiting less would only burn a strike, waiting the backoff when
+  // the reset is days away would probe uselessly. One minute of slack covers
+  // clock skew between the gateway and the provider. Strikes still grow so a
+  // provider that lies about its reset keeps backing off once the wait ends.
+  private onError(id: string, s: State, kind: ErrorKind, retryAfterS?: number) {
     if (kind === "rate_limited") {
-      const minutes = Math.min(30, 2 ** s.strikes);
+      const backoffMinutes = Math.min(30, 2 ** s.strikes);
       s.strikes++;
-      s.pausedUntil = this.now() + minutes * 60_000;
-      this.opts.log.warn({ provider: id, minutes, strikes: s.strikes }, "provider paused after rate limit");
+      const waitMs = retryAfterS !== undefined ? (retryAfterS + 60) * 1000 : backoffMinutes * 60_000;
+      s.pausedUntil = this.now() + waitMs;
+      this.opts.log.warn({ provider: id, seconds: Math.round(waitMs / 1000), explicit: retryAfterS !== undefined, strikes: s.strikes }, "provider paused after rate limit");
     } else if (kind === "auth_expired") {
       s.health = { ok: false, kind, detail: "auth_expired reported by a request", checkedAt: this.now() };
       this.opts.log.error({ provider: id }, "provider authentication expired");

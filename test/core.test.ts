@@ -157,3 +157,98 @@ describe("Core", () => {
     expect(checks).toBe(afterStop);
   });
 });
+
+const IMG: ProviderEvent = { type: "image", mime: "image/jpeg", bytes: Buffer.from("ffd8ffe0", "hex"), width: 1376, height: 768 };
+const IMG_OK: ProviderEvent[] = [IMG, { type: "done" }];
+const imgReq = (model: string) => ({ model, prompt: "a lighthouse" });
+function makeImages(opts: { now?: () => number } = {}) {
+  const c = new FakeProvider("c", ["c-text", { name: "c-image", kind: "image" }], OK, 1);
+  c.imageScript = IMG_OK;
+  const usage = new UsageStore(":memory:");
+  const core = new Core([c], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: opts.now });
+  return { c, usage, core };
+}
+
+describe("Core images", () => {
+  it("reports the kind of every model", () => {
+    const { core } = makeImages();
+    expect(core.listModels().map((m) => [m.name, m.kind])).toEqual([["c-text", "text"], ["c-image", "image"]]);
+  });
+  it("refuses a chat request against an image model with bad_request", async () => {
+    const { core, c } = makeImages();
+    await expect(drain(core.execute(req("c-image"), { source: "http" }))).rejects.toMatchObject({ kind: "bad_request" });
+    expect(c.calls.length).toBe(0);
+  });
+  it("refuses an image request against a text model with bad_request", async () => {
+    const { core, c } = makeImages();
+    await expect(drain(core.generateImage(imgReq("c-text"), { source: "http" }))).rejects.toMatchObject({ kind: "bad_request" });
+    expect(c.imageCalls.length).toBe(0);
+  });
+  it("refuses an image request when the provider cannot generate images", async () => {
+    const { core, c } = makeImages();
+    c.generateImage = undefined;
+    await expect(drain(core.generateImage(imgReq("c-image"), { source: "http" }))).rejects.toMatchObject({ kind: "bad_request" });
+  });
+  it("rejects unknown image models", async () => {
+    const { core } = makeImages();
+    await expect(drain(core.generateImage(imgReq("nope"), { source: "http" }))).rejects.toMatchObject({ kind: "unknown_model" });
+  });
+  it("routes an image request to the provider and records usage under the image model", async () => {
+    const { core, c, usage } = makeImages();
+    const ev = await drain(core.generateImage(imgReq("c-image"), { source: "mcp" }));
+    expect(ev).toEqual(IMG_OK);
+    expect(c.imageCalls).toEqual([imgReq("c-image")]);
+    expect(c.calls.length).toBe(0);
+    expect(usage.totals("c", 60_000)).toEqual({ calls: 1, inputTokens: 0, outputTokens: 0 });
+    const rows = (usage as unknown as { db: { prepare(q: string): { all(): { model: string; outcome: string; source: string }[] } } }).db
+      .prepare("SELECT model, outcome, source FROM calls WHERE provider = 'c'").all();
+    expect(rows).toEqual([{ model: "c-image", outcome: "ok", source: "mcp" }]);
+  });
+  it("pauses until the reported quota reset plus a minute and still counts a strike", async () => {
+    let t = 1_000_000;
+    const { core, c } = makeImages({ now: () => t });
+    c.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }];
+    await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    expect(core.providerStates().find((p) => p.id === "c")).toMatchObject({ pausedUntil: t + (442_209 + 60) * 1000, strikes: 1 });
+    await expect(drain(core.generateImage(imgReq("c-image"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited", retryAfterS: 442_269 });
+    // Chat shares the provider, so the pause holds it too.
+    await expect(drain(core.execute(req("c-text"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited", retryAfterS: 442_269 });
+    t += (442_209 + 61) * 1000;
+    c.imageScript = IMG_OK;
+    expect(await drain(core.generateImage(imgReq("c-image"), { source: "http" }))).toEqual(IMG_OK);
+    expect(core.providerStates().find((p) => p.id === "c")!.strikes).toBe(0);
+  });
+  it("honours an explicit retry-after on the chat path as well", async () => {
+    let t = 1_000_000;
+    const { core, a } = make({ now: () => t });
+    a.script = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 300 }];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(core.providerStates().find((p) => p.id === "a")).toMatchObject({ pausedUntil: t + 360_000, strikes: 1 });
+  });
+  it("keeps the backoff when the rate limit carries no retry-after", async () => {
+    let t = 1_000_000;
+    const { core, c } = makeImages({ now: () => t });
+    c.imageScript = [{ type: "error", kind: "rate_limited", detail: "429" }];
+    await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    expect(core.providerStates().find((p) => p.id === "c")).toMatchObject({ pausedUntil: t + 60_000, strikes: 1 });
+  });
+  it("shares the provider's concurrency slot between chat and images", async () => {
+    const { core, c } = makeImages();
+    c.delayMs = 400;                                       // a chat call now takes ~800 ms: the image gives up at 200 ms
+    const slow = drain(core.execute(req("c-text"), { source: "http" }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(core.providerStates().find((p) => p.id === "c")).toMatchObject({ active: 1, waiting: 0 });
+    await expect(drain(core.generateImage(imgReq("c-image"), { source: "http" }))).rejects.toMatchObject({ kind: "queue_full" });
+    await slow;
+    expect(c.imageCalls.length).toBe(0);
+  });
+  it("records a client abort of an image request as aborted", async () => {
+    const { core, usage } = makeImages();
+    const ac = new AbortController();
+    ac.abort();
+    expect(await drain(core.generateImage(imgReq("c-image"), { signal: ac.signal, source: "http" }))).toEqual([]);
+    const rows = (usage as unknown as { db: { prepare(q: string): { all(): { outcome: string }[] } } }).db
+      .prepare("SELECT outcome FROM calls WHERE provider = 'c'").all().map((r) => r.outcome);
+    expect(rows).toEqual(["aborted"]);
+  });
+});
