@@ -37,12 +37,6 @@ had two review findings and both are already fixed in the current code
 
 - `src/runner/runner.ts` — observed once on the Mac with the real `claude` CLI: after a streaming request the client closed early, one empty `run-…` directory remained under `sandbox_root`; not reproducible with the fake CLIs, whose abort path cleans up. Fix: reproduce with the real CLI at `LOG_LEVEL=debug`, and add a startup sweep removing stale `run-*` directories older than the provider timeout.
 
-## Usage
-
-- `src/usage/store.ts`: every `record()`/`totals()`/`setWindow()`/`windows()` call recompiles its SQL with `db.prepare()`, paying compilation cost on every HTTP/MCP request — prepare the four statements once in the constructor and reuse them.
-- `src/usage/store.ts`: `close()` is not idempotent (`node:sqlite` throws on a second call), so a process that receives both SIGTERM and SIGINT can turn a clean shutdown into an unhandled rejection — guard it with a `closed` flag.
-- `src/usage/store.ts`: the constructor opens `db_path` without ensuring its parent directory exists, so a fresh deployment with a nested path (e.g. `/var/lib/capitoline/usage.sqlite`) fails at startup with an opaque `unable to open database file` — `mkdirSync(dirname(path), { recursive: true })` before opening.
-
 ## MCP
 
 - `src/mcp/server.ts`: the progress notification can send the same `progress` value twice (at the last `n % 20 === 0` mark and again at completion), which violates the MCP spec's "must increase" rule — use a counter that always advances.
@@ -63,7 +57,6 @@ had two review findings and both are already fixed in the current code
 - `test/codex.test.ts`: three behaviors are uncovered — no `developer_instructions` flag when there's no system message, the `type: "error"` fallback branch, and the `system_prompt_flag: null` stdin path — add the three cases.
 - `test/antigravity.test.ts`: no test asserts that `cfg.args` is the prefix of the built command, so dropping `--input-format stream-json`/`--sandbox`/`-p=` from the adapter would leave every existing test green — assert `c.args.slice(0, cfg.args.length)` and the total arg count.
 - `test/antigravity.test.ts`: the error-mapping test never asserts the resulting `kind`, unlike the Claude/Codex equivalents, so `rate_limited`/`auth_expired` classification for Antigravity is unverified — assert `kind` on the existing fixture and add synthetic rate-limit/auth cases.
-- `test/usage.test.ts`: both tests use `":memory:"`, so the file-backed path, the WAL pragma and four of the eight recorded columns (`model`, `duration_ms`, `outcome`, `source`) are never exercised — add a file-backed test that reopens the DB with a second connection and reads the row back.
 - `test/e2e.test.ts`: "streams through the fake claude" only checks the text ends with `data: [DONE]`, so an empty stream would pass identically — parse the SSE lines and assert the concatenated delta, first/last chunk shape and non-zero usage.
 - `test/e2e.config.yaml`: is a hand-copied duplicate of `config/capitoline.yaml` with nothing checking they stay aligned beyond the intended diffs (port, runner user, sandbox root, db path, binaries, timeouts) — add a test that loads both and asserts they differ only in those keys.
 - `test/runner.test.ts`: every case uses `user: null`, so the production `sudo -n -H -u <user> --` branch of `src/runner/runner.ts` (argv shape, reduced env) is never exercised by any test — add a case with a fake `sudo` script on `PATH` asserting argv and env.

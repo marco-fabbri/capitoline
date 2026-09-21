@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { H5, UsageStore } from "../src/usage/store.js";
@@ -81,6 +81,87 @@ describe("UsageStore", () => {
       s.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // A fresh deployment points `db_path` at a directory systemd has not created
+  // yet (/var/lib/capitoline/usage.sqlite): without the mkdir the process dies
+  // at startup with sqlite's opaque "unable to open database file".
+  it("creates the parent directory of a nested database path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-usage-"));
+    const path = join(dir, "var", "lib", "capitoline", "usage.sqlite");
+    try {
+      const s = new UsageStore(path);
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http" });
+      s.close();
+      expect(existsSync(path)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The production path: a real file, in WAL mode, read back by a second
+  // connection — the only way to see that what `record()` writes actually
+  // lands on disk, and the only test that looks at the four columns the
+  // in-memory ones never read.
+  it("writes every column to a real file, readable by a second connection", () => {
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-usage-"));
+    const path = join(dir, "usage.sqlite");
+    const now = 1_000_000_000_000;
+    try {
+      const s = new UsageStore(path);
+      s.record({ provider: "claude", model: "claude-opus-4-6", inputTokens: 120, outputTokens: 34, durationMs: 4321, outcome: "rate_limited", source: "mcp", ts: now });
+      s.setWindow("claude", "five_hour", { utilization: 0.25, resetsAt: 1789896000 }, now);
+      s.close();
+
+      const other = new DatabaseSync(path);
+      try {
+        expect((other.prepare(`PRAGMA journal_mode`).get() as { journal_mode: string }).journal_mode).toBe("wal");
+        expect(other.prepare(`SELECT ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind FROM calls`).all()).toEqual([
+          { ts: now, provider: "claude", model: "claude-opus-4-6", input_tokens: 120, output_tokens: 34, duration_ms: 4321, outcome: "rate_limited", source: "mcp", kind: "text" },
+        ]);
+        expect(other.prepare(`SELECT provider, window, utilization, resets_at, updated_at FROM rate_windows`).all()).toEqual([
+          { provider: "claude", window: "five_hour", utilization: 0.25, resets_at: 1789896000, updated_at: now },
+        ]);
+      } finally {
+        other.close();
+      }
+
+      // Reopening the same file keeps the history and still reads it back.
+      const again = new UsageStore(path);
+      expect(again.totals("claude", H5, now + 1)).toEqual({ calls: 1, inputTokens: 120, outputTokens: 34 });
+      expect(again.windows("claude").five_hour).toEqual({ utilization: 0.25, resetsAt: 1789896000, updatedAt: now });
+      again.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // SIGTERM followed by SIGINT closes the store twice; node:sqlite throws on
+  // the second close, which would turn a clean shutdown into a crash.
+  it("closes idempotently", () => {
+    const s = new UsageStore(":memory:");
+    s.close();
+    expect(() => s.close()).not.toThrow();
+  });
+
+  // Every request records a row and reads the budget windows: the SQL must be
+  // compiled once, in the constructor, not on every call.
+  it("compiles its statements once and reuses them", () => {
+    const s = new UsageStore(":memory:");
+    const spy = vi.spyOn(DatabaseSync.prototype, "prepare");
+    try {
+      const now = Date.now();
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now });
+      s.record({ provider: "claude", model: "claude-opus", kind: "image", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now });
+      s.totals("claude", H5, now + 1);
+      s.imageWindow("claude", H5, now + 1);
+      s.setWindow("claude", "five_hour", { utilization: 0.1, resetsAt: 1 }, now);
+      s.windows("claude");
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      s.close();
     }
   });
 });
