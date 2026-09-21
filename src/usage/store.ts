@@ -13,7 +13,8 @@ export type WindowName = "five_hour" | "seven_day";
 /** Image generations counted in a rolling window: `windowStartedAt` is null while the window is empty. */
 export interface ImageWindow { used: number; windowStartedAt: number | null }
 
-const H5 = 5 * 3600_000;
+/** The five-hour window: the provider's short image quota and the budget windows share it. */
+export const H5 = 5 * 3600_000;
 
 export class UsageStore {
   private readonly db: DatabaseSync;
@@ -45,6 +46,11 @@ export class UsageStore {
   // generation that produced an image spends it: a 429 or a crash costs
   // nothing. The window is rolling, so it "opens" at the oldest call still
   // inside it — that is what a client needs to know when the next one frees up.
+  // The count is a lower bound, never an exact reading: it sees the successful
+  // runs of the images endpoint only, while a text run that invokes the CLI's
+  // own generate_image tool (recorded with kind text) and a generation the
+  // client abandons after the image event (recorded aborted) spend quota
+  // without being counted.
   imageWindow(provider: string, windowMs = H5, now = Date.now()): ImageWindow {
     const row = this.db.prepare(`SELECT COUNT(*) AS used, MIN(ts) AS started FROM calls WHERE provider = ? AND kind = 'image' AND outcome = 'ok' AND ts > ?`)
       .get(provider, now - windowMs) as { used: number; started: number | null };

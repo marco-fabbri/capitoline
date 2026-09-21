@@ -48,11 +48,14 @@ function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
   };
   const providerOf = (model: string) => core.listModels().find((m) => m.name === model)?.provider ?? "unknown";
 
+  // Unlike /v1/models this lists the unavailable models too, so it is the one
+  // place a client can read the image quota of an exhausted provider: its
+  // `resetAt` says when generating becomes possible again.
   server.registerTool("list_models", {
-    description: "List the models Capitoline can route to right now, with kind (text or image), availability and budget state.",
+    description: "List the models Capitoline can route to right now, with kind (text or image), availability, budget state and, for image models, the quota of the current window (used, limit, resetAt).",
     inputSchema: {},
   }, async () => {
-    const models = core.listModels().map((m) => ({ name: m.name, provider: m.provider, kind: m.kind, available: m.available, ...(m.reason ? { reason: m.reason } : {}), over_budget: m.overBudget }));
+    const models = core.listModels().map((m) => ({ name: m.name, provider: m.provider, kind: m.kind, available: m.available, ...(m.reason ? { reason: m.reason } : {}), over_budget: m.overBudget, ...(m.quota ? { quota: m.quota } : {}) }));
     return { content: [{ type: "text", text: JSON.stringify(models) }] };
   });
 

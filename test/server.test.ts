@@ -40,11 +40,23 @@ describe("GET /v1/models", () => {
     const before = await request(app).get("/v1/models");
     const quotaOf = (r: { body: { data: { id: string; capitoline: Record<string, unknown> }[] } }, id: string) =>
       r.body.data.find((m) => m.id === id)!.capitoline.quota;
-    expect(quotaOf(before, "agy-image")).toEqual({ used: 0, limit: 12, window_started_at: null, reset_at: null });
+    expect(quotaOf(before, "agy-image")).toEqual({ used: 0, limit: 12, window_started_at: null });
     expect(quotaOf(before, "agy-text")).toBeUndefined();
     await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" });
     const after = await request(app).get("/v1/models");
-    expect(quotaOf(after, "agy-image")).toMatchObject({ used: 1, limit: 12, window_started_at: expect.any(Number), reset_at: null });
+    expect(quotaOf(after, "agy-image")).toEqual({ used: 1, limit: 12, window_started_at: expect.any(Number) });
+  });
+  it("drops an image model whose quota is exhausted, and says so nowhere in this list", async () => {
+    const { app } = makeImages([{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }]);
+    const sent = Date.now();
+    expect((await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" })).status).toBe(429);
+    // The quota hit paused the provider past the reset it reported, so every
+    // model of that provider is unavailable and this list has dropped it
+    // (spec 6.4). That is why the block here carries no reset instant: it
+    // could never be anything but null. The reset is read from /health.
+    expect((await request(app).get("/v1/models")).body.data).toEqual([]);
+    const health = await request(app).get("/health");
+    expect(health.body.providers[0].imageQuota.resetAt).toBeGreaterThanOrEqual(sent + 442_209 * 1000);
   });
 });
 

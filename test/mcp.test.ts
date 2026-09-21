@@ -59,8 +59,22 @@ describe("MCP", () => {
     const text = (r.content as { type: string; text: string }[])[0].text;
     expect(JSON.parse(text)).toEqual([
       { name: "claude-opus", provider: "claude", kind: "text", available: true, over_budget: false },
-      { name: "agy-image", provider: "antigravity", kind: "image", available: true, over_budget: false },
+      { name: "agy-image", provider: "antigravity", kind: "image", available: true, over_budget: false, quota: { used: 0, limit: null, windowStartedAt: null, resetAt: null } },
     ]);
+    await c.close();
+  });
+  it("list_models still carries the quota, with its reset, once the image quota is exhausted", async () => {
+    images.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }];
+    const sent = Date.now();
+    const c = await client();
+    await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "agy-image" } });
+    const r = await c.callTool({ name: "list_models", arguments: {} });
+    const models = JSON.parse((r.content as Block[])[0].text!) as { name: string; available: boolean; reason?: string; quota?: { resetAt: number | null } }[];
+    const image = models.find((m) => m.name === "agy-image")!;
+    // /v1/models drops an unavailable model, so this tool is where a client
+    // reads when the exhausted quota frees up.
+    expect(image).toMatchObject({ available: false, reason: "rate_limited" });
+    expect(image.quota!.resetAt).toBeGreaterThanOrEqual(sent + 442_209 * 1000);
     await c.close();
   });
   it("ask_model returns the answer, usage and passes effort and system", async () => {

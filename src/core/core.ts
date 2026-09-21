@@ -1,6 +1,6 @@
 import type { Logger } from "../log.js";
 import type { HealthStatus, ModelKind, ModelSpec, Provider } from "../providers/adapter.js";
-import type { UsageStore } from "../usage/store.js";
+import { H5, type UsageStore } from "../usage/store.js";
 import { Semaphore } from "./semaphore.js";
 import { CapitolineError, type ErrorKind, type ImageRequest, type InternalRequest, type ProviderEvent } from "./types.js";
 
@@ -22,7 +22,7 @@ export interface CoreOptions {
   imageQuotas?: Record<string, number>;
 }
 
-const H5 = 5 * 3600_000, D7 = 7 * 24 * 3600_000;
+const D7 = 7 * 24 * 3600_000;
 
 interface State {
   provider: Provider; sem: Semaphore; health: HealthStatus | null; pausedUntil: number | null; strikes: number;

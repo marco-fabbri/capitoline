@@ -48,13 +48,18 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
 
   // The quota block is only there for image models, and its keys follow this
   // endpoint's snake_case (over_budget) rather than the internal names; /health
-  // serves the internal shape instead.
+  // serves the internal shape instead. It carries no reset instant on purpose:
+  // a quota hit pauses the provider until that instant plus a minute of slack
+  // (Core.onError), so while a reset stands the model is unavailable and this
+  // list, which carries only available models (spec 6.4), has already dropped
+  // it. The reset is read from /health or from the MCP list_models tool, which
+  // both report unavailable models too.
   app.get("/v1/models", (_req, res) => {
     const data = core.listModels().filter((m) => m.available).map((m) => ({
       id: m.name, object: "model", created: 0, owned_by: m.provider,
       capitoline: {
         kind: m.kind, over_budget: m.overBudget,
-        ...(m.quota ? { quota: { used: m.quota.used, limit: m.quota.limit, window_started_at: m.quota.windowStartedAt, reset_at: m.quota.resetAt } } : {}),
+        ...(m.quota ? { quota: { used: m.quota.used, limit: m.quota.limit, window_started_at: m.quota.windowStartedAt } } : {}),
       },
     }));
     res.json({ object: "list", data });

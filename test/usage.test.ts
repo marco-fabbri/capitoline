@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { UsageStore } from "../src/usage/store.js";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { H5, UsageStore } from "../src/usage/store.js";
 
 describe("UsageStore", () => {
   it("records calls and sums them per provider within a window", () => {
@@ -28,7 +32,6 @@ describe("UsageStore", () => {
   it("counts successful image calls in the window and reports when it opened", () => {
     const s = new UsageStore(":memory:");
     const now = 1_000_000_000_000;
-    const H5 = 5 * 3600_000;
     const img = (ts: number, outcome: "ok" | "rate_limited") =>
       s.record({ provider: "antigravity", model: "agy-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 20_000, outcome, source: "http", ts });
     img(now - 6 * 3600_000, "ok");                 // before the window
@@ -50,5 +53,34 @@ describe("UsageStore", () => {
     s.record({ provider: "antigravity", model: "agy-gemini-flash", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now - 1000 });
     expect(s.imageWindow("antigravity")).toEqual({ used: 1, windowStartedAt: now - 1000 });
     s.close();
+  });
+  // On a real host the store opens a database written before image models
+  // existed, whose `calls` table has no `kind` column; CREATE TABLE IF NOT
+  // EXISTS leaves it untouched, so only the ALTER TABLE keeps that history
+  // readable. A file is needed: `:memory:` is always born with the column.
+  it("adds the kind column to a database written before image models existed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-usage-"));
+    const path = join(dir, "usage.sqlite");
+    const now = Date.now();
+    try {
+      const legacy = new DatabaseSync(path);
+      legacy.exec(`CREATE TABLE calls (
+        id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
+        outcome TEXT NOT NULL, source TEXT NOT NULL)`);
+      legacy.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source)
+        VALUES (?, 'antigravity', 'agy-gemini-flash', 10, 2, 5, 'ok', 'http')`).run(now - 1000);
+      legacy.close();
+
+      const s = new UsageStore(path);
+      s.record({ provider: "antigravity", model: "agy-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 20, outcome: "ok", source: "http", ts: now });
+      // The pre-image row is still there and counted as text, so it weighs on
+      // the budget but not on the image quota.
+      expect(s.totals("antigravity", H5, now + 1).calls).toBe(2);
+      expect(s.imageWindow("antigravity", H5, now + 1)).toEqual({ used: 1, windowStartedAt: now });
+      s.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

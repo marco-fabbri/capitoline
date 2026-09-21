@@ -39,8 +39,12 @@ describe("end to end with fake CLIs", () => {
   });
   it("reports the kind of every model, image included", async () => {
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
-    const data = ((await r.json()) as { data: { id: string; capitoline: { kind: string } }[] }).data;
+    const data = ((await r.json()) as { data: { id: string; capitoline: { kind: string; quota?: { used: number; limit: number | null } } }[] }).data;
     const kinds = Object.fromEntries(data.map((m) => [m.id, m.capitoline.kind]));
+    // The configured quota travelled from the YAML through main.ts into Core:
+    // a wrong provider key there would leave this null with every unit test
+    // still green.
+    expect(data.find((m) => m.id === "agy-image")!.capitoline.quota).toEqual({ used: 0, limit: 12, window_started_at: null });
     expect(kinds["agy-image"]).toBe("image");
     expect(kinds["agy-gemini-3.7-flash"]).toBe("text");
     expect(kinds["agy-gemini-3.6-flash"]).toBe("text");
