@@ -5,11 +5,12 @@ import { tmpdir } from "node:os";
 import { CliProvider } from "../src/providers/cli-provider.js";
 import { buildProviders } from "../src/providers/index.js";
 import { claudeAdapter } from "../src/providers/claude.js";
+import { antigravityAdapter } from "../src/providers/antigravity.js";
 import { jsonLines, type Adapter } from "../src/providers/adapter.js";
-import { createRunner, type RunHandle, type Runner } from "../src/runner/runner.js";
+import { createRunner, type CaptureSpec, type RunHandle, type Runner } from "../src/runner/runner.js";
 import { createLogger } from "../src/log.js";
 import { loadConfig } from "../src/config.js";
-import type { InternalRequest, ProviderEvent } from "../src/core/types.js";
+import type { ImageRequest, InternalRequest, ProviderEvent } from "../src/core/types.js";
 
 const FAKE = join(process.cwd(), "test/fake-cli/fake-cli.mjs");
 const config = loadConfig("config/capitoline.yaml");
@@ -17,9 +18,14 @@ const base = config.providers.claude;
 const runner = createRunner({ sandboxRoot: mkdtempSync(join(tmpdir(), "cp-")), user: null, killGraceMs: 200, log: createLogger("t") });
 
 // Wraps the runner so a test can observe the underlying run's result.
-function spyRunner(): Runner & { handles: RunHandle[] } {
+function spyRunner(): Runner & { handles: RunHandle[]; captures: CaptureSpec[] } {
   const handles: RunHandle[] = [];
-  return { handles, async run(spec) { const h = await runner.run(spec); handles.push(h); return h; }, capture: (spec) => runner.capture(spec) };
+  const captures: CaptureSpec[] = [];
+  return {
+    handles, captures,
+    async run(spec) { const h = await runner.run(spec); handles.push(h); return h; },
+    capture(spec) { captures.push(spec); return runner.capture(spec); },
+  };
 }
 
 function provider(mode: string, extra: Partial<typeof base> = {}, r: Runner = runner, adapter: Adapter = claudeAdapter, opts = {}) {
@@ -130,6 +136,135 @@ describe("CliProvider", () => {
   it("health() fails clearly on an unknown health_model", async () => {
     const h = await provider("replay", { health_model: "nope" }).health();
     expect(h).toMatchObject({ ok: false, kind: "bad_output", detail: expect.stringContaining("nope") });
+  });
+});
+
+describe("CliProvider.generateImage", () => {
+  const agy = config.providers.antigravity;
+  const IMAGE_RUN = join(process.cwd(), "test/fixtures/antigravity/image-run.jsonl");
+  const IMAGE_429 = join(process.cwd(), "test/fixtures/antigravity/image-429.jsonl");
+  const COLLECT = join(process.cwd(), "test/fake-cli/fake-collect-image.sh");
+  const SAMPLE = readFileSync(join(process.cwd(), "test/fixtures/images/sample.jpg"));
+  // The 429 fixture was captured on 2026-09-21; with a fixed clock the wait is the
+  // captured delay, not whatever is left until the reset at the time the test runs.
+  const NOW = Date.parse("2026-09-21T12:00:00Z");
+  const imageReq: ImageRequest = { model: "agy-image", prompt: "a lighthouse on a cliff at dawn, watercolour" };
+
+  function imageProvider(fixture: string, extra: Partial<typeof agy> = {}, r: Runner = runner, opts = {}, mode = "replay") {
+    const cfg = { ...agy, binary: FAKE, args: ["--mode", mode, "--file", fixture], timeout_s: 1, image: { ...agy.image, collect: [COLLECT] }, ...extra };
+    return new CliProvider("antigravity", cfg, antigravityAdapter, r, createLogger("t"), { now: () => NOW, ...opts });
+  }
+  async function generate(p: CliProvider, signal?: AbortSignal, timeoutS?: number) {
+    const out: ProviderEvent[] = [];
+    const m = { ...p.models().find((x) => x.name === "agy-image")!, timeoutS };
+    for await (const e of p.generateImage!(imageReq, m, signal)) out.push(e);
+    return out;
+  }
+  // FAKE_COLLECT reaches the fake helper through the runner's environment.
+  async function withCollect<T>(outcome: string, fn: () => Promise<T>): Promise<T> {
+    process.env.FAKE_COLLECT = outcome;
+    try { return await fn(); } finally { delete process.env.FAKE_COLLECT; }
+  }
+  // A synthetic stream: init, the given tool step, then (optionally) a SUCCESS result.
+  function synthetic(lines: Record<string, unknown>[]): string {
+    const path = join(mkdtempSync(join(tmpdir(), "cp-img-")), "run.jsonl");
+    writeFileSync(path, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    return path;
+  }
+  const CID = "40fc0b5c-042f-453a-9eaf-6162913de55e";
+  const init = { event: "init", conversation_id: CID, init: { model: "gemini-3.8-flash-low" } };
+  const toolStep = (name: string, state: string, index = 2) => ({ event: "step_update", step_update: { conversation_id: CID, step_index: index, state, step_type: "tool", tool_name: name, tool_info: { name, parameters: {} } } });
+  const result = { event: "result", result: { conversation_id: CID, status: "SUCCESS", response: "done\n", usage: { input_tokens: 10, output_tokens: 2 } } };
+
+  it("yields the collected image (1376x768 JPEG) then done on a real run", async () => {
+    const spy = spyRunner();
+    const ev = await generate(imageProvider(IMAGE_RUN, {}, spy));
+    expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
+    expect(ev[0]).toMatchObject({ type: "image", mime: "image/jpeg", width: 1376, height: 768 });
+    expect((ev[0] as { bytes: Buffer }).bytes.equals(SAMPLE)).toBe(true);
+    expect(ev[1]).toEqual({ type: "done", usage: { input: 26711, output: 60 } });
+    // The collect command gets the conversation id from the stream as its last argument.
+    expect(spy.captures).toHaveLength(1);
+    expect(spy.captures[0]).toMatchObject({ binary: COLLECT, args: [CID], timeoutMs: 30_000, maxBytes: 20 * 1024 * 1024 });
+  });
+  it("never forwards adapter-internal meta or tool events", async () => {
+    const ev = await generate(imageProvider(IMAGE_RUN));
+    expect(ev.some((e) => (e.type as string) === "meta" || (e.type as string) === "tool")).toBe(false);
+  });
+  it("reports rate_limited with the captured reset wait on the silent 429", async () => {
+    const ev = await withCollect("none", () => generate(imageProvider(IMAGE_429)));
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ type: "error", kind: "rate_limited", retryAfterS: 442209, detail: expect.stringContaining("gemini-3.1-flash-image") });
+  });
+  it("reports rate_limited when only the agent's prose mentions the quota and no image comes out", async () => {
+    const prose = synthetic([
+      init,
+      { event: "step_update", step_update: { conversation_id: CID, step_index: 1, state: "DONE", step_type: "agent_response", text_delta: "I could not generate the image: quota exhausted, resets in 2h30m." } },
+      result,
+    ]);
+    const spy = spyRunner();
+    const ev = await withCollect("none", () => generate(imageProvider(prose, {}, spy)));
+    expect(ev).toEqual([{ type: "error", kind: "rate_limited", detail: expect.stringContaining("quota"), retryAfterS: 9000 }]);
+    expect(spy.captures).toHaveLength(1); // the conversation directory is still cleaned up
+  });
+  it("rejects a collected file that is too small as bad_output", async () => {
+    const ev = await withCollect("tiny", () => generate(imageProvider(IMAGE_RUN)));
+    expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: expect.stringMatching(/too small/) }]);
+  });
+  it("reports bad_output when the run ends cleanly but no image was produced", async () => {
+    const ev = await withCollect("none", () => generate(imageProvider(IMAGE_RUN)));
+    expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: "no image produced" }]);
+  });
+  it("aborts the CLI and reports bad_output on a tool call outside allowed_tools", async () => {
+    const rogue = synthetic([init, toolStep("run_command", "ACTIVE")]);
+    const spy = spyRunner();
+    const t0 = Date.now();
+    const ev = await generate(imageProvider(rogue, {}, spy, {}, "replay-linger"), undefined, 5);
+    expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: run_command" }]);
+    expect(await spy.handles[0]!.result).toMatchObject({ aborted: true, timedOut: false });
+    expect(Date.now() - t0).toBeLessThan(3000); // killed, not left to the 5 s timeout
+    expect(spy.captures).toHaveLength(0);
+  });
+  it("lets a tool listed in allowed_tools through", async () => {
+    const other = synthetic([init, toolStep("read_url_content", "DONE"), result]);
+    const allowed = { ...agy.image, collect: [COLLECT], allowed_tools: ["generate_image", "read_url_content"] };
+    const ev = await generate(imageProvider(other, { image: allowed }));
+    expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
+  });
+  it("reports bad_output when the stream carries no conversation id", async () => {
+    const anonymous = synthetic([{ event: "result", result: { status: "SUCCESS", response: "done\n" } }]);
+    const spy = spyRunner();
+    const ev = await generate(imageProvider(anonymous, {}, spy));
+    expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: expect.stringMatching(/conversation id/) }]);
+    expect(spy.captures).toHaveLength(0);
+  });
+  it("keeps the collect helper's stderr out of the error detail", async () => {
+    const failing = { ...agy.image, collect: ["/bin/sh", "-c", "echo /home/runner/secret >&2; exit 3"] };
+    const ev = await generate(imageProvider(IMAGE_RUN, { image: failing }));
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ type: "error", kind: "bad_output" });
+    expect((ev[0] as { detail: string }).detail).not.toContain("secret");
+  });
+  it("forwards the adapter's error event when the CLI reports a failed result", async () => {
+    const failed = synthetic([init, { event: "result", result: { conversation_id: CID, status: "ERROR", error: "boom" } }]);
+    const spy = spyRunner();
+    const ev = await generate(imageProvider(failed, {}, spy));
+    expect(ev).toEqual([{ type: "error", kind: "cli_crashed", detail: "boom" }]);
+    expect(spy.captures).toHaveLength(0);
+  });
+  it("uses the model's timeout and reports timeout when the CLI hangs", async () => {
+    const t0 = Date.now();
+    const ev = await generate(imageProvider(IMAGE_RUN, { timeout_s: 30 }, runner, {}, "hang"), undefined, 1);
+    expect(ev).toEqual([{ type: "error", kind: "timeout", detail: "killed after 1s" }]);
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
+  it("stops without an error event when the caller aborts", async () => {
+    const spy = spyRunner();
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 100);
+    const ev = await generate(imageProvider(IMAGE_RUN, {}, spy, {}, "hang"), ac.signal, 5);
+    expect(ev).toEqual([]);
+    expect(await spy.handles[0]!.result).toMatchObject({ aborted: true, timedOut: false });
   });
 });
 
