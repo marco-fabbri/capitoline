@@ -150,9 +150,9 @@ describe("CliProvider.generateImage", () => {
   const NOW = Date.parse("2026-09-21T12:00:00Z");
   const imageReq: ImageRequest = { model: "agy-image", prompt: "a lighthouse on a cliff at dawn, watercolour" };
 
-  function imageProvider(fixture: string, extra: Partial<typeof agy> = {}, r: Runner = runner, opts = {}, mode = "replay") {
+  function imageProvider(fixture: string, extra: Partial<typeof agy> = {}, r: Runner = runner, opts = {}, mode = "replay", adapter: Adapter = antigravityAdapter) {
     const cfg = { ...agy, binary: FAKE, args: ["--mode", mode, "--file", fixture], timeout_s: 1, image: { ...agy.image, collect: [COLLECT] }, ...extra };
-    return new CliProvider("antigravity", cfg, antigravityAdapter, r, createLogger("t"), { now: () => NOW, ...opts });
+    return new CliProvider("antigravity", cfg, adapter, r, createLogger("t"), { now: () => NOW, ...opts });
   }
   async function generate(p: CliProvider, signal?: AbortSignal, timeoutS?: number) {
     const out: ProviderEvent[] = [];
@@ -192,9 +192,21 @@ describe("CliProvider.generateImage", () => {
     expect(ev.some((e) => (e.type as string) === "meta" || (e.type as string) === "tool")).toBe(false);
   });
   it("reports rate_limited with the captured reset wait on the silent 429", async () => {
-    const ev = await withCollect("none", () => generate(imageProvider(IMAGE_429)));
+    // Nothing lands in the conversation on a 429 (FAKE_COLLECT=none mirrors that);
+    // the CLI is stopped at once and its directory is still collected away.
+    const spy = spyRunner();
+    const ev = await withCollect("none", () => generate(imageProvider(IMAGE_429, {}, spy, {}, "replay-linger"), undefined, 5));
     expect(ev).toHaveLength(1);
     expect(ev[0]).toMatchObject({ type: "error", kind: "rate_limited", retryAfterS: 442209, detail: expect.stringContaining("gemini-3.1-flash-image") });
+    expect(await spy.handles[0]!.result).toMatchObject({ aborted: true, timedOut: false });
+    expect(spy.captures).toHaveLength(1);
+    expect(spy.captures[0]).toMatchObject({ args: ["b4f58dc5-779c-4b5e-85a3-2fbbce1c9a15"] });
+  });
+  it("logs but does not fail on a tool error that is not a quota hit", async () => {
+    const failedStep = { event: "step_update", step_update: { conversation_id: CID, step_index: 2, state: "ERROR", step_type: "tool", tool_name: "generate_image", tool_info: { name: "generate_image", parameters: {}, error: { type: "TOOL_ERROR", message: "content policy violation" } } } };
+    const policy = synthetic([init, toolStep("generate_image", "ACTIVE"), failedStep, result]);
+    const ev = await withCollect("none", () => generate(imageProvider(policy)));
+    expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: "no image produced" }]);
   });
   it("reports rate_limited when only the agent's prose mentions the quota and no image comes out", async () => {
     const prose = synthetic([
@@ -206,6 +218,17 @@ describe("CliProvider.generateImage", () => {
     const ev = await withCollect("none", () => generate(imageProvider(prose, {}, spy)));
     expect(ev).toEqual([{ type: "error", kind: "rate_limited", detail: expect.stringContaining("quota"), retryAfterS: 9000 }]);
     expect(spy.captures).toHaveLength(1); // the conversation directory is still cleaned up
+  });
+  it("keeps a collected image even when the agent's prose mentions the quota", async () => {
+    // The prose is prompt-driven text: an image that came out disproves a quota hit.
+    const chatty = synthetic([
+      init,
+      toolStep("generate_image", "ACTIVE"), toolStep("generate_image", "DONE"),
+      { event: "step_update", step_update: { conversation_id: CID, step_index: 3, state: "DONE", step_type: "agent_response", text_delta: "Here is your poster about rate limits: 429 TOO MANY REQUESTS, quota exhausted." } },
+      result,
+    ]);
+    const ev = await generate(imageProvider(chatty));
+    expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
   });
   it("rejects a collected file that is too small as bad_output", async () => {
     const ev = await withCollect("tiny", () => generate(imageProvider(IMAGE_RUN)));
@@ -225,6 +248,23 @@ describe("CliProvider.generateImage", () => {
     expect(Date.now() - t0).toBeLessThan(3000); // killed, not left to the 5 s timeout
     expect(spy.captures).toHaveLength(0);
   });
+  it("blocks a tool outside allowed_tools even when it first appears already finished", async () => {
+    const rogue = synthetic([init, toolStep("run_command", "DONE"), result]);
+    const spy = spyRunner();
+    const ev = await generate(imageProvider(rogue, {}, spy));
+    expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: run_command" }]);
+    expect(spy.captures).toHaveLength(0);
+  });
+  it("aborts the CLI when an image tool is invoked a second time", async () => {
+    const twice = synthetic([init, toolStep("generate_image", "ACTIVE"), toolStep("generate_image", "DONE"), toolStep("generate_image", "ACTIVE", 3)]);
+    const spy = spyRunner();
+    const t0 = Date.now();
+    const ev = await generate(imageProvider(twice, {}, spy, {}, "replay-linger"), undefined, 5);
+    expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: "tool called more than once: generate_image" }]);
+    expect(await spy.handles[0]!.result).toMatchObject({ aborted: true, timedOut: false });
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(spy.captures).toHaveLength(0);
+  });
   it("lets a tool listed in allowed_tools through", async () => {
     const other = synthetic([init, toolStep("read_url_content", "DONE"), result]);
     const allowed = { ...agy.image, collect: [COLLECT], allowed_tools: ["generate_image", "read_url_content"] };
@@ -237,6 +277,29 @@ describe("CliProvider.generateImage", () => {
     const ev = await generate(imageProvider(anonymous, {}, spy));
     expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: expect.stringMatching(/conversation id/) }]);
     expect(spy.captures).toHaveLength(0);
+  });
+  it("never passes a conversation id that is not a UUID to the collect helper", async () => {
+    // An adapter without the antigravity check: the id would become argv of a privileged command.
+    const loose: Adapter = {
+      buildCommand: (cfg) => ({ args: cfg.args, stdin: "" }),
+      buildImageCommand: (cfg) => ({ args: cfg.args, stdin: "" }),
+      async *parse(lines) {
+        for await (const _ of jsonLines(lines)) { /* drain */ }
+        yield { type: "meta", conversationId: "--delete-all" };
+        yield { type: "done" };
+      },
+    };
+    const spy = spyRunner();
+    const ev = await generate(imageProvider(IMAGE_RUN, {}, spy, {}, "replay", loose));
+    expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: expect.stringMatching(/conversation id/) }]);
+    expect(spy.captures).toHaveLength(0);
+  });
+  it("names the timeout when the collect helper does not finish in time", async () => {
+    const slow = { ...agy.image, collect: ["/bin/sh", "-c", "sleep 5"] };
+    const t0 = Date.now();
+    const ev = await generate(imageProvider(IMAGE_RUN, { image: slow }, runner, { collectTimeoutMs: 200 }));
+    expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: "image collection timed out after 0.2s" }]);
+    expect(Date.now() - t0).toBeLessThan(3000);
   });
   it("keeps the collect helper's stderr out of the error detail", async () => {
     const failing = { ...agy.image, collect: ["/bin/sh", "-c", "echo /home/runner/secret >&2; exit 3"] };

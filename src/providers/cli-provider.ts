@@ -22,15 +22,19 @@ export interface CliProviderOptions {
   healthDeadlineMs?: number;
   /** Clock used to turn a quota reset instant into a wait (tests pin it). */
   now?: () => number;
+  /** Deadline for the image collect helper (tests shorten it). */
+  collectTimeoutMs?: number;
 }
-const DEFAULTS: Required<CliProviderOptions> = { exitGraceMs: 1000, healthDeadlineMs: 60_000, now: Date.now };
-
 // Bounds for the collect helper: a generation is ~1 MB, and the helper only
 // reads one file, so anything beyond these is a fault, not a bigger picture.
 const COLLECT_TIMEOUT_MS = 30_000;
 const COLLECT_MAX_BYTES = 20 * 1024 * 1024;
 // Exit code of the collect helper when the conversation exists but holds no image.
 const COLLECT_NO_IMAGE = 4;
+const DEFAULTS: Required<CliProviderOptions> = { exitGraceMs: 1000, healthDeadlineMs: 60_000, now: Date.now, collectTimeoutMs: COLLECT_TIMEOUT_MS };
+// The conversation id becomes an argument of a privileged command: only this
+// shape is ever passed on, whatever an adapter reports.
+const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // A run's process, its internal abort controller and the wind-down shared by
 // execute() and generateImage(): the process must never outlive its consumer.
@@ -138,6 +142,10 @@ export class CliProvider implements Provider {
     const timeoutS = model.timeoutS ?? this.cfg.timeout_s;
     const run = await this.start(args, stdin, timeoutS * 1000, signal);
     const allowed = new Set(this.cfg.image.allowed_tools);
+    // Tools that reached a terminal phase: a later call is a second invocation,
+    // which the prompt forbids and which would spend quota on an image the
+    // helper never collects (it returns one file).
+    const finished = new Set<string>();
     let conversationId: string | undefined;
     let prose = "";
     let usage: Usage | undefined;
@@ -153,12 +161,24 @@ export class CliProvider implements Provider {
             yield { type: "error", kind: "bad_output", detail: `unexpected tool call: ${ev.name}` };
             return;
           }
+          if (ev.phase === "call" && finished.has(ev.name)) {
+            this.log.warn({ model: model.name, tool: ev.name }, "tool called more than once: run aborted");
+            run.ac.abort();
+            yield { type: "error", kind: "bad_output", detail: `tool called more than once: ${ev.name}` };
+            return;
+          }
+          if (ev.phase === "done" || ev.phase === "error") finished.add(ev.name);
           const hit = detectQuotaExhausted(ev.raw, this.opts.now());
           if (hit) {
             run.ac.abort();
+            // Nothing landed, but the CLI created the conversation directory:
+            // collect it best effort so a run of 429s leaves no litter behind.
+            await run.handle.result;
+            await this.discardConversation(model, conversationId);
             yield this.quotaError(model, hit);
             return;
           }
+          if (ev.phase === "error") this.log.warn({ model: model.name, tool: ev.name, raw: ev.raw.slice(0, 2000) }, "image tool step failed");
         } else if (ev.type === "text") {
           prose += ev.delta;
         } else if (ev.type === "error") {
@@ -183,18 +203,18 @@ export class CliProvider implements Provider {
       await run.handle.result;
 
       const proseHit = detectQuotaExhausted(prose, this.opts.now());
-      if (!conversationId) {
+      if (!conversationId || !CONVERSATION_ID.test(conversationId)) {
         if (proseHit) { yield this.quotaError(model, proseHit); return; }
-        this.log.warn({ model: model.name }, "image run reported no conversation id");
+        this.log.warn({ model: model.name, conversationId }, "image run reported no usable conversation id");
         yield { type: "error", kind: "bad_output", detail: "no conversation id in the CLI output" };
         return;
       }
-      const [binary, ...collectArgs] = this.cfg.image.collect;
-      const collected = await this.runner.capture({ binary, args: [...collectArgs, conversationId], timeoutMs: COLLECT_TIMEOUT_MS, maxBytes: COLLECT_MAX_BYTES });
-      // The quota is reported even when a file came out: the prose is the
-      // agent's own account of the failure, and the directory is now cleaned up.
-      if (proseHit) { yield this.quotaError(model, proseHit); return; }
+      const collected = await this.collect(conversationId);
       if (collected.exitCode === COLLECT_NO_IMAGE || (collected.exitCode === 0 && collected.stdout.length === 0)) {
+        // Only now does the prose count: a quota hit leaves nothing in the
+        // conversation, so an image that came out disproves it, and the prose
+        // is prompt-driven text that may merely echo "rate limit" or "429".
+        if (proseHit) { yield this.quotaError(model, proseHit); return; }
         this.log.warn({ model: model.name, conversationId, prose: prose.slice(-500) }, "image run produced no image");
         yield { type: "error", kind: "bad_output", detail: "no image produced" };
         return;
@@ -202,7 +222,10 @@ export class CliProvider implements Provider {
       if (collected.exitCode !== 0) {
         // The helper's stderr may name host paths and users: logs only.
         this.log.warn({ model: model.name, conversationId, exitCode: collected.exitCode, timedOut: collected.timedOut, stderr: collected.stderr.slice(-2000) }, "image collection failed");
-        yield { type: "error", kind: "bad_output", detail: `image collection failed (exit ${String(collected.exitCode)})` };
+        const detail = collected.timedOut
+          ? `image collection timed out after ${this.opts.collectTimeoutMs / 1000}s`
+          : `image collection failed (exit ${String(collected.exitCode)})`;
+        yield { type: "error", kind: "bad_output", detail };
         return;
       }
       const verdict = inspectImage(collected.stdout, { minBytes: this.cfg.image.min_bytes });
@@ -215,6 +238,25 @@ export class CliProvider implements Provider {
       yield { type: "done", usage };
     } finally {
       if (terminal) run.windDown(); else run.ac.abort();
+    }
+  }
+
+  // Runs the configured collect helper: image bytes on stdout, and the
+  // conversation directory is removed either way.
+  private collect(conversationId: string) {
+    const [binary, ...collectArgs] = this.cfg.image.collect!;
+    return this.runner.capture({ binary, args: [...collectArgs, conversationId], timeoutMs: this.opts.collectTimeoutMs, maxBytes: COLLECT_MAX_BYTES });
+  }
+
+  // Clean-up only: whatever the helper returns is irrelevant to a run that
+  // already failed, and its own failure must not mask the real error.
+  private async discardConversation(model: ModelSpec, conversationId: string | undefined): Promise<void> {
+    if (!conversationId || !CONVERSATION_ID.test(conversationId)) return;
+    try {
+      const r = await this.collect(conversationId);
+      if (r.exitCode !== 0 && r.exitCode !== COLLECT_NO_IMAGE) this.log.warn({ model: model.name, conversationId, exitCode: r.exitCode, timedOut: r.timedOut }, "conversation clean-up failed");
+    } catch (e) {
+      this.log.warn({ model: model.name, conversationId, err: String(e) }, "conversation clean-up threw");
     }
   }
 
