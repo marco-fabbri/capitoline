@@ -263,7 +263,13 @@ export class CliProvider implements Provider {
   private quotaError(model: ModelSpec, hit: QuotaHit): ProviderEvent {
     this.log.warn({ model: model.name, quotaModel: hit.model, matched: hit.matched, retryAfterS: hit.retryAfterS, resetAt: hit.resetAt }, "image quota exhausted");
     const detail = `image quota exhausted for ${hit.model ?? model.cliModel} (${hit.matched})` + (hit.retryAfterS === undefined ? "" : `, resets in ${hit.retryAfterS}s`);
-    return { type: "error", kind: "rate_limited", detail, retryAfterS: hit.retryAfterS };
+    // Scoped to the model, always: the image tool has a quota of its own
+    // (gemini-3.1-flash-image, 12 per 5 hours and 58 per week) and the text
+    // models of the same CLI draw on a different pool. Pausing the provider
+    // here took every Antigravity text model down for five days over an image
+    // refusal (observed in production 2026-09-22) — and that pause outlives
+    // the quota it came from, because the image window is the longer one.
+    return { type: "error", kind: "rate_limited", detail, retryAfterS: hit.retryAfterS, scope: "model" };
   }
 
   async health(): Promise<HealthStatus> {

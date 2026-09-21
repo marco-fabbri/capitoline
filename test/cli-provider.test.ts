@@ -212,7 +212,10 @@ describe("CliProvider.generateImage", () => {
     const spy = spyRunner();
     const ev = await withCollect("none", () => generate(imageProvider(IMAGE_429, {}, spy, {}, "replay-linger"), undefined, 5));
     expect(ev).toHaveLength(1);
-    expect(ev[0]).toMatchObject({ type: "error", kind: "rate_limited", retryAfterS: 442209, detail: expect.stringContaining("gemini-3.1-flash-image") });
+    // scope "model": the image tool's quota is not the text models' quota, and a
+    // provider-wide pause here would take every Antigravity text model down for
+    // as long as the image window lasts.
+    expect(ev[0]).toMatchObject({ type: "error", kind: "rate_limited", retryAfterS: 442209, scope: "model", detail: expect.stringContaining("gemini-3.1-flash-image") });
     expect(await spy.handles[0]!.result).toMatchObject({ aborted: true, timedOut: false });
     expect(spy.captures).toHaveLength(1);
     expect(spy.captures[0]).toMatchObject({ args: ["b4f58dc5-779c-4b5e-85a3-2fbbce1c9a15"] });
@@ -231,7 +234,7 @@ describe("CliProvider.generateImage", () => {
     ]);
     const spy = spyRunner();
     const ev = await withCollect("none", () => generate(imageProvider(prose, {}, spy)));
-    expect(ev).toEqual([{ type: "error", kind: "rate_limited", detail: expect.stringContaining("quota"), retryAfterS: 9000 }]);
+    expect(ev).toEqual([{ type: "error", kind: "rate_limited", detail: expect.stringContaining("quota"), retryAfterS: 9000, scope: "model" }]);
     expect(spy.captures).toHaveLength(1); // the conversation directory is still cleaned up
   });
   it("keeps a collected image even when the agent's prose mentions the quota", async () => {
