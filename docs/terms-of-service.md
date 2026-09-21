@@ -85,9 +85,14 @@ wording gives Google the widest latitude.
 1. **Subscription providers (`claude-*`, `codex-*`, `agy-*`) serve the owner
    only**: Claude Code via MCP, Open WebUI, the owner's scripts, the council
    the owner asks. Volumes stay "ordinary, individual".
-2. **Anything with other people as end users (a Telegram bot for other
-   parents, a service for colleagues, an endpoint registered in a corporate
-   gateway) must not be answered by the subscription providers.** Those apps
-   use free-tier or self-hosted inference (Gemini free tier, the platform, Ollama), or
-   API keys if the no-pay-per-use rule is ever lifted.
-3. Never pool accounts, never share the service token with anyone else's app.
+2. **Content the owner generates and then publishes is the owner's use**: a
+   batch that writes recipes into a database, an article draft, images for a
+   site. Who reads the result afterwards does not matter, as with any text
+   written with Claude and published.
+3. **Requests triggered by other people, answered live for them** (a bot
+   command that calls a model for the parent who typed it, a service for
+   colleagues, an endpoint registered in a corporate gateway) **must not be
+   answered by the subscription providers.** Those paths use free-tier or
+   self-hosted inference (Gemini free tier, the platform, Ollama), or API keys if the
+   no-pay-per-use rule is ever lifted.
+4. Never pool accounts, never share the service token with anyone else's app.
