@@ -43,11 +43,14 @@ export const codexAdapter: Adapter = {
       // two exceptions, both of which a client can send (the system prompt is
       // its text) and either of which would kill the whole run on an
       // unparsable override instead of answering: an unpaired surrogate and a
-      // raw DEL. tomlString replaces both before quoting. The
-      // "-c" here is the CLI's override flag for a key that the configuration
-      // names (system_prompt_flag), not a model or effort flag.
-      if (cfg.system_prompt_flag) args.push("-c", `${cfg.system_prompt_flag}=${tomlString(system)}`);
-      else prompt = `System instructions:\n${system}\n\n${prompt}`;
+      // raw DEL. tomlString replaces both before quoting — but only for the
+      // override form, since a bare flag carries the text as it is and no TOML
+      // parser ever sees it.
+      if (cfg.system_prompt_flag && cfg.system_prompt_flag_prefix) {
+        args.push(cfg.system_prompt_flag_prefix, `${cfg.system_prompt_flag}=${tomlString(system)}`);
+      } else if (cfg.system_prompt_flag) {
+        args.push(cfg.system_prompt_flag, system);
+      } else prompt = `System instructions:\n${system}\n\n${prompt}`;
     }
     args.push("-");
     return { args, stdin: prompt };

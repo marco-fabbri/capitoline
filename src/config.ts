@@ -61,6 +61,16 @@ const ProviderSchema = z.object({
   // model_reasoning_effort="high", not as a flag of its own.
   effort_key: z.string().min(1).nullable(),
   system_prompt_flag: z.string().nullable(),
+  // The flag that introduces the system prompt override, or null when
+  // `system_prompt_flag` is passed as a bare flag followed by the text
+  // (Claude: `--system-prompt <text>`). Set, the argument becomes
+  // `<prefix> <system_prompt_flag>="<text>"`: Codex takes the override as a
+  // configuration assignment, `-c developer_instructions="..."`, so the flag
+  // that carries it is part of the CLI's shape and belongs here. Required and
+  // without a default like the three flag keys above: a default of null would
+  // drop Codex's `-c` from a configuration file written before this key
+  // existed and pass the override as a bare argument the CLI never sees.
+  system_prompt_flag_prefix: z.string().min(1).nullable(),
   prompt_via: z.literal("stdin"),
   image: ImageSchema,
 }).strict();

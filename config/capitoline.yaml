@@ -51,6 +51,7 @@ providers:
       - --permission-prompts
       - none
     system_prompt_flag: --system-prompt
+    system_prompt_flag_prefix: null                  # none: the flag carries the text, not a key="value" override
     prompt_via: stdin
     # Production adds:  --settings /home/runner/.claude/capitoline.json
     # That file (owned by runner, mode 0600) holds {"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}.
@@ -83,6 +84,7 @@ providers:
       - -c
       - web_search="disabled"
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"
+    system_prompt_flag_prefix: -c                    # the flag that carries key="value" configuration overrides
     prompt_via: stdin                                # codex exec -
 
   antigravity:
@@ -114,6 +116,7 @@ providers:
       - --sandbox
       - -p=
     system_prompt_flag: null                         # none: prepended to the prompt with a role marker
+    system_prompt_flag_prefix: null
     prompt_via: stdin                                # {"event":"user","message":{"role":"user","content":...}}
     image:
       # Image models: the CLI writes the file into its own home, never into the

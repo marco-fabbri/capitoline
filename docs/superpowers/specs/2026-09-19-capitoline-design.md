@@ -257,10 +257,11 @@ providers:
     effort_key: <key> | null               # required; set = <flag> <key>="<value>" (Codex)
     args: [<fixed sandbox and output flags>]
     system_prompt_flag: <flag> | null      # null = prepended to the prompt with a role marker
+    system_prompt_flag_prefix: <flag> | null  # required; set = <prefix> <flag>="<text>" (Codex), null = <flag> <text>
     prompt_via: stdin
 ```
 
-The real file with verified values for the three CLIs is `config/capitoline.yaml`. Antigravity encodes effort in the model id (`gemini-3.8-flash-low`), hence `effort_suffix`. The three flag keys have no default: a deployed file that predates them fails validation naming the missing key, rather than inheriting a default and building a command line nobody verified.
+The real file with verified values for the three CLIs is `config/capitoline.yaml`. Antigravity encodes effort in the model id (`gemini-3.8-flash-low`), hence `effort_suffix`. The four flag keys have no default: a deployed file that predates them fails validation naming the missing key, rather than inheriting a default and building a command line nobody verified.
 
 ## 9. Deployment on the host
 

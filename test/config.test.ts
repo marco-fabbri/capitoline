@@ -22,6 +22,7 @@ const PROVIDER: Fields = {
   effort_key: "null",
   args: "[]",
   system_prompt_flag: "null",
+  system_prompt_flag_prefix: "null",
   prompt_via: "stdin",
 };
 
@@ -41,6 +42,10 @@ describe("config", () => {
     expect(Object.keys(cfg.providers).sort()).toEqual(["antigravity", "claude", "codex"]);
     expect(cfg.providers.claude.models["claude-opus"].cli_model).toBe("opus");
     expect(cfg.providers.antigravity.models["agy-gemini-flash"].effort_suffix).toBe(true);
+    expect(cfg.providers.codex.system_prompt_flag).toBe("developer_instructions");
+    expect(cfg.providers.codex.system_prompt_flag_prefix).toBe("-c");
+    expect(cfg.providers.claude.system_prompt_flag_prefix).toBeNull();
+    expect(cfg.providers.antigravity.system_prompt_flag_prefix).toBeNull();
     expect(cfg.server.port).toBe(8080);
     expect(cfg.usage.db_path).toBe("capitoline.sqlite");
   });
@@ -57,7 +62,7 @@ describe("config", () => {
     expect(agy.image.args).toEqual([]);
     expect(cfg.providers.claude.image).toEqual({ args: [], allowed_tools: ["generate_image"], collect: undefined, min_bytes: 200000 });
   });
-  it("requires every provider to name the model and effort flags", () => {
+  it("requires every provider to name the model, effort and system-prompt flags", () => {
     // No defaults on purpose: a file written before these keys existed — the
     // hand-edited copy in /etc on the host — must fail `npm run check-config`
     // naming the missing key, instead of inheriting a default and building a
@@ -71,8 +76,13 @@ describe("config", () => {
     // An empty flag would reach the CLI as an empty argument.
     expect(() => parseConfig(config({ model_flag: '""' }))).toThrow(/providers\.x\.model_flag/);
     expect(() => parseConfig(config({ effort_flag: '""' }))).toThrow(/providers\.x\.effort_flag/);
-    const p = parseConfig(config({ effort_flag: "-c", effort_key: "model_reasoning_effort" })).providers.x;
-    expect([p.model_flag, p.effort_flag, p.effort_key]).toEqual(["--model", "-c", "model_reasoning_effort"]);
+    // Same rule for the flag that introduces the system prompt override: a
+    // default of null would quietly drop Codex's "-c" and pass the override as
+    // a bare argument, which is the drift the other three keys exist to stop.
+    expect(() => parseConfig(config({ system_prompt_flag_prefix: null }))).toThrow(/providers\.x\.system_prompt_flag_prefix/);
+    expect(() => parseConfig(config({ system_prompt_flag_prefix: '""' }))).toThrow(/providers\.x\.system_prompt_flag_prefix/);
+    const p = parseConfig(config({ effort_flag: "-c", effort_key: "model_reasoning_effort", system_prompt_flag: "developer_instructions", system_prompt_flag_prefix: "-c" })).providers.x;
+    expect([p.model_flag, p.effort_flag, p.effort_key, p.system_prompt_flag_prefix]).toEqual(["--model", "-c", "model_reasoning_effort", "-c"]);
   });
   it("defaults a model's kind to text with no per-model timeout", () => {
     const m = parseConfig(config()).providers.x.models.a;

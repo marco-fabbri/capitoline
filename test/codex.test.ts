@@ -31,6 +31,29 @@ describe("codex adapter", () => {
     expect(c.args).not.toContain("-m");
     expect(c.args).not.toContain('model_reasoning_effort="low"');
   });
+  it("takes the flag that introduces the system prompt override from the configuration", () => {
+    // The last flag still written in the adapter: the configuration named the
+    // override key (developer_instructions) while the "-c" that carries it was
+    // a literal, so a CLI that renamed it would have needed a code change.
+    expect(cfg.system_prompt_flag_prefix).toBe("-c");
+    const req = { model: "codex-gpt-6-astra", stream: false, effort: "low" as const, messages: [{ role: "system" as const, text: "S" }, { role: "user" as const, text: "q" }] };
+    expect(codexAdapter.buildCommand(cfg, astra, req).args.slice(cfg.args.length))
+      .toEqual(["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="low"', "-c", 'developer_instructions="S"', "-"]);
+    const renamed = { ...cfg, system_prompt_flag_prefix: "--config" };
+    const c = codexAdapter.buildCommand(renamed, astra, req);
+    expect(c.args.slice(cfg.args.length))
+      .toEqual(["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="low"', "--config", 'developer_instructions="S"', "-"]);
+    expect(c.stdin).toBe("q");
+  });
+  it("passes the system prompt as a bare flag when the provider declares no prefix", () => {
+    // A null prefix is how a CLI that takes the system prompt as a flag of its
+    // own is declared: flag and text, no key="value" and no TOML quoting.
+    const bare = { ...cfg, system_prompt_flag: "--system-prompt", system_prompt_flag_prefix: null };
+    const c = codexAdapter.buildCommand(bare, astra, { model: "codex-gpt-6-astra", stream: false, messages: [{ role: "system", text: 'S "x"' }, { role: "user", text: "q" }] });
+    expect(c.args.slice(cfg.args.length))
+      .toEqual(["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="medium"', "--system-prompt", 'S "x"', "-"]);
+    expect(c.stdin).toBe("q");
+  });
   it("passes a bare effort value when the provider declares no effort key", () => {
     const bare = { ...cfg, effort_key: null };
     const c = codexAdapter.buildCommand(bare, astra, { model: "codex-gpt-6-astra", stream: false, effort: "low", messages: [{ role: "user", text: "q" }] });
