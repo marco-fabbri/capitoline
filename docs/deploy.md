@@ -81,7 +81,7 @@ use these absolute paths.
 
 ```sh
 cat > /etc/sudoers.d/capitoline <<'SUDO'
-capitoline ALL=(runner) NOPASSWD: /home/runner/.npm-global/bin/claude, /home/runner/.npm-global/bin/codex, /home/runner/.local/bin/agy
+capitoline ALL=(runner) NOPASSWD: /home/runner/.npm-global/bin/claude, /home/runner/.npm-global/bin/codex, /home/runner/.local/bin/agy, /usr/local/bin/capitoline-collect-image
 SUDO
 chmod 0440 /etc/sudoers.d/capitoline
 visudo -cf /etc/sudoers.d/capitoline
@@ -92,6 +92,12 @@ The production configuration (§7) must use exactly these absolute paths as
 invoked by the gateway as `sudo -n -H -u runner -- <binary> ...` with an
 environment reduced to `PATH`, so nothing from the gateway's environment
 reaches the CLI.
+
+The fourth entry is not a CLI: it is the image collection helper of §6.5,
+run the same way, with a conversation id as its only argument. Write the
+rule now — `visudo -cf` does not check that the path exists — but remember
+that until §6.5 has installed the file an image request fails with a `sudo`
+error.
 
 ## 6. Authentication, as runner
 
@@ -280,6 +286,54 @@ call, which is exactly the case the gateway's own timeout covers). If
 `uid=` appears, stop: the permission model changed and the provider must
 stay disabled until `settings.json` locks it again.
 
+### 6.5 Image collection helper
+
+The helper ships in the repository, so this step follows the clone of §7
+even though what it configures belongs to the runner's setup.
+
+`agy` writes a generated image inside its own home, never into the sandbox:
+`/home/runner/.gemini/antigravity-cli/brain/<conversation-id>/image_<ts>.jpg`
+(JPEG, about one megabyte). `/home/runner` is `0700`, so the gateway user
+cannot read it, and the agent's claim that it saved `./image.png` in the
+working directory is invented. `scripts/capitoline-collect-image` is the
+only way across that boundary: it checks that its argument is a UUID,
+prints the newest `image_*` file of that conversation to stdout and removes
+the conversation directory.
+
+```sh
+install -o root -g root -m 0755 \
+  /var/lib/capitoline/app/scripts/capitoline-collect-image \
+  /usr/local/bin/capitoline-collect-image
+```
+
+Owned by `root` and not writable by `capitoline`: the sudoers rule of §5
+lets `capitoline` run this exact path as `runner`, so a copy the gateway
+user could edit would hand it the `runner` account. Exit codes: 2 invalid
+conversation id, 3 no such conversation, 4 no image (the directory is
+removed anyway). The gateway maps 4 and an empty output to `bad_output`, or
+to `rate_limited` when the run also carried a quota refusal.
+
+Image generation needs no change to the `strict` settings of §6.4: for
+`agy` a `generate_image` call is not a file write, so it runs headless with
+no approval prompt, while `run_command` and real file writes keep stalling.
+The tool takes only `ImageName` and `Prompt` — there is no size parameter,
+which is why the API accepts `size` and reports it as ignored.
+
+Verify, after §8 has the service running:
+
+```sh
+sudo -n -H -u capitoline -- sudo -n -H -u runner -- \
+  /usr/local/bin/capitoline-collect-image not-a-uuid; echo $?   # prints 2
+curl -s localhost:8080/v1/images/generations -H 'content-type: application/json' \
+  -d '{"prompt":"a red fox in the snow, 16:9"}' | jq '.capitoline'
+```
+
+Expected: `mime` `image/jpeg`, dimensions around 1376x768 and `bytes`
+around a million. `bad_output` with "too small" means the CLI wrote a
+placeholder instead of a picture (the `min_bytes` gate of §7); a 429 with
+`Retry-After` means the image quota is exhausted — there are two rolling
+windows and the longer one resets in days, see `docs/spike-2026-09.md` §8.
+
 ## 7. Application
 
 ```sh
@@ -308,6 +362,8 @@ Edit `/etc/capitoline/capitoline.yaml`:
 | `providers.claude.args` | append `--settings` and `/home/runner/.claude/capitoline.json` as two list items |
 | `providers.codex.binary` | `/home/runner/.npm-global/bin/codex` |
 | `providers.antigravity.binary` | `/home/runner/.local/bin/agy` |
+| `providers.antigravity.image.collect` | `[/usr/local/bin/capitoline-collect-image]` — already the value in the repository copy; it must match the sudoers path of §5 (a developer machine points it at `scripts/capitoline-collect-image` instead, which reads its own `$HOME` without sudo) |
+| `providers.antigravity.image.min_bytes` | `200000` — keep it: below this the collected file is a placeholder, not a picture, and the request fails with `bad_output` rather than returning a grey rectangle |
 | `server.access.team_domain`, `server.access.audience` | filled in §9; both empty until then |
 
 Everything else (flags, model aliases, effort mapping) stays as in the
@@ -404,15 +460,22 @@ claude mcp add --transport http capitoline https://api.example.com/mcp \
   --header "CF-Access-Client-Id: <id>" --header "CF-Access-Client-Secret: <secret>"
 ```
 
-A CLI answer can take minutes; raise the tool timeout in the Mac shell
-profile:
+A CLI answer can take minutes and an image 11-45 s; raise the tool timeout
+in the Mac shell profile:
 
 ```sh
 export MCP_TOOL_TIMEOUT=600000
 ```
 
+This is the only thing that keeps a long call alive. `generate_image` sends
+a progress notification every 5 s, but a notification postpones the client's
+deadline only when that client sets `resetTimeoutOnProgress`, off by default
+in the MCP TypeScript SDK (spec §6.2); treat it as a sign of life, not as a
+timeout extension.
+
 Test: in Claude Code run `/mcp` (the server must show as connected), then
-ask "use capitoline ask_model with codex-gpt-5.5: reply ok".
+ask "use capitoline ask_model with codex-gpt-5.5: reply ok" and "use
+capitoline generate_image: a red fox in the snow".
 
 ## 11. Backup
 
