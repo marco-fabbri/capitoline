@@ -9,7 +9,10 @@ import type { Logger } from "../log.js";
 export interface McpOptions {
   // How often generate_image reports progress while the CLI is working.
   // A generation takes 11-45 s and says nothing meanwhile; the notification
-  // keeps the client's tool timeout from firing. Tests shorten it.
+  // gives the client a sign of life, and a client that asks for it
+  // (resetTimeoutOnProgress, off by default in the TypeScript SDK) also
+  // extends its own tool timeout on it. Raising that timeout is the client's
+  // job and the installation docs explain it (spec 6.2). Tests shorten it.
   progressIntervalMs?: number;
 }
 
@@ -17,7 +20,8 @@ const PROGRESS_INTERVAL_MS = 5_000;
 
 function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
   const server = new McpServer({ name: "capitoline", version: "0.1.0" });
-  const progressIntervalMs = opts.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
+  // Clamped: a 0 from a caller would become a 1 ms timer, not "no progress".
+  const progressIntervalMs = Math.max(1, opts.progressIntervalMs ?? PROGRESS_INTERVAL_MS);
 
   // A provider error event becomes the tool's error. For a rate limit the wait
   // comes from Core, which has just installed the pause for that provider (with
@@ -27,13 +31,20 @@ function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
     const retry = ev.kind === "rate_limited" ? core.pauseRemainingS(provider) ?? ev.retryAfterS : ev.retryAfterS;
     return new CapitolineError(ev.kind, ev.kind, retry);
   };
-  // The tool error text carries the kind and the wait, never the detail: the
-  // detail is CLI stderr or a raw 429 body, which stays in the log (spec 8.3).
+  // The tool error text carries the kind and the wait, never the provider's
+  // detail: that is CLI stderr or a raw 429 body and stays in the log (spec
+  // 8.3). Capitoline's own reason is always logged, so an operator reading
+  // `generate_image failed` sees which rule rejected the call; it also goes
+  // back to the client for the kinds the caller can fix by itself (a wrong
+  // model name, the wrong endpoint), which are never provider text.
+  const CALLER_FAULT = new Set(["bad_request", "unknown_model"]);
   const toolError = (e: unknown, tool: string, model: string | undefined) => {
     const kind = e instanceof CapitolineError ? e.kind : "internal_error";
-    log.warn({ kind, model, err: e instanceof CapitolineError ? undefined : e }, `${tool} failed`);
+    const reason = e instanceof CapitolineError && e.message !== e.kind ? e.message : undefined;
+    log.warn({ kind, model, reason, err: e instanceof CapitolineError ? undefined : e }, `${tool} failed`);
     const retry = e instanceof CapitolineError && e.retryAfterS !== undefined ? ` (retry after ${e.retryAfterS}s)` : "";
-    return { isError: true as const, content: [{ type: "text" as const, text: `Capitoline error: ${kind}${retry}` }] };
+    const detail = reason !== undefined && CALLER_FAULT.has(kind) ? `: ${reason}` : "";
+    return { isError: true as const, content: [{ type: "text" as const, text: `Capitoline error: ${kind}${detail}${retry}` }] };
   };
   const providerOf = (model: string) => core.listModels().find((m) => m.name === model)?.provider ?? "unknown";
 
@@ -81,27 +92,36 @@ function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
     description: "Generate one image from a prompt through an image model's CLI. The image comes back inline (JPEG or PNG) with its real dimensions; there is no size parameter. Use list_models for names (kind image); omit model for the first available image model.",
     inputSchema: {
       prompt: z.string().min(1).describe("What to draw"),
-      model: z.string().optional().describe("Image model name from list_models; default: the first available image model"),
+      model: z.string().min(1).optional().describe("Image model name from list_models; default: the first available image model"),
     },
     outputSchema: { model: z.string(), provider: z.string(), mime: z.string(), width: z.number(), height: z.number(), bytes: z.number() },
   }, async ({ prompt, model: requested }, extra) => {
-    // One listing per call: the default and the owner come from the same
-    // snapshot. Same rule as the HTTP route: the first image model a client
-    // would see as available, else the first declared one so a paused
-    // provider answers with its own 429 instead of "no image model".
-    const models = core.listModels();
-    const model = requested ?? (models.find((m) => m.kind === "image" && m.available) ?? models.find((m) => m.kind === "image"))?.name;
-    const provider = model ? models.find((m) => m.name === model)?.provider ?? "unknown" : "unknown";
-    const token = extra._meta?.progressToken;
-    let ticks = 0;
-    const startedAt = Date.now();
-    // The CLI says nothing useful while it draws (11-45 s), so progress is a
-    // heartbeat with the elapsed time, sent on a timer rather than per event.
-    const tick = () => extra.sendNotification({ method: "notifications/progress", params: { progressToken: token!, progress: ++ticks, message: `generating, ${Math.round((Date.now() - startedAt) / 1000)}s` } })
-      .catch((e: unknown) => log.debug({ err: e }, "progress notification failed"));
-    const timer = token !== undefined ? setInterval(() => { void tick(); }, progressIntervalMs) : undefined;
+    // Everything runs inside the try, listModels() included: it queries the
+    // usage store per provider, and an exception escaping the handler would
+    // be turned by the SDK into a tool error carrying the raw message (a
+    // database path, say) with no log line and no spec 8.3 sanitising.
+    let model: string | undefined;
+    let timer: ReturnType<typeof setInterval> | undefined;
     try {
+      // One listing per call: the default and the owner come from the same
+      // snapshot. Same rule as the HTTP route: the first image model a client
+      // would see as available, else the first declared one so a paused
+      // provider answers with its own 429 instead of "no image model".
+      const models = core.listModels();
+      model = requested ?? (models.find((m) => m.kind === "image" && m.available) ?? models.find((m) => m.kind === "image"))?.name;
       if (!model) throw new CapitolineError("bad_request", "no image model is configured: set \"model\" explicitly");
+      const provider = models.find((m) => m.name === model)?.provider ?? "unknown";
+      const token = extra._meta?.progressToken;
+      let ticks = 0;
+      const startedAt = Date.now();
+      // The CLI says nothing useful while it draws (11-45 s), so progress is a
+      // heartbeat with the elapsed time, sent on a timer rather than per event.
+      // No token, no timer: a client that did not ask gets no notification.
+      if (token !== undefined) {
+        const tick = () => extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: ++ticks, message: `generating, ${Math.round((Date.now() - startedAt) / 1000)}s` } })
+          .catch((e: unknown) => log.debug({ err: e }, "progress notification failed"));
+        timer = setInterval(() => { void tick(); }, progressIntervalMs);
+      }
       let image: Extract<ProviderEvent, { type: "image" }> | undefined;
       for await (const ev of core.generateImage({ model, prompt }, { signal: extra.signal, source: "mcp" })) {
         if (ev.type === "image") image = ev;
@@ -109,7 +129,15 @@ function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
         // text events are the agent's prose ("saved as ./image.png" and the
         // like) and never reach the client: the answer is the image or an error.
       }
-      if (!image) throw new CapitolineError("bad_output", "the provider finished without returning an image");
+      // A cancelled call ends the same way as a broken provider (no image, no
+      // error event), but it is not bad_output: Core records it as aborted and
+      // the client is no longer listening, so it must not raise a warn line
+      // with the kind an operator uses to hunt a broken collect helper. Same
+      // check as the HTTP route.
+      if (!image) {
+        if (extra.signal.aborted) return { isError: true as const, content: [{ type: "text" as const, text: "Capitoline error: cancelled" }] };
+        throw new CapitolineError("bad_output", "the provider finished without returning an image");
+      }
       const structured = { model, provider, mime: image.mime, width: image.width, height: image.height, bytes: image.bytes.length };
       return { content: [{ type: "image", data: image.bytes.toString("base64"), mimeType: image.mime }], structuredContent: structured };
     } catch (e) {

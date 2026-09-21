@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Server } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -7,6 +7,7 @@ import { createMcpHandler } from "../src/mcp/server.js";
 import { Core } from "../src/core/core.js";
 import { UsageStore } from "../src/usage/store.js";
 import type { ProviderEvent } from "../src/core/types.js";
+import pino from "pino";
 import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
 
@@ -15,17 +16,27 @@ const JPEG = Buffer.from("ffd8ffe000104a464946", "hex");
 const IMG: ProviderEvent = { type: "image", mime: "image/jpeg", bytes: JPEG, width: 1376, height: 768 };
 
 let server: Server, url: string, provider: FakeProvider, images: FakeProvider, core: Core;
+// What the MCP layer logged: a tool error is a warn line, and some of the
+// rules under test are about which line an operator ends up reading.
+let warnings: Record<string, unknown>[];
 
-beforeAll(async () => {
+// Fresh providers, Core and app per test: a test that scripts a 429 leaves the
+// provider paused for days inside Core, which no reassignment of the fake's
+// script can undo, and the next generate_image test would silently get a 429.
+beforeEach(async () => {
   provider = new FakeProvider("claude", ["claude-opus"], [{ type: "text", delta: "answer" }, { type: "done", usage: { input: 5, output: 1 } }]);
   images = new FakeProvider("antigravity", [{ name: "agy-image", kind: "image" }], []);
   images.imageScript = [{ type: "text", delta: "saved as ./image.png" }, IMG, { type: "done" }];
   core = new Core([provider, images], new UsageStore(":memory:"), { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
-  const app = createApp(core, { log: createLogger("t"), mcp: createMcpHandler(core, createLogger("t"), { progressIntervalMs: 20 }) });
+  warnings = [];
+  const mcpLog = pino({ name: "t", level: "warn" }, { write: (line: string) => { warnings.push(JSON.parse(line) as Record<string, unknown>); } });
+  const app = createApp(core, { log: createLogger("t"), mcp: createMcpHandler(core, mcpLog, { progressIntervalMs: 20 }) });
   await new Promise<void>((r) => { server = app.listen(0, () => r()); });
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
 });
-afterAll(() => new Promise<void>((r) => server.close(() => r())));
+// closeAllConnections: a test that hangs up mid-call leaves a socket the
+// server would otherwise wait on forever.
+afterEach(() => new Promise<void>((r) => { server.closeAllConnections(); server.close(() => r()); }));
 
 async function client() {
   const c = new Client({ name: "test", version: "0" });
@@ -65,8 +76,12 @@ describe("MCP", () => {
     const c = await client();
     const r = await c.callTool({ name: "ask_model", arguments: { model: "agy-image", prompt: "q" } });
     expect(r.isError).toBe(true);
-    expect((r.content as Block[])[0].text).toMatch(/bad_request/);
-    expect(images.imageCalls).toHaveLength(0);
+    // The reason, not only the kind: it is Capitoline's own text (spec 8.3
+    // covers CLI output), and it is what lets the agent pick another model.
+    expect((r.content as Block[])[0].text).toMatch(/bad_request.*generates images/);
+    // execute() is the call the kind guard must stop: imageCalls could never
+    // grow here, whether or not the guard exists.
+    expect(images.calls).toHaveLength(0);
     await c.close();
   });
 
@@ -93,34 +108,86 @@ describe("MCP", () => {
       expect(images.imageCalls.at(-1)).toEqual({ model: "agy-image", prompt: "a lighthouse" });
       await c.close();
     });
+    it("still defaults to a declared image model when no image model is available", async () => {
+      images.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 30 }];
+      const c = await client();
+      await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "agy-image" } });
+      // agy-image is now unavailable (its provider is paused). The default must
+      // still land on it, so the caller gets that provider's own 429 rather
+      // than "no image model is configured", which would be a wrong diagnosis.
+      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse" } });
+      expect(r.isError).toBe(true);
+      expect((r.content as Block[])[0].text).toMatch(/rate_limited/);
+      expect(images.imageCalls).toHaveLength(1);
+      await c.close();
+    });
     it("refuses an empty prompt", async () => {
       const c = await client();
-      const before = images.imageCalls.length;
       const r = await c.callTool({ name: "generate_image", arguments: { prompt: "" } });
       expect(r.isError).toBe(true);
-      expect(images.imageCalls).toHaveLength(before);
+      expect(images.imageCalls).toHaveLength(0);
+      await c.close();
+    });
+    it("refuses an empty model in the schema, not as a missing default", async () => {
+      const c = await client();
+      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "" } });
+      expect(r.isError).toBe(true);
+      expect((r.content as Block[])[0].text).toMatch(/model/);
+      expect((r.content as Block[])[0].text).not.toMatch(/no image model is configured/);
+      expect(images.imageCalls).toHaveLength(0);
       await c.close();
     });
     it("refuses a text model as a tool error", async () => {
       const c = await client();
-      const before = provider.calls.length;
+      // The distinctive reason, not just the kind: "provider cannot generate
+      // images" is bad_request too and would hide a missing kind check.
       const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "claude-opus" } });
       expect(r.isError).toBe(true);
-      expect((r.content as Block[])[0].text).toMatch(/bad_request/);
-      expect(provider.calls).toHaveLength(before);
+      expect((r.content as Block[])[0].text).toMatch(/bad_request.*is a text model/);
       await c.close();
+    });
+    it("reports a provider that ends without an image as bad_output", async () => {
+      images.imageScript = [{ type: "text", delta: "I could not draw that" }, { type: "done" }];
+      const c = await client();
+      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse" } });
+      expect(r.isError).toBe(true);
+      expect((r.content as Block[])[0].text).toMatch(/bad_output/);
+      await c.close();
+    });
+    it("answers a cancelled call as cancelled, not as a provider that returned no image", async () => {
+      // A cancelled generation and a broken one look the same from the loop:
+      // no image event, no error event. The script has no image at all, so a
+      // handler that ignored the signal would log bad_output here.
+      images.imageScript = [{ type: "text", delta: "drawing" }, { type: "done" }];
+      images.delayMs = 100;
+      const c = await client();
+      // The client hangs up while the CLI is still drawing (Esc in Claude
+      // Code): the transport closes and the SDK aborts the handler's signal.
+      const call = c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse" } });
+      setTimeout(() => { void c.close(); }, 50);
+      await expect(call).rejects.toThrow();
+      await new Promise((r) => setTimeout(r, 250)); // let the handler finish
+      expect(warnings).toHaveLength(0);
     });
     it("sends progress notifications while the generation runs, when the client asked for them", async () => {
       images.delayMs = 60;
-      try {
-        const c = await client();
-        const seen: number[] = [];
-        const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse" } }, undefined, { onprogress: (p) => { seen.push(p.progress); } });
-        expect(r.isError).toBeFalsy();
-        expect(seen.length).toBeGreaterThanOrEqual(2);
-        expect(seen).toEqual([...seen].sort((a, b) => a - b));
-        await c.close();
-      } finally { images.delayMs = 0; }
+      const c = await client();
+      const seen: number[] = [];
+      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse" } }, undefined, { onprogress: (p) => { seen.push(p.progress); } });
+      expect(r.isError).toBeFalsy();
+      expect(seen.length).toBeGreaterThanOrEqual(2);
+      expect(seen).toEqual([...seen].sort((a, b) => a - b));
+      await c.close();
+    });
+    it("sends no progress notification when the client did not ask for one", async () => {
+      images.delayMs = 60; // long enough for several ticks of the 20 ms timer
+      const c = await client();
+      const seen: unknown[] = [];
+      c.fallbackNotificationHandler = async (n) => { seen.push(n); };
+      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse" } });
+      expect(r.isError).toBeFalsy();
+      expect(seen).toHaveLength(0);
+      await c.close();
     });
     it("reports a rate limit as a tool error with the wait Core installed", async () => {
       images.imageScript = [{ type: "error", kind: "rate_limited", detail: "429 secret body", retryAfterS: 442_209 }];
@@ -129,8 +196,9 @@ describe("MCP", () => {
       expect(r.isError).toBe(true);
       const text = (r.content as Block[])[0].text!;
       expect(text).toMatch(/rate_limited/);
-      expect(text).toMatch(/retry after \d+s/);
-      expect(Number(/retry after (\d+)s/.exec(text)![1])).toBe(core.pauseRemainingS("antigravity"));
+      // The pause Core installed (the CLI's figure plus its minute of slack),
+      // not the raw 442_209 the provider reported.
+      expect(Number(/retry after (\d+)s/.exec(text)![1])).toBe(442_269);
       expect(text).not.toContain("secret body");
       await c.close();
     });
