@@ -30,6 +30,11 @@ describe("GET /v1/models", () => {
     expect(r.status).toBe(200);
     expect(r.body.data).toEqual([expect.objectContaining({ id: "claude-opus", object: "model", owned_by: "claude" })]);
   });
+  it("reports the kind of every model in the capitoline block", async () => {
+    const { app } = makeImages();
+    const r = await request(app).get("/v1/models");
+    expect(r.body.data.map((m: { id: string; capitoline: { kind: string } }) => [m.id, m.capitoline.kind])).toEqual([["agy-text", "text"], ["agy-image", "image"]]);
+  });
 });
 
 describe("POST /v1/chat/completions", () => {
@@ -130,6 +135,19 @@ describe("POST /v1/chat/completions", () => {
     expect(r.body.error.code).toBe(kind);
     expect(JSON.stringify(r.body)).not.toContain("secret stderr");
   });
+  it("passes an explicit retry-after from the provider into Retry-After", async () => {
+    const { app } = make([{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 120 }]);
+    const r = await request(app).post("/v1/chat/completions").send(body());
+    expect(r.status).toBe(429);
+    expect(r.headers["retry-after"]).toBe("120");
+  });
+  it("returns 400 for a chat request against an image model", async () => {
+    const { app, p } = makeImages();
+    const r = await request(app).post("/v1/chat/completions").send(body({ model: "agy-image" }));
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe("bad_request");
+    expect(p.calls).toHaveLength(0);
+  });
   it("reports a provider error after output started as an SSE error line and ends without [DONE]", async () => {
     const { app } = make([{ type: "text", delta: "par" }, { type: "error", kind: "cli_crashed", detail: "secret stderr" }]);
     const r = await request(app).post("/v1/chat/completions").send(body({ stream: true }));
@@ -158,6 +176,126 @@ describe("POST /v1/chat/completions", () => {
       await reader.read(); // first chunk: the stream is live
       ac.abort();
       await expect(reader.read()).rejects.toThrow();
+      const deadline = Date.now() + 2000;
+      while (outcomes().length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+      expect(outcomes()).toEqual(["aborted"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+// A JPEG header is enough for the fake: the route never inspects the bytes.
+const JPEG = Buffer.from("ffd8ffe000104a464946", "hex");
+const IMG: ProviderEvent = { type: "image", mime: "image/jpeg", bytes: JPEG, width: 1376, height: 768 };
+function makeImages(script: ProviderEvent[] = [IMG, { type: "done" }]) {
+  const p = new FakeProvider("antigravity", ["agy-text", { name: "agy-image", kind: "image" }], OK, 1);
+  p.imageScript = script;
+  const core = new Core([p], new UsageStore(":memory:"), { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+  return { p, core, app: createApp(core, { log: createLogger("t") }) };
+}
+
+describe("POST /v1/images/generations", () => {
+  it("returns the image as b64_json with the capitoline block", async () => {
+    const { app, p } = makeImages();
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" });
+    expect(r.status).toBe(200);
+    expect(r.body.created).toEqual(expect.any(Number));
+    expect(r.body.data).toHaveLength(1);
+    expect(Buffer.from(r.body.data[0].b64_json, "base64")).toEqual(JPEG);
+    expect(r.body.capitoline).toEqual({ provider: "antigravity", model: "agy-image", mime: "image/jpeg", width: 1376, height: 768, bytes: JPEG.length, ignored: [] });
+    expect(r.headers["x-capitoline-ignored"]).toBeUndefined();
+    expect(p.imageCalls).toEqual([{ model: "agy-image", prompt: "a lighthouse" }]);
+    expect(p.calls).toHaveLength(0);
+  });
+  it("defaults to the first image model when model is omitted", async () => {
+    const { app, p } = makeImages();
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
+    expect(r.status).toBe(200);
+    expect(r.body.capitoline.model).toBe("agy-image");
+    expect(p.imageCalls[0].model).toBe("agy-image");
+  });
+  it("returns 400 when model is omitted and no image model exists", async () => {
+    const { app } = make();
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe("bad_request");
+  });
+  it("ignores size, quality and style and says so in the header", async () => {
+    const { app } = makeImages();
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", size: "1024x1024", quality: "hd", style: "vivid" });
+    expect(r.status).toBe(200);
+    expect(r.headers["x-capitoline-ignored"].split(",").sort()).toEqual(["quality", "size", "style"]);
+    expect(r.body.capitoline.ignored.sort()).toEqual(["quality", "size", "style"]);
+    expect(r.body.capitoline.width).toBe(1376);
+  });
+  it.each([
+    [{ n: 2 }, /"n" must be 1/], [{ response_format: "url" }, /response_format/], [{ prompt: "" }, /prompt/], [{ prompt: undefined }, /prompt/],
+  ])("rejects %j with 400", async (extra, re) => {
+    const { app, p } = makeImages();
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", ...extra });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe("bad_request");
+    expect(r.body.error.message).toMatch(re);
+    expect(p.imageCalls).toHaveLength(0);
+  });
+  it.each([[{ n: 1 }], [{ response_format: "b64_json" }], [{ n: null }]])("accepts %j with 200", async (extra) => {
+    const { app } = makeImages();
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", ...extra });
+    expect(r.status).toBe(200);
+    expect(r.headers["x-capitoline-ignored"]).toBeUndefined();
+  });
+  it("returns 400 for an image request against a text model", async () => {
+    const { app, p } = makeImages();
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-text" });
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe("bad_request");
+    expect(p.imageCalls).toHaveLength(0);
+    expect(p.calls).toHaveLength(0);
+  });
+  it("returns 404 for an unknown model", async () => {
+    const { app } = makeImages();
+    expect((await request(app).post("/v1/images/generations").send({ prompt: "x", model: "nope" })).status).toBe(404);
+  });
+  it("maps rate_limited with an explicit retry-after to 429 and Retry-After", async () => {
+    const { app } = makeImages([{ type: "error", kind: "rate_limited", detail: "429 secret body", retryAfterS: 442_209 }]);
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
+    expect(r.status).toBe(429);
+    expect(r.headers["retry-after"]).toBe("442209");
+    expect(r.body.error.code).toBe("rate_limited");
+    expect(r.body.error.message).toBe("provider rate limit reached");
+    expect(r.text).not.toContain("secret body");
+  });
+  it.each([
+    ["auth_expired", 503], ["timeout", 504], ["cli_crashed", 502], ["bad_output", 502],
+  ] as const)("maps provider error %s to %d", async (kind, status) => {
+    const { app } = makeImages([{ type: "error", kind, detail: "secret stderr" }]);
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
+    expect(r.status).toBe(status);
+    expect(r.body.error.code).toBe(kind);
+    expect(r.text).not.toContain("secret stderr");
+  });
+  it("answers 502 bad_output when the provider ends without an image", async () => {
+    const { app } = makeImages([{ type: "done" }]);
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
+    expect(r.status).toBe(502);
+    expect(r.body.error.code).toBe("bad_output");
+  });
+  it("aborts the generation when the client disconnects", async () => {
+    const { app, p, core } = makeImages();
+    p.delayMs = 100;
+    const outcomes = () => (core as unknown as { usage: { db: { prepare(q: string): { all(): { outcome: string }[] } } } }).usage.db
+      .prepare("SELECT outcome FROM calls WHERE source = 'http' ORDER BY id").all().map((r) => r.outcome);
+    const server = app.listen(0);
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const ac = new AbortController();
+      const pending = fetch(`http://127.0.0.1:${port}/v1/images/generations`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: "a lighthouse" }), signal: ac.signal,
+      });
+      await new Promise((r) => setTimeout(r, 30));      // the provider is busy on the first event
+      ac.abort();
+      await expect(pending).rejects.toThrow();
       const deadline = Date.now() + 2000;
       while (outcomes().length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
       expect(outcomes()).toEqual(["aborted"]);

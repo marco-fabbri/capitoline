@@ -61,6 +61,15 @@ export function convertChatRequest(body: unknown): Converted {
   return { req: { model: b.model, messages, effort: b.reasoning_effort, attachments: attachments.length ? attachments : undefined, stream: b.stream }, ignored };
 }
 
+// What the client is told for each provider error. CLI detail stays in the log.
+export const CLIENT_MESSAGE: Record<string, string> = {
+  auth_expired: "provider authentication expired; the model is unavailable until it is renewed",
+  rate_limited: "provider rate limit reached",
+  timeout: "the model did not answer within the time limit",
+  cli_crashed: "the provider process failed",
+  bad_output: "the provider returned unreadable output",
+};
+
 export function httpStatus(e: CapitolineError | ErrorKind): { status: number; retryAfterS?: number } {
   const kind = typeof e === "string" ? e : e.kind;
   const retry = typeof e === "string" ? undefined : e.retryAfterS;

@@ -2,16 +2,8 @@ import express, { type NextFunction, type Request, type RequestHandler, type Res
 import type { Core } from "../core/core.js";
 import { CapitolineError, type Usage } from "../core/types.js";
 import type { Logger } from "../log.js";
-import { completionResponse, convertChatRequest, httpStatus, sseChunk } from "./openai.js";
-
-// What the client is told for each provider error. CLI detail stays in the log.
-const CLIENT_MESSAGE: Record<string, string> = {
-  auth_expired: "provider authentication expired; the model is unavailable until it is renewed",
-  rate_limited: "provider rate limit reached",
-  timeout: "the model did not answer within the time limit",
-  cli_crashed: "the provider process failed",
-  bad_output: "the provider returned unreadable output",
-};
+import { convertImageRequest, imageResponse, type ImageEvent } from "./images.js";
+import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, sseChunk } from "./openai.js";
 
 function beginSse(res: Response) {
   res.status(200).setHeader("Content-Type", "text/event-stream").setHeader("Cache-Control", "no-cache");
@@ -43,7 +35,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
 
   app.get("/v1/models", (_req, res) => {
     const data = core.listModels().filter((m) => m.available).map((m) => ({
-      id: m.name, object: "model", created: 0, owned_by: m.provider, capitoline: { over_budget: m.overBudget },
+      id: m.name, object: "model", created: 0, owned_by: m.provider, capitoline: { kind: m.kind, over_budget: m.overBudget },
     }));
     res.json({ object: "list", data });
   });
@@ -67,7 +59,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
             res.write(sseChunk(conv.req.model, id, { content: ev.delta }, null));
           } else text += ev.delta;
         } else if (ev.type === "done") usage = ev.usage;
-        else if (ev.type === "error") { opts.log.warn({ kind: ev.kind, detail: ev.detail.slice(-2000) }, "provider error"); throw new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind]); }
+        else if (ev.type === "error") { opts.log.warn({ kind: ev.kind, detail: ev.detail.slice(-2000) }, "provider error"); throw new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind], ev.retryAfterS); }
       }
       if (ac.signal.aborted) return; // client went away: nothing left to answer
       if (conv.req.stream) {
@@ -83,6 +75,32 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
         res.write(`data: ${JSON.stringify({ error: { message: err.message, type: "server_error", code: err.kind } })}\n\n`);
         res.end();
       } else sendError(res, e, opts.log);
+    }
+  });
+
+  // One image per request, returned inline (b64_json): there is nothing to
+  // stream, so the answer is either the whole document or a spec 8.3 error.
+  app.post("/v1/images/generations", async (req: Request, res: Response) => {
+    let conv;
+    try {
+      const defaultModel = core.listModels().find((m) => m.kind === "image")?.name;
+      conv = convertImageRequest(req.body, defaultModel);
+    } catch (e) { return sendError(res, e, opts.log); }
+    if (conv.ignored.length) res.setHeader("X-Capitoline-Ignored", conv.ignored.join(","));
+    const ac = new AbortController();
+    res.on("close", () => { if (!res.writableFinished) ac.abort(); });
+    const provider = core.listModels().find((m) => m.name === conv.req.model)?.provider ?? "unknown";
+    let image: ImageEvent | undefined;
+    try {
+      for await (const ev of core.generateImage(conv.req, { signal: ac.signal, source: "http" })) {
+        if (ev.type === "image") image = ev;
+        else if (ev.type === "error") { opts.log.warn({ kind: ev.kind, detail: ev.detail.slice(-2000) }, "provider error"); throw new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind], ev.retryAfterS); }
+      }
+      if (ac.signal.aborted) return; // client went away: nothing left to answer
+      if (!image) throw new CapitolineError("bad_output", "the provider finished without returning an image");
+      res.json(imageResponse(image, { provider, model: conv.req.model, ignored: conv.ignored }));
+    } catch (e) {
+      sendError(res, e, opts.log);
     }
   });
 
