@@ -331,7 +331,16 @@ for the CLI versions in `docs/update-clis.md`.
 
 **Keys added by an update must be copied across.** This file is a hand-made
 copy, edited in place; a `git pull` changes the repository copy and never this
-one. Four keys are new, in every one of the three provider blocks:
+one. After every pull, before restarting, see what is missing:
+
+```sh
+diff <(grep -oE '^[[:space:]]*[a-z_]+:' /etc/capitoline/capitoline.yaml | tr -d ' ' | sort -u)      <(grep -oE '^[[:space:]]*[a-z_]+:' config/capitoline.yaml | tr -d ' ' | sort -u)
+```
+
+It happened twice on 2026-09-22, each time costing a restart loop until the
+field was added. The backlog carries the proper fix: a host overlay merged
+over the repository file, so an upstream field arrives with the pull that
+carries it. Four keys are new, in every one of the three provider blocks:
 `providers.<id>.model_flag`, `effort_flag` and `effort_key` (task B1), and
 `system_prompt_flag_prefix` with them. They name the flags that used to be
 literals in the adapters, so the values to copy are the command lines the host
