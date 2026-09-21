@@ -47,10 +47,21 @@ describe("isModelScoped", () => {
     // The real Fable refusal: the CLI itself says the other models still work.
     ["You've reached your Fable limit. Switch to another model, or manage usage credits at claude.ai/settings/usage, to continue.", true],
     ["Reached your Sonnet limit for now.", true],
+    // A model name is often two or three tokens, and only this branch would be
+    // left if a future wording dropped the advice to change model.
+    ["You've reached your Claude Opus limit.", true],
+    ["You've reached your Opus 4.5 limit.", true],
     // The subscription-wide wordings, which must keep pausing the provider.
     ["Claude usage limit reached. Your limit will reset at 3pm.", false],
     ["You've hit your usage limit. Resets at 5pm", false],
     ["You've reached your plan limit.", false],
+    // The same CLI template as the Fable capture, filled with the plan's own
+    // limit: the advice to change model is there too, and taking it at face
+    // value would leave every other model of an exhausted subscription
+    // starting a real run before being paused in its turn.
+    ["You've reached your usage limit. Switch to another model, or manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue.", false],
+    ["You've reached your weekly limit. Switch to another model, or manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue.", false],
+    ["You've reached your 5-hour limit. Switch to another model, to continue.", false],
     ["429 Too Many Requests", false],
     ["", false],
   ])("%j -> %s", (text, scoped) => {

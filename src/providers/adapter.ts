@@ -24,7 +24,16 @@ export interface Adapter {
   buildImageCommand?(cfg: ProviderConfig, model: ModelSpec, req: ImageRequest): ImageCommand;
 }
 
-export interface HealthStatus { ok: boolean; kind?: ErrorKind; detail?: string; checkedAt: number }
+// The verdict of one probe. `scope` and `model` carry the same attribution the
+// error events do: a refusal the CLI blamed on the model the probe happened to
+// run says nothing about the provider, so Core pauses that model instead of
+// marking the whole provider unhealthy.
+export interface HealthStatus {
+  ok: boolean; kind?: ErrorKind; detail?: string; checkedAt: number;
+  scope?: "model";
+  /** The model the probe ran; set on a failure, so a model-scoped one can be attributed. */
+  model?: string;
+}
 
 export interface Provider {
   readonly id: string;

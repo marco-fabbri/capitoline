@@ -164,6 +164,18 @@ describe("POST /v1/chat/completions", () => {
     expect(r.status).toBe(429);
     expect(r.headers["retry-after"]).toBe("180");
   });
+  it("takes Retry-After from the model's own pause when the refusal named the model", async () => {
+    // The refusal installed a pause on the model alone, so the provider has
+    // none: only the third argument of core.pauseRemainingS(provider, model)
+    // finds it. Without it the header would fall back to the CLI's own figure
+    // (10) and the client would come back 60 s before the model is free.
+    const { app, core } = make([{ type: "error", kind: "rate_limited", detail: "reached your claude-opus limit", scope: "model", retryAfterS: 10 }]);
+    const r = await request(app).post("/v1/chat/completions").send(body());
+    expect(r.status).toBe(429);
+    expect(core.pauseRemainingS("claude")).toBeUndefined();          // the provider is untouched
+    expect(core.pauseRemainingS("claude", "claude-opus")).toBe(70);  // 10 s reported + Core's minute of slack
+    expect(r.headers["retry-after"]).toBe("70");
+  });
   it("keeps a header-unsafe unknown key out of X-Capitoline-Ignored and still answers 200", async () => {
     const { app } = make();
     const r = await request(app).post("/v1/chat/completions").send(body({ "weird\r\nX-Evil: 1": "v", max_tokens: 10 }));

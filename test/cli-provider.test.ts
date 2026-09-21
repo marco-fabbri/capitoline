@@ -134,6 +134,20 @@ describe("CliProvider", () => {
     expect(h).toMatchObject({ ok: false, kind: "timeout" });
     expect(await spy.handles[0]!.result).toMatchObject({ aborted: true, timedOut: false });
   });
+  it("health() attributes a model-scoped refusal to the model it probed", async () => {
+    // The probe runs health_model, so the attribution the adapter read out of
+    // the CLI must travel with the verdict: Core pauses that one model instead
+    // of marking the provider, which would take every other model down with it.
+    const fixture = join(process.cwd(), "test/fixtures/claude/rate-limited-model.json");
+    const h = await provider("replay", { args: ["--mode", "replay", "--file", fixture] }).health();
+    expect(h).toMatchObject({ ok: false, kind: "rate_limited", scope: "model", model: "claude-haiku" });
+    expect(base.health_model).toBe("claude-haiku");
+  });
+  it("health() leaves the scope out of a refusal the CLI did not attribute", async () => {
+    const h = await provider("crash").health();
+    expect(h).not.toHaveProperty("scope");
+    expect(h.model).toBe("claude-haiku");   // the probed model is reported either way
+  });
   it("health() fails clearly on an unknown health_model", async () => {
     const h = await provider("replay", { health_model: "nope" }).health();
     expect(h).toMatchObject({ ok: false, kind: "bad_output", detail: expect.stringContaining("nope") });

@@ -101,6 +101,14 @@ describe("claude adapter", () => {
     expect(await one({ result: "429 Too Many Requests" })).toMatchObject({ kind: "rate_limited" });
     // A provider-wide 429 keeps the provider-wide pause: no model attribution.
     expect(await one({ api_error_status: 429, result: "Claude usage limit reached. Your limit will reset at 3pm." })).not.toHaveProperty("scope");
+    // The same template carrying the plan's own limit: the advice to change
+    // model is there too, and taking it as model-scoped would leave every
+    // other model of an exhausted subscription starting a run of its own.
+    expect(await one({ api_error_status: 429, result: "You've reached your usage limit. Switch to another model, or manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue." })).not.toHaveProperty("scope");
+    // No `result` at all: the detail is the terminal reason, never `subtype`,
+    // which stays "success" on a failure and would read "provider error …
+    // detail: success" in the log.
+    expect(await one({ api_error_status: 500, terminal_reason: "api_error" })).toMatchObject({ kind: "cli_crashed", detail: "api_error" });
   });
   it("emits no rate_limit event when neither window can be parsed", async () => {
     const collect = async (info: unknown) => {

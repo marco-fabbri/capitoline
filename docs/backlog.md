@@ -16,6 +16,7 @@ not one of them but a later observation from the host, still to be confirmed.
 
 ## Providers
 
+- `src/providers/antigravity.ts`: verify on the host, on a capture where `cache_read_tokens` and `thinking_tokens` are not zero, whether the CLI's own `total_tokens` already includes them. B2 added both to the usage formula (input gains the cached tokens, output the thinking ones) because every fixture in hand has them at zero, so no capture can say which side they sit on; if the CLI counts them already, the formula counts them twice and the budget windows go from understating this provider to overstating it. Reduce it to `input_tokens`/`output_tokens` in that case. Host-only check: nothing in the repository can settle it.
 - `src/providers/codex.ts`: the one CLI flag still written in code after B1 is the `-c` that carries `system_prompt_flag` (`-c developer_instructions="<text>"`), because the configuration names the override *key* and not the flag that introduces it — either add a `config_flag` field for it or record the `-c` as accepted.
 
 ## Runner

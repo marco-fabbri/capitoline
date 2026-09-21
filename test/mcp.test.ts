@@ -218,6 +218,22 @@ describe("MCP", () => {
     });
   });
 
+  it("puts the model's own pause in the retry hint when the refusal named the model", async () => {
+    // Same rule as the HTTP layer: the pause landed on the model alone, so
+    // only core.pauseRemainingS(provider, model) sees it. Without the model
+    // the hint would be the CLI's raw 10 s and the caller would retry into a
+    // pause that still has a minute to run.
+    provider.script = [{ type: "error", kind: "rate_limited", detail: "reached your claude-opus limit", scope: "model", retryAfterS: 10 }];
+    const c = await client();
+    const r = await c.callTool({ name: "ask_model", arguments: { model: "claude-opus", prompt: "q" } });
+    expect(r.isError).toBe(true);
+    const text = (r.content as Block[])[0].text!;
+    expect(text).toMatch(/rate_limited/);
+    expect(Number(/retry after (\d+)s/.exec(text)![1])).toBe(70);
+    expect(core.pauseRemainingS("claude")).toBeUndefined();
+    await c.close();
+  });
+
   it("reports provider errors as tool errors", async () => {
     provider.script = [{ type: "error", kind: "rate_limited", detail: "429" }];
     const c = await client();

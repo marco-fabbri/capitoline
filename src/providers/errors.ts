@@ -15,18 +15,28 @@ export function classifyError(text: string): ErrorKind {
 // A refusal the CLI attributes to the model that was asked for rather than to
 // the subscription behind it. Real capture on the host, 2026-09-21: "You've
 // reached your Fable limit. Switch to another model, or manage usage credits
-// at claude.ai/settings/usage…, to continue." — sent while the same
-// subscription still answered on Opus and Sonnet. Two markers, both taken from
-// wordings the CLIs actually use: the advice to change model, which says in so
-// many words that the others still work, and a limit named after something
-// that is not the plan itself. The named words are excluded because
-// "your usage limit" and "your plan limit" are the subscription-wide
-// wordings, and reading one of those as model-scoped would leave the gateway
-// hammering a provider that is out of quota altogether.
-const MODEL_SCOPED = /\bswitch to (?:another|a different) model\b|\breached your (?!usage\b|plan\b|account\b|subscription\b|weekly\b|daily\b|five|5)[\w.-]+ limit\b/i;
+// at claude.ai/settings/usage?from=cc_cli_limit_message, to continue." — sent
+// while the same subscription still answered on Opus and Sonnet.
+//
+// Two markers, both taken from wordings the CLIs actually use: the advice to
+// change model, which says in so many words that the others still work, and a
+// limit named after something that is not the plan itself (model names run to
+// three tokens: "Claude Opus", "Opus 4.5").
+//
+// The subscription-wide wordings are a **veto on the whole answer**, not an
+// exception carved out of one marker. That sentence is a single CLI template
+// with the limit's name filled in, so an exhausted subscription produces
+// "You've reached your usage limit. Switch to another model, …" — the same
+// advice to change model, about a subscription that has nothing left. Reading
+// that as model-scoped would pause the one model asked for and leave every
+// other model of the provider starting a real CLI run (up to the timeout)
+// before being paused in its turn, which is the hammering the model-scoped
+// pause exists to avoid.
+const PLAN_SCOPED = /\b(?:reached|hit) your (?:usage|plan|account|subscription|weekly|daily|monthly|five|5)\b|\busage limit reached\b/i;
+const MODEL_SCOPED = /\bswitch to (?:another|a different) model\b|\breached your [\w.-]+(?: [\w.-]+){0,2} limit\b/i;
 
 export function isModelScoped(text: string): boolean {
-  return MODEL_SCOPED.test(text);
+  return !PLAN_SCOPED.test(text) && MODEL_SCOPED.test(text);
 }
 
 // Antigravity's image quota exhaustion is silent: the run ends SUCCESS, and the

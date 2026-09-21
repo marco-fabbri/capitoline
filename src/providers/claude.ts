@@ -64,7 +64,10 @@ export const claudeAdapter: Adapter = {
         // `subtype` stays "success" on a refusal (both real captures): only
         // `is_error` says whether the run failed.
         if (o.is_error) {
-          const detail = String(o.result ?? o.subtype ?? "unknown error");
+          // Not `subtype`: it stays "success" on a failure (line above), so it
+          // is known to say nothing. `terminal_reason` is what the real
+          // capture carries alongside the prose ("api_error").
+          const detail = String(o.result ?? o.terminal_reason ?? "unknown error");
           const kind = fromStatus(o.api_error_status) ?? classifyError(detail);
           // A per-model limit is not a provider-wide one: the subscription
           // kept answering on the other models while Fable was refused.

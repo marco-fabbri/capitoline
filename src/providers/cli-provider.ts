@@ -278,7 +278,12 @@ export class CliProvider implements Provider {
       // event and winds the CLI down with its grace period.
       for await (const ev of this.execute({ model: model.name, stream: false, effort: "low", messages: [{ role: "user", text: "Reply with the single word: ok" }] }, model, ac.signal)) {
         if (ev.type === "done") status = { ok: true, checkedAt: Date.now() };
-        else if (ev.type === "error") status = { ok: false, kind: ev.kind, detail: ev.detail, checkedAt: Date.now() };
+        // The attribution travels with the verdict: the probe runs one model
+        // (health_model), so a refusal the CLI blamed on that model must pause
+        // that model alone, exactly as it would coming from a client request.
+        // Marking the provider here would take down every other model of it
+        // until this one's limit expires, and the loop would renew it.
+        else if (ev.type === "error") status = { ok: false, kind: ev.kind, detail: ev.detail, model: model.name, ...(ev.scope ? { scope: ev.scope } : {}), checkedAt: Date.now() };
       }
     } finally {
       clearTimeout(timer);

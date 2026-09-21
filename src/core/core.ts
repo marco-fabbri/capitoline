@@ -232,6 +232,17 @@ export class Core {
   private onError(id: string, s: State, modelName: string, ev: Extract<ProviderEvent, { type: "error" }>, modelKind: ModelKind = "text") {
     const { kind, retryAfterS } = ev;
     if (kind === "rate_limited") {
+      // Only an image run says anything about the image quota, and only the
+      // reset it reported: the exhausted window is the one the client asks
+      // about, so the bare instant is kept without the pause's slack. Like the
+      // pause, it only ever grows while it stands, so a short-window 429 from a
+      // request already in flight cannot hide a multi-day exhaustion. It is
+      // recorded before the scope branch below: the reset is a fact about the
+      // provider's quota, not about which pause this refusal installs, and
+      // /health and /v1/models report it either way.
+      if (modelKind === "image" && retryAfterS !== undefined) {
+        s.imageResetAt = Math.max(s.imageResetAt ?? 0, this.now() + Math.max(0, retryAfterS) * 1000);
+      }
       // A refusal the CLI attributed to the model that was asked for: pausing
       // the provider would take down the models that still answer, which is
       // what the Fable capture of 2026-09-21 showed happening.
@@ -239,14 +250,6 @@ export class Core {
       const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** s.strikes) * 60_000;
       s.strikes++;
       s.pausedUntil = Math.max(s.pausedUntil ?? 0, this.now() + waitMs);
-      // Only an image run says anything about the image quota, and only the
-      // reset it reported: the exhausted window is the one the client asks
-      // about, so the bare instant is kept without the pause's slack. Like the
-      // pause, it only ever grows while it stands, so a short-window 429 from a
-      // request already in flight cannot hide a multi-day exhaustion.
-      if (modelKind === "image" && retryAfterS !== undefined) {
-        s.imageResetAt = Math.max(s.imageResetAt ?? 0, this.now() + Math.max(0, retryAfterS) * 1000);
-      }
       this.opts.log.warn({ provider: id, seconds: Math.round((s.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: s.strikes }, "provider paused after rate limit");
     } else if (kind === "auth_expired") {
       s.health = { ok: false, kind, detail: "auth_expired reported by a request", checkedAt: this.now() };
@@ -295,10 +298,21 @@ export class Core {
     if (providerId && !one) throw new CapitolineError("unknown_model", `unknown provider "${providerId}"`);
     const targets = one ? [one] : [...this.states.values()];
     await Promise.all(targets.map(async (s) => {
-      try { s.health = await s.provider.health(); }
-      catch (e) { s.health = { ok: false, kind: "cli_crashed", detail: String(e), checkedAt: this.now() }; }
-      this.usage.record({ provider: s.provider.id, model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: s.health.ok ? "ok" : (s.health.kind ?? "cli_crashed"), source: "health", ts: this.now() });
-      this.opts.log.info({ provider: s.provider.id, ok: s.health.ok, kind: s.health.kind, detail: s.health.detail }, "health check");
+      let status: HealthStatus;
+      try { status = await s.provider.health(); }
+      catch (e) { status = { ok: false, kind: "cli_crashed", detail: String(e), checkedAt: this.now() }; }
+      // A rate limit the CLI attributed to the probe's own model is about that
+      // model, not about the provider: the very same answer coming from a
+      // client request pauses the model alone (onError). Marking the provider
+      // here would make every one of its models unavailable — 404 in
+      // /v1/models, model_unavailable on a request — until that single model's
+      // limit expires, and the loop would renew the verdict every round. So the
+      // model is paused and the provider keeps the health it had.
+      const modelOnly = !status.ok && status.kind === "rate_limited" && status.scope === "model" && status.model !== undefined;
+      if (modelOnly) this.pauseModel(s.provider.id, status.model!, undefined);
+      else s.health = status;
+      this.usage.record({ provider: s.provider.id, model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: status.ok ? "ok" : (status.kind ?? "cli_crashed"), source: "health", ts: this.now() });
+      this.opts.log.info({ provider: s.provider.id, ok: status.ok, kind: status.kind, detail: status.detail, ...(modelOnly ? { model: status.model, scope: "model" } : {}) }, "health check");
     }));
   }
 

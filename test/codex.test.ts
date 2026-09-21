@@ -51,12 +51,30 @@ describe("codex adapter", () => {
     expect(await events(l())).toEqual([{ type: "error", kind: "rate_limited", detail: "429 Too Many Requests" }]);
     async function* empty() { yield JSON.stringify({ type: "turn.failed", error: {} }); }
     expect(await events(empty())).toEqual([{ type: "error", kind: "cli_crashed", detail: "codex error" }]);
+    // An empty string is no more of a message than a missing one: the two
+    // shapes must not produce different details.
+    async function* blank() { yield JSON.stringify({ type: "turn.failed", error: "" }); }
+    expect(await events(blank())).toEqual([{ type: "error", kind: "cli_crashed", detail: "codex error" }]);
   });
   it("maps the real expired-credential capture to auth_expired", async () => {
     const ev = await events(linesOf("test/fixtures/codex/auth-expired.jsonl"));
     expect(ev).toHaveLength(1);                      // the first error ends the stream
     expect(ev[0]).toMatchObject({ type: "error", kind: "auth_expired" });
     expect((ev[0] as any).detail).toContain("401 Unauthorized");
+  });
+  it("replaces a raw DEL in the developer instructions", () => {
+    // JSON.stringify escapes every control character below U+0020 but emits
+    // U+007F raw, and TOML forbids it in a basic string just the same: the
+    // override would not parse and the run would die with the client's own
+    // text as the cause.
+    const c = codexAdapter.buildCommand(cfg, astra, {
+      model: "codex-gpt-6-astra", stream: false,
+      messages: [{ role: "system", text: "lone \u007F end" }, { role: "user", text: "q" }],
+    });
+    const arg = c.args.find((a) => a.startsWith("developer_instructions="))!;
+    expect(arg).not.toContain("\u007F");
+    expect(Buffer.from(arg, "utf8").includes(0x7f)).toBe(false);
+    expect(arg).toBe('developer_instructions="lone � end"');
   });
   it("replaces unpaired surrogates in the developer instructions", () => {
     // Client-controlled text can hold a lone surrogate; JSON.stringify escapes

@@ -4,12 +4,17 @@ import type { InternalRequest, ProviderEvent } from "../core/types.js";
 import { effortArgs, effortValue, jsonLines, type Adapter, type Command, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
-// A surrogate with no partner on the other side, in either direction.
-const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+// What a TOML basic string cannot carry and JSON.stringify does not fix for
+// us: a surrogate with no partner on the other side (in either direction),
+// which stringify escapes verbatim as \uD800 — no Unicode scalar, so TOML
+// rejects it — and U+007F (DEL), which stringify passes through raw although
+// TOML forbids it exactly like the control characters below U+0020 that
+// stringify does escape. Everything else a client can send is already safe.
+const TOML_UNSAFE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|\u007F/g;
 
 /** A TOML basic string for `-c key=<value>`, safe for any client text. */
 function tomlString(s: string): string {
-  return JSON.stringify(s.replace(LONE_SURROGATE, "�"));
+  return JSON.stringify(s.replace(TOML_UNSAFE, "�"));
 }
 
 // What the CLI said, from an event whose `error` is an object with a message,
@@ -19,7 +24,10 @@ function tomlString(s: string): string {
 // 502 as a crash instead of 429 with a pause.
 function errorDetail(o: Record<string, unknown>): string {
   const err = o.error ?? o;
-  if (typeof err === "string") return err;
+  // Same guard as the object branch below: an empty string is no more of a
+  // message than a missing one, and it would reach the log and classifyError
+  // as "".
+  if (typeof err === "string") return err.length ? err : "codex error";
   const message = (err as { message?: unknown }).message;
   return typeof message === "string" && message.length ? message : "codex error";
 }
@@ -32,11 +40,10 @@ export const codexAdapter: Adapter = {
     let prompt = flatten(rest);
     if (system) {
       // JSON string escapes are a subset of TOML basic-string escapes, with
-      // one exception: an unpaired surrogate, which JSON.stringify emits as
-      // \uD800 (well-formed stringify, ES2019) and which TOML rejects, since
-      // it is no Unicode scalar. A client can send one — the system prompt is
-      // its text — and the whole run would then die on an unparsable override
-      // instead of answering, so each unpaired half is replaced first. The
+      // two exceptions, both of which a client can send (the system prompt is
+      // its text) and either of which would kill the whole run on an
+      // unparsable override instead of answering: an unpaired surrogate and a
+      // raw DEL. tomlString replaces both before quoting. The
       // "-c" here is the CLI's override flag for a key that the configuration
       // names (system_prompt_flag), not a model or effort flag.
       if (cfg.system_prompt_flag) args.push("-c", `${cfg.system_prompt_flag}=${tomlString(system)}`);

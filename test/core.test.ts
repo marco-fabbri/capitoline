@@ -192,6 +192,32 @@ describe("Core", () => {
     expect(state.health).not.toHaveProperty("detail");
     expect(JSON.stringify(core.providerStates())).not.toContain("secret");
   });
+  it("pauses only the health model when the probe is refused for that model alone", async () => {
+    // The probe runs one model (health_model). The very same CLI answer pauses
+    // that model alone when it comes from a client request, so it must not
+    // take the provider down when it comes from the probe: the other models
+    // would go 404 in /v1/models until this one's limit expires, and the loop
+    // would renew the verdict every round.
+    let t = 1_000_000;
+    const { core, a } = make({ now: () => t });
+    a.healthResult = { ok: false, kind: "rate_limited", detail: "reached your a-1 limit", scope: "model", model: "a-1", checkedAt: 0 };
+    await core.checkHealth("a");
+    expect(core.providerStates().find((p) => p.id === "a")).toMatchObject({ health: null, pausedUntil: null });
+    expect(core.listModels().map((m) => [m.name, m.available, m.reason])).toEqual([
+      ["a-1", false, "rate_limited"], ["a-2", true, undefined], ["b-1", true, undefined],
+    ]);
+    expect(await drain(core.execute(req("a-2"), { source: "http" }))).toEqual(OK);
+    await expect(drain(core.execute(req("a-1"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited" });
+    t += 61_000;                                          // the model's own pause runs out like any other
+    a.healthResult = { ok: true, checkedAt: 0 };
+    expect(core.listModels().find((m) => m.name === "a-1")!.available).toBe(true);
+  });
+  it("still marks the provider when a rate limit carries no model attribution", async () => {
+    const { core, a } = make();
+    a.healthResult = { ok: false, kind: "rate_limited", detail: "usage limit reached", checkedAt: 0 };
+    await core.checkHealth("a");
+    expect(core.listModels().filter((m) => m.provider === "a").map((m) => m.available)).toEqual([false, false]);
+  });
   it("rejects a health check for an unknown provider", async () => {
     const { core } = make();
     await expect(core.checkHealth("zzz")).rejects.toMatchObject({ kind: "unknown_model" });
