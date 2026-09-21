@@ -185,6 +185,29 @@ describe("Core", () => {
     expect(core.providerStates().find((p) => p.id === "b")).toMatchObject({ pausedUntil: t + 60_000, strikes: 0 });
     await expect(drain(core.execute(req("b-1"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited" });
   });
+  // The twin of the test above, in model scope: the danger is the same one,
+  // and since the pause is now on disk a lifted one is not repaired by the
+  // next restart either.
+  it("does not lift an active model pause when an in-flight request completes", async () => {
+    const t = 1_000_000;
+    const usage = new UsageStore(":memory:");
+    const { core, b } = make({ now: () => t, usage });
+    b.delayMs = 20;
+    b.script = () => (b.calls.length === 1
+      ? [{ type: "error", kind: "rate_limited", detail: "reached your b-1 limit", scope: "model", retryAfterS: 3600 }]
+      : OK);
+    const limited = drain(core.execute(req("b-1"), { source: "http" }));
+    await new Promise((r) => setTimeout(r, 5));
+    const fine = drain(core.execute(req("b-1"), { source: "http" }));   // concurrency 2: runs alongside
+    await limited;
+    expect(await fine).toEqual(OK);                       // done arrives after the model pause was installed
+    expect(core.pauseRemainingS("b", "b-1")).toBe(3660);
+    // The row stands with it, and carries the strikes the success zeroed.
+    expect(usage.pauses(t)).toEqual([{ provider: "b", model: "b-1", until: t + 3_660_000, strikes: 0 }]);
+    await expect(drain(core.execute(req("b-1"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited" });
+    usage.close();
+  });
+
   it("restores a provider pause and its strikes over a restart on the same store", async () => {
     let t = 1_000_000;
     const usage = new UsageStore(":memory:");
@@ -286,6 +309,49 @@ describe("Core", () => {
     t += 61_000;                                          // the model's own pause runs out like any other
     a.healthResult = { ok: true, checkedAt: 0 };
     expect(core.listModels().find((m) => m.name === "a-1")!.available).toBe(true);
+  });
+  // A probe is a real call, so a pause is as binding on it as on a client
+  // request. This is what makes restorePauses() before the first check
+  // (main.ts) worth the ordering: without the skip the startup spends the
+  // refusal all over again, and every hourly round after it.
+  it("skips the probe of a paused provider and checks again once the pause ends", async () => {
+    let t = 1_000_000;
+    const { core, a } = make({ now: () => t });
+    a.script = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 3600 }];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    await core.checkHealth("a");
+    expect(a.healthCalls).toBe(0);
+    // The health on record is untouched: the pause alone is what makes the
+    // models unavailable, and a verdict nobody took must not be invented.
+    expect(core.providerStates().find((p) => p.id === "a")!.health).toBeNull();
+    t += 3_661_000;
+    await core.checkHealth("a");
+    expect(a.healthCalls).toBe(1);
+    expect(core.providerStates().find((p) => p.id === "a")!.health).toMatchObject({ ok: true });
+  });
+  it("skips the probe when the model it runs is paused, and probes the other providers", async () => {
+    let t = 1_000_000;
+    const { core, a, b } = make({ now: () => t });
+    a.healthModel = "a-1";
+    a.script = [{ type: "error", kind: "rate_limited", detail: "reached your a-1 limit", scope: "model" }];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    await core.checkHealth();
+    expect(a.healthCalls).toBe(0);
+    expect(b.healthCalls).toBe(1);                        // one provider's pause stops one provider's probe
+    t += 61_000;
+    await core.checkHealth("a");
+    expect(a.healthCalls).toBe(1);
+  });
+  it("still probes when the paused model is not the one the probe runs", async () => {
+    // The probe says something about the models that still answer, and a
+    // provider whose health went stale would take them all down with it.
+    const t = 1_000_000;
+    const { core, a } = make({ now: () => t });
+    a.healthModel = "a-2";
+    a.script = [{ type: "error", kind: "rate_limited", detail: "reached your a-1 limit", scope: "model" }];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    await core.checkHealth("a");
+    expect(a.healthCalls).toBe(1);
   });
   it("still marks the provider when a rate limit carries no model attribution", async () => {
     const { core, a } = make();

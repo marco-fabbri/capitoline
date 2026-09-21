@@ -232,16 +232,23 @@ export class Core {
 
   // A model that answered: its strikes go back to zero and its pause goes with
   // them, in memory and in the store alike, so nothing stale is restored at the
-  // next start. The provider's pause itself is not lifted — with concurrency
-  // above one a request that started before the pause lands still completes,
-  // and it must not open a window a rate limit closed — so while one stands the
-  // row is rewritten with the zeroed strikes instead of being dropped.
+  // next start. Neither pause is lifted while it still stands — with
+  // concurrency above one a request that started before the refusal landed
+  // still completes, and it must not open a window a rate limit closed — so
+  // the row is rewritten with the zeroed strikes instead of being dropped, for
+  // the model exactly as for the provider.
+  //
+  // Nothing is written when there is no pause to clear: this runs on every
+  // successful request, and an unconditional pair of DELETEs would open a write
+  // transaction on the WAL database for each one of them.
   private onSuccess(id: string, s: State, modelName: string) {
     s.strikes = 0;
     if (this.isPaused(s)) this.usage.setPause(id, null, s.pausedUntil!, 0, this.now());
-    else this.usage.clearPause(id, null);
-    this.modelPauses.delete(modelName);
-    this.usage.clearPause(id, modelName);
+    else if (s.pausedUntil !== null) { s.pausedUntil = null; this.usage.clearPause(id, null); }
+    const own = this.modelPauses.get(modelName);
+    if (own === undefined) return;
+    if (this.modelRemainingS(modelName) !== undefined) { own.strikes = 0; this.usage.setPause(id, modelName, own.pausedUntil, 0, this.now()); }
+    else { this.modelPauses.delete(modelName); this.usage.clearPause(id, modelName); }
   }
 
   // An explicit retry-after (the quota reset the CLI reported) replaces the
@@ -312,10 +319,19 @@ export class Core {
    * Strikes come back with the pause, so the backoff carries on doubling
    * instead of restarting at one minute after a bounce. A row naming a provider
    * or a model the configuration no longer declares is left alone rather than
-   * restored: nothing can ask for it, and the store drops it once it expires.
+   * restored: nothing can ask for it, and the prune below drops it once it
+   * expires.
+   *
+   * The collection is here, once per start, and not inside the store's read:
+   * a delete that runs on a clock nobody checked is how a five-day pause
+   * disappears without a line anywhere after an NTP step or a restored
+   * snapshot. Logged, so the journal says what went.
    */
   restorePauses(): void {
-    for (const row of this.usage.pauses(this.now())) {
+    const rows = this.usage.pauses(this.now());
+    const removed = this.usage.prunePauses(this.now());
+    if (removed > 0) this.opts.log.info({ removed }, "expired pauses pruned");
+    for (const row of rows) {
       if (row.model === null) {
         const s = this.states.get(row.provider);
         if (!s) continue;
@@ -351,6 +367,26 @@ export class Core {
     if (providerId && !one) throw new CapitolineError("unknown_model", `unknown provider "${providerId}"`);
     const targets = one ? [one] : [...this.states.values()];
     await Promise.all(targets.map(async (s) => {
+      // A probe is a real call on a real CLI. While a pause stands it would
+      // spend the refusal all over again and learn nothing the pause does not
+      // already say — and that call is exactly what restorePauses() before the
+      // first check (main.ts) exists to save. The health already on record is
+      // kept: isPaused() alone makes the models unavailable, and the next
+      // round after the pause expires takes a fresh verdict.
+      if (this.isPaused(s)) {
+        this.opts.log.info({ provider: s.provider.id, seconds: this.remainingS(s) }, "health check skipped: provider paused");
+        return;
+      }
+      // The probe runs one model, the configured health_model, so a pause
+      // naming that model is a pause on the probe itself. A pause on any other
+      // model of the provider is not: the probe still says something about the
+      // ones that answer.
+      const probed = s.provider.healthModel;
+      const modelPaused = probed === undefined ? undefined : this.modelRemainingS(probed);
+      if (modelPaused !== undefined) {
+        this.opts.log.info({ provider: s.provider.id, model: probed, seconds: modelPaused }, "health check skipped: health model paused");
+        return;
+      }
       let status: HealthStatus;
       try { status = await s.provider.health(); }
       catch (e) { status = { ok: false, kind: "cli_crashed", detail: String(e), checkedAt: this.now() }; }

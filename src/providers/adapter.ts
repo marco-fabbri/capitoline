@@ -38,6 +38,13 @@ export interface HealthStatus {
 export interface Provider {
   readonly id: string;
   readonly concurrencyLimit: number;
+  /**
+   * The single model health() probes, when the provider runs one. Core reads
+   * it to skip a probe whose model is already paused: without it the gateway
+   * spends a call at every startup and every hourly round to rediscover a
+   * refusal it has written down.
+   */
+  readonly healthModel?: string;
   models(): ModelSpec[];
   execute(req: InternalRequest, model: ModelSpec, signal?: AbortSignal): AsyncIterable<ProviderEvent>;
   /** Present only for providers with an image-capable adapter; yields `image` then `done`, or `error`. */

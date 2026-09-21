@@ -64,6 +64,14 @@ export class UsageStore {
       CREATE TABLE IF NOT EXISTS pauses (
         provider TEXT NOT NULL, model TEXT, until INTEGER NOT NULL, strikes INTEGER NOT NULL,
         updated_at INTEGER NOT NULL, PRIMARY KEY (provider, model));
+      -- One row per scope, enforced rather than merely respected. The PRIMARY
+      -- KEY above cannot do it: sqlite admits NULLs inside the primary key of
+      -- a rowid table and holds two of them distinct, so nothing would stop a
+      -- second provider-wide row from being inserted, and the restore would
+      -- then pick whichever came first. Folding the NULL to '' gives the
+      -- scope a value the index can compare, and gives setPause() a conflict
+      -- target so one atomic upsert replaces the delete-then-insert pair.
+      CREATE UNIQUE INDEX IF NOT EXISTS pauses_scope ON pauses(provider, ifnull(model, ''));
     `);
     // A database written before image models existed has no `kind` column, and
     // CREATE TABLE IF NOT EXISTS leaves it alone: add it here, with the same
@@ -89,14 +97,17 @@ export class UsageStore {
       // host), so they would bury the breakdown under one huge null row.
       callers: this.db.prepare(`SELECT caller, COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o
         FROM calls WHERE ts > ? AND source <> 'health' GROUP BY caller ORDER BY calls DESC, caller`),
-      // Delete-then-insert rather than an upsert, and `model IS ?` rather than
-      // `model = ?`: sqlite admits NULLs inside a PRIMARY KEY of a rowid table
-      // and holds two of them distinct, so ON CONFLICT(provider, model) never
-      // fires for a provider-wide pause — every refusal would add a row, and
-      // the oldest would be the one restored at the next start. `IS` is the
-      // one comparison that matches a NULL, so the same pair of statements
-      // serves both scopes.
-      setPause: this.db.prepare(`INSERT INTO pauses (provider, model, until, strikes, updated_at) VALUES (?, ?, ?, ?, ?)`),
+      // One statement, so the row is never absent between two of them: a
+      // delete followed by an insert is two transactions in WAL, and a SIGKILL
+      // in the gap (systemd Restart=always, an OOM kill) would lose a five-day
+      // pause — the very state this table exists to keep. The conflict target
+      // is the expression the unique index above builds, not (provider,
+      // model), because ON CONFLICT(provider, model) never fires for a
+      // provider-wide pause: its model is NULL and no two NULLs conflict.
+      // `model IS ?` in the delete below for the same reason: `IS` is the one
+      // comparison that matches a NULL, so it serves both scopes.
+      setPause: this.db.prepare(`INSERT INTO pauses (provider, model, until, strikes, updated_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(provider, ifnull(model, '')) DO UPDATE SET until = excluded.until, strikes = excluded.strikes, updated_at = excluded.updated_at`),
       clearPause: this.db.prepare(`DELETE FROM pauses WHERE provider = ? AND model IS ?`),
       prunePauses: this.db.prepare(`DELETE FROM pauses WHERE until <= ?`),
       pauses: this.db.prepare(`SELECT provider, model, until, strikes FROM pauses WHERE until > ? ORDER BY provider, model`),
@@ -145,19 +156,25 @@ export class UsageStore {
   // model. It replaces whatever stood for that scope: the caller has already
   // decided the pause only grows, so what arrives here is the state to keep.
   setPause(provider: string, model: string | null, until: number, strikes: number, now = Date.now()): void {
-    this.stmts.clearPause.run(provider, model);
     this.stmts.setPause.run(provider, model, until, strikes, now);
   }
   clearPause(provider: string, model: string | null): void {
     this.stmts.clearPause.run(provider, model);
   }
-  // The pauses still standing. The expired ones are deleted on the way out
-  // rather than returned and ignored: they are read once per start, and a row
-  // nothing will ever consult again is the only garbage this table collects.
+  /** The pauses still standing at `now`. A read, and only a read. */
   pauses(now = Date.now()): PauseRow[] {
-    this.stmts.prunePauses.run(now);
     const rows = this.stmts.pauses.all(now) as { provider: string; model: string | null; until: number; strikes: number }[];
     return rows.map((r) => ({ provider: r.provider, model: r.model, until: Number(r.until), strikes: Number(r.strikes) }));
+  }
+  /**
+   * Drops the rows that expired before `now` and says how many went, so the
+   * caller can log it. Kept out of pauses(): a reader that deletes destroys a
+   * five-day pause silently when the clock it is given is wrong (a restored
+   * VM snapshot, an RTC off, an NTP step before time-sync.target), and the
+   * only trace of the collection would be the row's absence.
+   */
+  prunePauses(now = Date.now()): number {
+    return Number(this.stmts.prunePauses.run(now).changes);
   }
 
   // SIGTERM followed by SIGINT closes the store twice, and node:sqlite throws

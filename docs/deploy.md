@@ -419,7 +419,10 @@ there are two rolling windows and the longer one resets in days, see
 cat > /etc/systemd/system/capitoline.service <<'UNIT'
 [Unit]
 Description=Capitoline AI gateway
-After=network-online.target
+# time-sync as well as the network: the persisted pauses are absolute
+# instants, and a service that starts while the clock is still the RTC's
+# guess would read a five-day pause as expired and collect it.
+After=network-online.target time-sync.target
 [Service]
 User=capitoline
 Group=capitoline

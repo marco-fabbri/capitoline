@@ -156,8 +156,14 @@ describe("start()", () => {
     seed.setPause("claude", "claude-fable", Date.now() + 5 * 24 * 3600_000, 1);
     seed.close();
     const p = new FakeProvider("claude", ["claude-opus", "claude-fable"], OK);
+    // The probe runs the paused model itself, which is the case the ordering is
+    // for: the refusal is on record, so the check must not go and collect it
+    // again. healthCalls is what makes the order observable — the listing below
+    // is the same whether restorePauses() ran before or after checkHealth().
+    p.healthModel = "claude-fable";
     const app = await start(path, { port: 0, providers: [p] });
     try {
+      expect(p.healthCalls).toBe(0);
       const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
       expect(((await r.json()) as { data: { id: string }[] }).data.map((m) => m.id)).toEqual(["claude-opus"]);
     } finally { await app.close(); }

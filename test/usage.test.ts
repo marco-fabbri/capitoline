@@ -252,14 +252,22 @@ describe("UsageStore", () => {
     s.close();
   });
 
-  it("forgets an expired pause instead of returning it", () => {
+  it("leaves an expired pause out of the answer and collects it only when asked", () => {
     const s = new UsageStore(":memory:");
     const now = 1_000_000_000_000;
     s.setPause("a", null, now - 1, 4, now - 60_000);
     s.setPause("a", "a-1", now + 1000, 1, now);
     expect(s.pauses(now)).toEqual([{ provider: "a", model: "a-1", until: now + 1000, strikes: 1 }]);
-    // Dropped from the table, not merely filtered out of the answer: a reading
-    // taken from before it expired no longer sees it either.
+    // The read destroys nothing: the clock comes from the caller, and one that
+    // jumped ahead (a restored snapshot, an NTP step at boot) would otherwise
+    // wipe a five-day pause on its way past it, with no trace anywhere.
+    expect(s.pauses(now - 120_000)).toEqual([
+      { provider: "a", model: null, until: now - 1, strikes: 4 },
+      { provider: "a", model: "a-1", until: now + 1000, strikes: 1 },
+    ]);
+    // Collecting them is the separate step, and it says how many it took.
+    expect(s.prunePauses(now)).toBe(1);
+    expect(s.prunePauses(now)).toBe(0);
     expect(s.pauses(now - 120_000)).toEqual([{ provider: "a", model: "a-1", until: now + 1000, strikes: 1 }]);
     s.close();
   });
@@ -300,6 +308,7 @@ describe("UsageStore", () => {
       s.callers(H5, now + 1);
       s.setPause("claude", null, now + 60_000, 1, now);
       s.pauses(now);
+      s.prunePauses(now);
       s.clearPause("claude", null);
       expect(spy).not.toHaveBeenCalled();
     } finally {

@@ -9,6 +9,10 @@ export class FakeProvider implements Provider {
   imageCalls: ImageRequest[] = [];
   imageScript: ProviderEvent[] = [];
   healthResult: HealthStatus = { ok: true, checkedAt: 0 };
+  /** How many times the probe actually ran: 0 is how a skipped check is observed. */
+  healthCalls = 0;
+  /** The model the probe runs, as a CLI provider reads it from health_model. */
+  healthModel?: string;
   delayMs = 0;
   // Present only when the fake declares an image model, like a real provider
   // whose adapter cannot generate images: Core's "provider without generateImage"
@@ -37,5 +41,5 @@ export class FakeProvider implements Provider {
       yield ev;
     }
   }
-  async health(): Promise<HealthStatus> { return { ...this.healthResult, checkedAt: Date.now() }; }
+  async health(): Promise<HealthStatus> { this.healthCalls++; return { ...this.healthResult, checkedAt: Date.now() }; }
 }

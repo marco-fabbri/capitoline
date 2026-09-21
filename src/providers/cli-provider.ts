@@ -48,6 +48,8 @@ interface Run {
 export class CliProvider implements Provider {
   readonly id: string;
   readonly concurrencyLimit: number;
+  /** The model health() runs, so Core can skip the probe while that model is paused. */
+  readonly healthModel: string;
   private readonly opts: Required<CliProviderOptions>;
   constructor(
     id: string,
@@ -59,6 +61,7 @@ export class CliProvider implements Provider {
   ) {
     this.id = id;
     this.concurrencyLimit = cfg.concurrency;
+    this.healthModel = cfg.health_model;
     this.opts = { ...DEFAULTS, ...opts };
   }
 
