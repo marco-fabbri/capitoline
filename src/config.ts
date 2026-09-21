@@ -46,16 +46,20 @@ const ProviderSchema = z.object({
   effort: z.record(EffortSchema, z.string().min(1)),
   args: z.array(z.string()),
   // The flag that names the model to the CLI: `<model_flag> <cli_model>`.
-  // Two of the three CLIs use --model, so that is the default; Codex's -m is
-  // written in the file. A renamed flag is then a configuration change.
-  model_flag: z.string().min(1).default("--model"),
+  // Required, with no default on purpose: a configuration file written before
+  // these keys existed — the hand-edited copy in /etc on the host — would
+  // otherwise inherit a default and silently change the command line the CLI
+  // receives. Without a default it fails `npm run check-config`, which the
+  // runbook requires before every restart, and says which key is missing.
+  model_flag: z.string().min(1),
   // The flag that carries the effort, or null when the CLI has none
-  // (Antigravity encodes it in the model id through effort_suffix).
-  effort_flag: z.string().min(1).nullable().default(null),
+  // (Antigravity encodes it in the model id through effort_suffix). Null is a
+  // declared value here, never an omitted key.
+  effort_flag: z.string().min(1).nullable(),
   // When set, the effort argument is `<effort_key>="<value>"` instead of the
   // bare value: Codex takes it as a configuration override, -c
   // model_reasoning_effort="high", not as a flag of its own.
-  effort_key: z.string().min(1).nullable().default(null),
+  effort_key: z.string().min(1).nullable(),
   system_prompt_flag: z.string().nullable(),
   prompt_via: z.literal("stdin"),
   image: ImageSchema,

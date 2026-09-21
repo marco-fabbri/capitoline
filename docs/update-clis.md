@@ -56,7 +56,9 @@ On the host, as root:
      /usr/local/bin/capitoline-collect-image`, `docs/deploy.md` §7.1 — the
      installed copy is a snapshot of the clone, not a link, so without this
      a change to the helper has no effect), copy any config change to
-     `/etc/capitoline/capitoline.yaml`, `systemctl restart capitoline`; then
+     `/etc/capitoline/capitoline.yaml` — `diff` it against the repository
+     copy, keys added by an update are not optional (`docs/deploy.md` §7) —
+     `systemctl restart capitoline`; then
      run the smoke test again.
 
 4. Update the table above with the new version, the date and what changed.

@@ -328,6 +328,24 @@ Everything else (flags, model aliases, effort mapping) stays as in the
 repository copy; it is the verified set for the CLI versions in
 `docs/update-clis.md`.
 
+**Keys added by an update must be copied across.** This file is a hand-made
+copy, edited in place; a `git pull` changes the repository copy and never this
+one. `providers.<id>.model_flag`, `effort_flag` and `effort_key` are new (task
+B1): they name the flags that used to be literals in the adapters, so the
+values to copy are `--model` / `--effort` / `null` for `claude`, `-m` / `-c` /
+`model_reasoning_effort` for `codex`, `--model` / `null` / `null` for
+`antigravity` — the command lines the host already runs. The schema gives them
+no default on purpose: a file without them is rejected by `check-config` with
+`providers.codex.model_flag: Required`, instead of validating and quietly
+invoking `codex --model <id>` with no reasoning-effort override. After every
+`git pull`, before the restart:
+
+```sh
+diff /var/lib/capitoline/app/config/capitoline.yaml /etc/capitoline/capitoline.yaml
+```
+
+and carry over anything new, then re-validate with the command below.
+
 Validate the file after every edit, and before restarting the service:
 
 ```sh

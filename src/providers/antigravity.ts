@@ -17,9 +17,11 @@ export const antigravityAdapter: Adapter = {
     const eff = effortValue(cfg, model, req.effort);
     if (model.effortSuffix && eff) id = `${id}-${eff.value}`;
     const args = [...cfg.args, cfg.model_flag, id];
-    // This CLI has no effort flag today (the suffix above carries it), so the
-    // configuration declares none and this adds nothing; it is here so that a
-    // flag added to the file is not silently dropped.
+    // One carrier for the effort, never two: a model with effort_suffix already
+    // has the level inside its id, so a flag would declare the same value a
+    // second time and is not added. For every other model the configuration's
+    // effort_flag is honoured — none today, so this adds nothing, but a flag
+    // written into the file later reaches those models without a code change.
     if (!model.effortSuffix) args.push(...effortArgs(cfg, eff));
     let prompt = flatten(rest);
     if (system) prompt = `System instructions:\n${system}\n\n${prompt}`;

@@ -64,6 +64,13 @@ describe("antigravity adapter", () => {
     const c = antigravityAdapter.buildCommand(withFlag, opus, { model: "agy-claude-opus", stream: true, effort: "low", messages: [{ role: "user", text: "q" }] });
     expect(c.args.slice(cfg.args.length)).toEqual(["--model", "claude-opus-4-6-thinking", "--effort", "low"]);
   });
+  it("leaves a suffixed model with one carrier of the effort even when a flag is declared", () => {
+    // The level is already inside the model id, so the flag added to the file
+    // must not repeat it: the id keeps "-high" and nothing else is appended.
+    const withFlag = { ...cfg, effort_flag: "--effort" };
+    const c = antigravityAdapter.buildCommand(withFlag, flash, { model: "agy-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
+    expect(c.args.slice(cfg.args.length)).toEqual(["--model", "gemini-3.8-flash-high"]);
+  });
   it("parses stream-json into text deltas and done with usage", async () => {
     const ev = await events(linesOf("test/fixtures/antigravity/stream-json.jsonl"));
     expect(ev.filter((e) => e.type === "text").map((e) => (e as any).delta).join("")).toBe("ok ok\n");

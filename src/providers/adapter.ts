@@ -52,10 +52,15 @@ export function effortValue(cfg: ProviderConfig, model: ModelSpec, wanted: Effor
  * then travels inside the model id, or not at all), `<flag> <value>` normally,
  * and `<flag> <key>="<value>"` when `effort_key` is set, because the CLI takes
  * the effort as a configuration override rather than as a flag of its own.
+ * The quoted form goes through JSON.stringify, as the system prompt does in
+ * codex.ts: JSON string escapes are a subset of TOML's, so a value holding a
+ * quote or a backslash still produces a valid override instead of a run that
+ * fails on unparsable TOML. Values reach here from the configuration's effort
+ * table, never from a request, which only picks the level.
  */
 export function effortArgs(cfg: ProviderConfig, eff: { value: string } | null): string[] {
   if (!eff || !cfg.effort_flag) return [];
-  return [cfg.effort_flag, cfg.effort_key === null ? eff.value : `${cfg.effort_key}="${eff.value}"`];
+  return [cfg.effort_flag, cfg.effort_key === null ? eff.value : `${cfg.effort_key}=${JSON.stringify(eff.value)}`];
 }
 
 export function modelSpecs(providerId: string, cfg: ProviderConfig): ModelSpec[] {
