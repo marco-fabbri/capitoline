@@ -9,8 +9,12 @@ export interface CallRecord {
   outcome: "ok" | ErrorKind | "aborted"; source: "http" | "mcp" | "health"; ts?: number;
   /** What the model produces; defaults to text (health probes and every pre-image row). */
   kind?: ModelKind;
+  /** Who asked, as the Access identity names them; null when nothing identified them. */
+  caller?: string | null;
 }
 export interface Totals { calls: number; inputTokens: number; outputTokens: number }
+/** What one caller spent in a window. `caller` is null for the calls nothing identified. */
+export interface CallerUsage { caller: string | null; calls: number; inputTokens: number; outputTokens: number }
 export type WindowName = "five_hour" | "seven_day";
 /** Image generations counted in a rolling window: `windowStartedAt` is null while the window is empty. */
 export interface ImageWindow { used: number; windowStartedAt: number | null }
@@ -26,6 +30,7 @@ export class UsageStore {
   // a column the table does not have yet fails to compile.
   private readonly stmts: {
     record: StatementSync; imageWindow: StatementSync; totals: StatementSync; setWindow: StatementSync; windows: StatementSync;
+    callers: StatementSync;
   };
   private closed = false;
   constructor(path: string) {
@@ -40,7 +45,7 @@ export class UsageStore {
       CREATE TABLE IF NOT EXISTS calls (
         id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
         input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
-        outcome TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text');
+        outcome TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', caller TEXT);
       CREATE INDEX IF NOT EXISTS calls_provider_ts ON calls(provider, ts);
       CREATE TABLE IF NOT EXISTS rate_windows (
         provider TEXT NOT NULL, window TEXT NOT NULL, utilization REAL NOT NULL, resets_at INTEGER NOT NULL,
@@ -49,20 +54,39 @@ export class UsageStore {
     // A database written before image models existed has no `kind` column, and
     // CREATE TABLE IF NOT EXISTS leaves it alone: add it here, with the same
     // default, so an upgrade keeps its history instead of losing it.
-    const columns = this.db.prepare(`PRAGMA table_info(calls)`).all() as { name: string }[];
-    if (!columns.some((c) => c.name === "kind")) this.db.exec(`ALTER TABLE calls ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'`);
+    const columns = new Set((this.db.prepare(`PRAGMA table_info(calls)`).all() as { name: string }[]).map((c) => c.name));
+    if (!columns.has("kind")) this.db.exec(`ALTER TABLE calls ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'`);
+    // The same for the caller of a call, added after the deployed database was
+    // written. Nullable and with no default: "nobody said who" is a real
+    // state — the rows written before attribution existed, the health probes,
+    // and every call served with Access verification disabled — and NULL is
+    // its name, distinct from any string a token could carry.
+    if (!columns.has("caller")) this.db.exec(`ALTER TABLE calls ADD COLUMN caller TEXT`);
 
     this.stmts = {
-      record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind, caller) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
       imageWindow: this.db.prepare(`SELECT COUNT(*) AS used, MIN(ts) AS started FROM calls WHERE provider = ? AND kind = 'image' AND outcome = 'ok' AND ts > ?`),
       totals: this.db.prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o FROM calls WHERE provider = ? AND ts > ?`),
       setWindow: this.db.prepare(`INSERT INTO rate_windows (provider, window, utilization, resets_at, updated_at) VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(provider, window) DO UPDATE SET utilization = excluded.utilization, resets_at = excluded.resets_at, updated_at = excluded.updated_at`),
       windows: this.db.prepare(`SELECT window, utilization, resets_at, updated_at FROM rate_windows WHERE provider = ?`),
+      // The gateway's own health probes are excluded: they are not a caller,
+      // and they outnumber the real traffic (45 of the first 56 calls on the
+      // host), so they would bury the breakdown under one huge null row.
+      callers: this.db.prepare(`SELECT caller, COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o
+        FROM calls WHERE ts > ? AND source <> 'health' GROUP BY caller ORDER BY calls DESC, caller`),
     };
   }
   record(c: CallRecord): void {
-    this.stmts.record.run(c.ts ?? Date.now(), c.provider, c.model, c.inputTokens, c.outputTokens, c.durationMs, c.outcome, c.source, c.kind ?? "text");
+    this.stmts.record.run(c.ts ?? Date.now(), c.provider, c.model, c.inputTokens, c.outputTokens, c.durationMs, c.outcome, c.source, c.kind ?? "text", c.caller ?? null);
+  }
+
+  // Who spent the window, busiest first. One row per distinct caller, with the
+  // unidentified calls gathered under null — sqlite groups NULLs together,
+  // which is exactly the reading wanted: "not attributed" is one bucket.
+  callers(sinceMs: number, now = Date.now()): CallerUsage[] {
+    const rows = this.stmts.callers.all(now - sinceMs) as { caller: string | null; calls: number; i: number; o: number }[];
+    return rows.map((r) => ({ caller: r.caller, calls: Number(r.calls), inputTokens: Number(r.i), outputTokens: Number(r.o) }));
   }
 
   // The image quota is counted in generations, not tokens, and only a

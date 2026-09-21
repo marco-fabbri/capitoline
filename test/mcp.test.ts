@@ -10,12 +10,13 @@ import type { ProviderEvent } from "../src/core/types.js";
 import pino from "pino";
 import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
+import type { RequestHandler } from "express";
 
 // A JPEG header is enough for the fake: the tool never inspects the bytes.
 const JPEG = Buffer.from("ffd8ffe000104a464946", "hex");
 const IMG: ProviderEvent = { type: "image", mime: "image/jpeg", bytes: JPEG, width: 1376, height: 768 };
 
-let server: Server, url: string, provider: FakeProvider, images: FakeProvider, core: Core;
+let server: Server, url: string, provider: FakeProvider, images: FakeProvider, core: Core, usage: UsageStore;
 // What the MCP layer logged: a tool error is a warn line, and some of the
 // rules under test are about which line an operator ends up reading.
 let warnings: Record<string, unknown>[];
@@ -27,10 +28,14 @@ beforeEach(async () => {
   provider = new FakeProvider("claude", ["claude-opus"], [{ type: "text", delta: "answer" }, { type: "done", usage: { input: 5, output: 1 } }]);
   images = new FakeProvider("antigravity", [{ name: "agy-image", kind: "image" }], []);
   images.imageScript = [{ type: "text", delta: "saved as ./image.png" }, IMG, { type: "done" }];
-  core = new Core([provider, images], new UsageStore(":memory:"), { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+  usage = new UsageStore(":memory:");
+  core = new Core([provider, images], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
   warnings = [];
   const mcpLog = pino({ name: "t", level: "warn" }, { write: (line: string) => { warnings.push(JSON.parse(line) as Record<string, unknown>); } });
-  const app = createApp(core, { log: createLogger("t"), mcp: createMcpHandler(core, mcpLog, { progressIntervalMs: 20 }) });
+  // /mcp sits behind Access in production, so the handler sees an identity:
+  // the service token Claude Code is configured with.
+  const access: RequestHandler = (_req, res, next) => { res.locals.identity = { sub: "", type: "service", name: "claude-code" }; next(); };
+  const app = createApp(core, { log: createLogger("t"), access, mcp: createMcpHandler(core, mcpLog, { progressIntervalMs: 20 }) });
   await new Promise<void>((r) => { server = app.listen(0, () => r()); });
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
 });
@@ -231,6 +236,15 @@ describe("MCP", () => {
     expect(text).toMatch(/rate_limited/);
     expect(Number(/retry after (\d+)s/.exec(text)![1])).toBe(70);
     expect(core.pauseRemainingS("claude")).toBeUndefined();
+    await c.close();
+  });
+
+  // B4: an MCP call is attributed like an HTTP one. The identity is the same
+  // Access identity, which the handler reads off the response it was mounted on.
+  it("records the caller of a tool call", async () => {
+    const c = await client();
+    await c.callTool({ name: "ask_model", arguments: { model: "claude-opus", prompt: "q" } });
+    expect(usage.callers(60_000)).toEqual([{ caller: "claude-code", calls: 1, inputTokens: 5, outputTokens: 1 }]);
     await c.close();
   });
 

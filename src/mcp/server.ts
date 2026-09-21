@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Core } from "../core/core.js";
 import { CapitolineError, type Message, type ProviderEvent, type Usage } from "../core/types.js";
 import type { Logger } from "../log.js";
+import { callerOf } from "../server/access.js";
 
 export interface McpOptions {
   // How often generate_image reports progress while the CLI is working.
@@ -18,7 +19,10 @@ export interface McpOptions {
 
 const PROGRESS_INTERVAL_MS = 5_000;
 
-function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
+// `caller` is who the Access identity behind this request names, null when
+// nothing identified them: the server is built per request, so it is fixed for
+// the life of the tools it registers.
+function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string | null): McpServer {
   const server = new McpServer({ name: "capitoline", version: "0.1.0" });
   // Clamped: a 0 from a caller would become a 1 ms timer, not "no progress".
   const progressIntervalMs = Math.max(1, opts.progressIntervalMs ?? PROGRESS_INTERVAL_MS);
@@ -79,7 +83,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
     let n = 0;
     const progress = (done: boolean) => token !== undefined && extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: n, message: done ? "done" : `${text.length} chars` } });
     try {
-      for await (const ev of core.execute({ model, messages, effort, stream: true }, { signal: extra.signal, source: "mcp" })) {
+      for await (const ev of core.execute({ model, messages, effort, stream: true }, { signal: extra.signal, source: "mcp", caller })) {
         if (ev.type === "text") { text += ev.delta; if (++n % 20 === 0) await progress(false); }
         else if (ev.type === "done") usage = ev.usage;
         else if (ev.type === "error") throw providerError(ev, providerOf(model), model);
@@ -127,7 +131,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
         timer = setInterval(() => { void tick(); }, progressIntervalMs);
       }
       let image: Extract<ProviderEvent, { type: "image" }> | undefined;
-      for await (const ev of core.generateImage({ model, prompt }, { signal: extra.signal, source: "mcp" })) {
+      for await (const ev of core.generateImage({ model, prompt }, { signal: extra.signal, source: "mcp", caller })) {
         if (ev.type === "image") image = ev;
         else if (ev.type === "error") throw providerError(ev, provider, model);
         // text events are the agent's prose ("saved as ./image.png" and the
@@ -156,7 +160,10 @@ function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
 
 export function createMcpHandler(core: Core, log: Logger, opts: McpOptions = {}): RequestHandler {
   return async (req, res) => {
-    const server = buildServer(core, log, opts);
+    // The handler is mounted inside createApp, behind the Access middleware,
+    // so the identity it left on the response is the caller of every tool call
+    // this transport serves.
+    const server = buildServer(core, log, opts, callerOf(res.locals.identity));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => { void transport.close(); void server.close(); });
     await server.connect(transport);

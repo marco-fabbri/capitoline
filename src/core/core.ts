@@ -1,6 +1,6 @@
 import type { Logger } from "../log.js";
 import type { HealthStatus, ModelKind, ModelSpec, Provider } from "../providers/adapter.js";
-import { H5, type UsageStore } from "../usage/store.js";
+import { H5, type CallerUsage, type UsageStore } from "../usage/store.js";
 import { Semaphore } from "./semaphore.js";
 import { CapitolineError, type ErrorKind, type ImageRequest, type InternalRequest, type ProviderEvent } from "./types.js";
 
@@ -23,6 +23,8 @@ export interface CoreOptions {
 }
 
 const D7 = 7 * 24 * 3600_000;
+/** The window of the per-caller breakdown /health serves. */
+const D1 = 24 * 3600_000;
 
 interface State {
   provider: Provider; sem: Semaphore; health: HealthStatus | null; pausedUntil: number | null; strikes: number;
@@ -35,7 +37,9 @@ interface State {
 /** A model paused on its own, by a refusal that named it. Mirrors the provider's pause and strikes. */
 interface ModelPause { pausedUntil: number; strikes: number }
 interface Entry { provider: Provider; model: ModelSpec }
-interface Context { signal?: AbortSignal; source: "http" | "mcp" }
+// caller: who the Access identity says is asking, null when nothing
+// identified them (verification disabled, or a token with nothing in it).
+interface Context { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null }
 
 export class Core {
   private readonly states = new Map<string, State>();
@@ -142,6 +146,13 @@ export class Core {
     return { used: w.used, limit: s.imageLimit, windowStartedAt: w.windowStartedAt, resetAt: s.imageResetAt !== null && s.imageResetAt > now ? s.imageResetAt : null };
   }
 
+  // Who spent the last day, busiest first: with more than one application on
+  // the gateway this is the only place that says which one. The health probes
+  // are the gateway's own and the store leaves them out.
+  callers(): CallerUsage[] {
+    return this.usage.callers(D1, this.now());
+  }
+
   // The health `detail` carries raw CLI stderr and must never reach a client
   // (/health is unauthenticated): only the classification is exposed.
   providerStates(): ProviderState[] {
@@ -215,7 +226,7 @@ export class Core {
       // through its signal or by stopping the iteration (client disconnected).
       const aborted = !sawTerminal && phase !== "threw" && (phase === "running" || ctx.signal?.aborted === true);
       this.usage.record({ provider: id, model: modelName, kind, inputTokens: usage.input, outputTokens: usage.output,
-        durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, ts: this.now() });
+        durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, caller: ctx.caller ?? null, ts: this.now() });
     }
   }
 

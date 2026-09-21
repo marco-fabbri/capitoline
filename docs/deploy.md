@@ -528,6 +528,22 @@ From the host, `curl -s http://127.0.0.1:8080/v1/models` now answers 401
 (no Access JWT) while `curl -s http://127.0.0.1:8080/health` still answers:
 that is the intended exemption for local monitoring.
 
+A verified token also says who is calling, and every usage row records it: the
+email of a user token, the name (`common_name`) of a service token. `/health`
+reports the last 24 hours grouped by it, which is how two applications sharing
+one gateway are told apart:
+
+```sh
+curl -s http://127.0.0.1:8080/health | jq .callers
+# [ { "caller": "claude-code", "calls": 12, "inputTokens": 4210, "outputTokens": 980 } ]
+```
+
+A `caller` of `null` is a call nothing identified: one served while
+`server.access.team_domain` is empty, or a row written before the column
+existed (the database is upgraded in place, the history is kept). The
+gateway's own health probes are left out of the breakdown — on this host they
+are most of the table and would bury the rest under one `null` row.
+
 ## 10. Claude Code as MCP client (on the Mac)
 
 ```sh

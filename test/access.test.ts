@@ -4,7 +4,7 @@ import request from "supertest";
 import { SignJWT, exportJWK, generateKeyPair, createLocalJWKSet } from "jose";
 
 type PrivateKey = Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
-import { createAccessMiddleware } from "../src/server/access.js";
+import { callerOf, createAccessMiddleware } from "../src/server/access.js";
 import { createLogger } from "../src/log.js";
 
 const team = "example.cloudflareaccess.com", aud = "abc123";
@@ -38,9 +38,9 @@ describe("access middleware", () => {
     const r = await call(await sign({ email: "me@example.com", sub: "u1" }));
     expect(r.status).toBe(200); expect(r.body.who).toEqual({ email: "me@example.com", sub: "u1", type: "user" });
   });
-  it("accepts a service token via cookie", async () => {
+  it("accepts a service token via cookie, and keeps the name it carries", async () => {
     const r = await request(app).get("/x").set("Cookie", `CF_Authorization=${await sign({ common_name: "svc", sub: "" })}`);
-    expect(r.status).toBe(200); expect(r.body.who.type).toBe("service");
+    expect(r.status).toBe(200); expect(r.body.who).toEqual({ sub: "", type: "service", name: "svc" });
   });
   it("rejects a wrong audience", async () => {
     expect((await call(await sign({ sub: "u1" }, { aud: "other" }))).status).toBe(401);
@@ -61,5 +61,24 @@ describe("access middleware", () => {
   });
   it("refuses to start without an audience", () => {
     expect(() => createAccessMiddleware({ teamDomain: team, audience: "", jwks }, createLogger("t"))).toThrow(/audience/);
+  });
+});
+
+// The name a usage row is attributed to. A service token has no email and an
+// empty sub, so its own name is the only thing that tells two applications
+// apart; a user token has an email, which is what an operator recognises.
+describe("callerOf", () => {
+  it("prefers the email, then the service token name, then the subject", () => {
+    expect(callerOf({ email: "me@example.com", sub: "u1", type: "user", name: "svc" })).toBe("me@example.com");
+    expect(callerOf({ sub: "", type: "service", name: "claude-code" })).toBe("claude-code");
+    expect(callerOf({ sub: "u1", type: "user" })).toBe("u1");
+  });
+  it("is null when there is no identity at all", () => {
+    expect(callerOf(undefined)).toBeNull();
+    expect(callerOf({})).toBeNull();
+    expect(callerOf({ email: "   ", sub: "" })).toBeNull();
+  });
+  it("bounds what a token can write into the database", () => {
+    expect(callerOf({ email: "x".repeat(500), sub: "" })!.length).toBe(320);
   });
 });

@@ -137,6 +137,85 @@ describe("UsageStore", () => {
     }
   });
 
+  // B4: the row says who asked. `caller` is nullable because "nobody said"
+  // is a real state — Access verification disabled, and every health probe.
+  it("records the caller of a call, and null when there is none", () => {
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-usage-"));
+    const path = join(dir, "usage.sqlite");
+    const now = 1_000_000_000_000;
+    try {
+      const s = new UsageStore(path);
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", caller: "me@example.com", ts: now });
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now + 1 });
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", caller: null, ts: now + 2 });
+      s.close();
+
+      const other = new DatabaseSync(path);
+      try {
+        expect(other.prepare(`SELECT caller FROM calls ORDER BY id`).all()).toEqual([{ caller: "me@example.com" }, { caller: null }, { caller: null }]);
+      } finally {
+        other.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // What /health answers: who spent the window. The gateway's own health
+  // probes are not a caller and would swamp the null row (45 of the first 56
+  // calls on the host were health checks), so they are left out.
+  it("breaks a window down by caller, without its own health probes", () => {
+    const s = new UsageStore(":memory:");
+    const now = 1_000_000_000_000;
+    const call = (caller: string | null, ts: number, input: number, source: "http" | "mcp" = "http") =>
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: input, outputTokens: 1, durationMs: 5, outcome: "ok", source, caller, ts });
+    call("me@example.com", now - 1000, 10);
+    call("me@example.com", now - 2000, 20, "mcp");
+    call("svc-token", now - 3000, 5);
+    call(null, now - 4000, 1);
+    call("me@example.com", now - 25 * 3600_000, 999);   // outside the window
+    s.record({ provider: "claude", model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: "ok", source: "health", ts: now - 100 });
+    expect(s.callers(24 * 3600_000, now)).toEqual([
+      { caller: "me@example.com", calls: 2, inputTokens: 30, outputTokens: 2 },
+      { caller: null, calls: 1, inputTokens: 1, outputTokens: 1 },
+      { caller: "svc-token", calls: 1, inputTokens: 5, outputTokens: 1 },
+    ]);
+    // The window is open at the far end, `ts > now - sinceMs`, as totals() is.
+    expect(s.callers(1500, now)).toEqual([{ caller: "me@example.com", calls: 1, inputTokens: 10, outputTokens: 1 }]);
+    s.close();
+  });
+
+  // The deployed database was written before attribution existed: its `calls`
+  // table has no `caller` column and CREATE TABLE IF NOT EXISTS leaves it
+  // alone, so only the ALTER TABLE keeps that history readable.
+  it("adds the caller column to a database written before attribution existed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-usage-"));
+    const path = join(dir, "usage.sqlite");
+    const now = Date.now();
+    try {
+      const legacy = new DatabaseSync(path);
+      legacy.exec(`CREATE TABLE calls (
+        id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
+        outcome TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text')`);
+      legacy.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source)
+        VALUES (?, 'claude', 'claude-opus', 10, 2, 5, 'ok', 'http')`).run(now - 1000);
+      legacy.close();
+
+      const s = new UsageStore(path);
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: 3, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", caller: "me@example.com", ts: now });
+      // The old row is kept, and its unknown caller is the same null a call
+      // with Access disabled writes today.
+      expect(s.callers(H5, now + 1)).toEqual([
+        { caller: null, calls: 1, inputTokens: 10, outputTokens: 2 },
+        { caller: "me@example.com", calls: 1, inputTokens: 3, outputTokens: 1 },
+      ]);
+      s.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // SIGTERM followed by SIGINT closes the store twice; node:sqlite throws on
   // the second close, which would turn a clean shutdown into a crash.
   it("closes idempotently", () => {
@@ -158,6 +237,7 @@ describe("UsageStore", () => {
       s.imageWindow("claude", H5, now + 1);
       s.setWindow("claude", "five_hour", { utilization: 0.1, resetsAt: 1 }, now);
       s.windows("claude");
+      s.callers(H5, now + 1);
       expect(spy).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();

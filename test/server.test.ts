@@ -16,8 +16,11 @@ function make(script: ProviderEvent[] = OK, access?: RequestHandler) {
   const core = new Core([p], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
   const outcomes = () => (usage as unknown as { db: { prepare(q: string): { all(): { outcome: string }[] } } }).db
     .prepare("SELECT outcome FROM calls WHERE source = 'http' ORDER BY id").all().map((r) => r.outcome);
-  return { p, core, outcomes, app: createApp(core, { log: createLogger("t"), access }) };
+  return { p, core, usage, outcomes, app: createApp(core, { log: createLogger("t"), access }) };
 }
+// Stand-in for a verified Access token: the middleware's only job here is to
+// leave the identity behind, which is where the caller of a row comes from.
+const asCaller = (who: object): RequestHandler => (_req, res, next) => { res.locals.identity = who; next(); };
 // Stand-in for the Access middleware: any request without the header is refused.
 const deny: RequestHandler = (req, res, next) => (req.header("Cf-Access-Jwt-Assertion") ? next() : res.status(401).json({ error: { code: "unauthorized" } }));
 const body = (extra: object = {}) => ({ model: "claude-opus", messages: [{ role: "user", content: "hi" }], ...extra });
@@ -231,11 +234,12 @@ describe("POST /v1/chat/completions", () => {
 // A JPEG header is enough for the fake: the route never inspects the bytes.
 const JPEG = Buffer.from("ffd8ffe000104a464946", "hex");
 const IMG: ProviderEvent = { type: "image", mime: "image/jpeg", bytes: JPEG, width: 1376, height: 768 };
-function makeImages(script: ProviderEvent[] = [IMG, { type: "done" }]) {
+function makeImages(script: ProviderEvent[] = [IMG, { type: "done" }], access?: RequestHandler) {
   const p = new FakeProvider("antigravity", ["agy-text", { name: "agy-image", kind: "image" }], OK, 1);
   p.imageScript = script;
-  const core = new Core([p], new UsageStore(":memory:"), { maxWaitMs: 100, budgets: {}, log: createLogger("t"), imageQuotas: { antigravity: 12 } });
-  return { p, core, app: createApp(core, { log: createLogger("t") }) };
+  const usage = new UsageStore(":memory:");
+  const core = new Core([p], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t"), imageQuotas: { antigravity: 12 } });
+  return { p, core, usage, app: createApp(core, { log: createLogger("t"), access }) };
 }
 
 describe("POST /v1/images/generations", () => {
@@ -426,6 +430,40 @@ describe("GET /health", () => {
     const r = await request(app).get("/health");
     expect(r.body.providers[0].imageQuota.resetAt).toBeGreaterThanOrEqual(sent + 442_209 * 1000);
     expect(r.body.providers[0].imageQuota.used).toBe(0);
+  });
+});
+
+
+// B4: with more than one application behind the gateway, the row has to say
+// which one spent the window. The identity is the Access middleware's, and it
+// is the only source: with verification disabled the caller is null.
+describe("usage attribution", () => {
+  it("records the caller the Access middleware identified", async () => {
+    const { app, usage } = make(OK, asCaller({ email: "me@example.com", sub: "u1", type: "user" }));
+    expect((await request(app).post("/v1/chat/completions").send(body())).status).toBe(200);
+    expect(usage.callers(60_000)).toEqual([{ caller: "me@example.com", calls: 1, inputTokens: 3, outputTokens: 2 }]);
+  });
+  it("records a service token by the name it carries", async () => {
+    const { app, usage } = make(OK, asCaller({ sub: "", type: "service", name: "claude-code" }));
+    await request(app).post("/v1/chat/completions").send(body());
+    expect(usage.callers(60_000)).toEqual([{ caller: "claude-code", calls: 1, inputTokens: 3, outputTokens: 2 }]);
+  });
+  it("records no caller when Access verification is disabled", async () => {
+    const { app, usage } = make();
+    await request(app).post("/v1/chat/completions").send(body());
+    expect(usage.callers(60_000)).toEqual([{ caller: null, calls: 1, inputTokens: 3, outputTokens: 2 }]);
+  });
+  it("attributes an image generation as well as a completion", async () => {
+    const { app, usage } = makeImages([IMG, { type: "done" }], asCaller({ email: "me@example.com", sub: "u1", type: "user" }));
+    expect((await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" })).status).toBe(200);
+    expect(usage.callers(60_000)).toEqual([{ caller: "me@example.com", calls: 1, inputTokens: 0, outputTokens: 0 }]);
+  });
+  it("breaks the last 24 hours down by caller in /health", async () => {
+    const { app } = make(OK, asCaller({ email: "me@example.com", sub: "u1", type: "user" }));
+    await request(app).post("/v1/chat/completions").send(body());
+    await request(app).post("/v1/chat/completions").send(body());
+    const r = await request(app).get("/health");
+    expect(r.body.callers).toEqual([{ caller: "me@example.com", calls: 2, inputTokens: 6, outputTokens: 4 }]);
   });
 });
 

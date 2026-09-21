@@ -2,6 +2,7 @@ import express, { type NextFunction, type Request, type RequestHandler, type Res
 import type { Core } from "../core/core.js";
 import { CapitolineError, type ProviderEvent, type Usage } from "../core/types.js";
 import type { Logger } from "../log.js";
+import { callerOf } from "./access.js";
 import { convertImageRequest, imageResponse, type ImageEvent } from "./images.js";
 import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, ignoredHeader, sseChunk } from "./openai.js";
 
@@ -59,8 +60,12 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     return new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind], retry);
   };
 
+  // `callers` is the last 24 hours broken down by who asked: with more than
+  // one application behind the same tunnel, it is the only way to see which
+  // one is spending the window. It carries no provider detail and no prompt,
+  // only what the Access token already said about the caller.
   app.get("/health", (_req, res) => {
-    res.json({ ok: true, providers: core.providerStates(), models: core.listModels() });
+    res.json({ ok: true, providers: core.providerStates(), models: core.listModels(), callers: core.callers() });
   });
 
   // The quota block is only there for image models, and its keys follow this
@@ -95,7 +100,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     try {
       const ignored = ignoredHeader(conv.ignored);
       if (ignored) res.setHeader("X-Capitoline-Ignored", ignored);
-      for await (const ev of core.execute(conv.req, { signal: ac.signal, source: "http" })) {
+      for await (const ev of core.execute(conv.req, { signal: ac.signal, source: "http", caller: callerOf(res.locals.identity) })) {
         if (ev.type === "text") {
           if (conv.req.stream) {
             if (!started) { beginSse(res); res.write(sseChunk(conv.req.model, id, { role: "assistant", content: "" }, null)); started = true; }
@@ -142,7 +147,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     try {
       const ignored = ignoredHeader(conv.ignored);
       if (ignored) res.setHeader("X-Capitoline-Ignored", ignored);
-      for await (const ev of core.generateImage(conv.req, { signal: ac.signal, source: "http" })) {
+      for await (const ev of core.generateImage(conv.req, { signal: ac.signal, source: "http", caller: callerOf(res.locals.identity) })) {
         if (ev.type === "image") image = ev;
         else if (ev.type === "error") throw providerError(ev, provider, conv.req.model);
         // text events are the agent's prose ("saved as ./image.png" and the
