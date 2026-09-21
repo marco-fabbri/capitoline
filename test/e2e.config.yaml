@@ -32,6 +32,9 @@ providers:
       claude-haiku:  { cli_model: haiku }
       claude-fable:  { cli_model: fable }
     effort: { low: low, medium: medium, high: high }        # --effort value
+    model_flag: --model         # <flag> <cli_model>
+    effort_flag: --effort       # <flag> <effort value>
+    effort_key: null            # the value is passed bare, not as key="value"
     args:
       - -p
       - --output-format
@@ -64,6 +67,9 @@ providers:
       codex-gpt-5.6-sol: { cli_model: gpt-5.6-sol }
       codex-gpt-5.5:     { cli_model: gpt-5.5 }
     effort: { low: low, medium: medium, high: high }        # -c model_reasoning_effort="<v>"
+    model_flag: -m
+    effort_flag: -c
+    effort_key: model_reasoning_effort   # -c model_reasoning_effort="<v>"
     args:
       - exec
       - --json
@@ -96,6 +102,9 @@ providers:
       # kind: image → served by /v1/images/generations and the generate_image MCP tool
       agy-image:            { cli_model: gemini-3.8-flash-low, kind: image, timeout_s: 240 }
     effort: { low: low, medium: medium, high: high }
+    model_flag: --model
+    effort_flag: null           # none: the effort is part of the model id (effort_suffix)
+    effort_key: null
     args:
       - --output-format
       - stream-json

@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { InternalRequest, ProviderEvent, RateLimitWindow } from "../core/types.js";
-import { effortValue, jsonLines, type Adapter, type Command, type ModelSpec } from "./adapter.js";
+import { effortArgs, effortValue, jsonLines, type Adapter, type Command, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
 function window(w: unknown): RateLimitWindow | undefined {
@@ -14,9 +14,8 @@ function window(w: unknown): RateLimitWindow | undefined {
 export const claudeAdapter: Adapter = {
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
     const { system, rest } = splitSystem(req.messages);
-    const args = [...cfg.args, "--model", model.cliModel];
-    const eff = effortValue(cfg, model, req.effort);
-    if (eff) args.push("--effort", eff.value);
+    const args = [...cfg.args, cfg.model_flag, model.cliModel];
+    args.push(...effortArgs(cfg, effortValue(cfg, model, req.effort)));
     let prompt = flatten(rest);
     if (system) {
       if (cfg.system_prompt_flag) args.push(cfg.system_prompt_flag, system);

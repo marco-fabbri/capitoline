@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.js";
-import { effortValue, jsonLines, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
+import { effortArgs, effortValue, jsonLines, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
 // The CLI is an agent: the prompt names the one tool it may use and forbids
@@ -16,7 +16,11 @@ export const antigravityAdapter: Adapter = {
     let id = model.cliModel;
     const eff = effortValue(cfg, model, req.effort);
     if (model.effortSuffix && eff) id = `${id}-${eff.value}`;
-    const args = [...cfg.args, "--model", id];
+    const args = [...cfg.args, cfg.model_flag, id];
+    // This CLI has no effort flag today (the suffix above carries it), so the
+    // configuration declares none and this adds nothing; it is here so that a
+    // flag added to the file is not silently dropped.
+    if (!model.effortSuffix) args.push(...effortArgs(cfg, eff));
     let prompt = flatten(rest);
     if (system) prompt = `System instructions:\n${system}\n\n${prompt}`;
     const stdin = JSON.stringify({ event: "user", message: { role: "user", content: prompt } }) + "\n";
@@ -24,7 +28,7 @@ export const antigravityAdapter: Adapter = {
   },
 
   buildImageCommand(cfg: ProviderConfig, model: ModelSpec, req: ImageRequest): ImageCommand {
-    const args = [...cfg.args, ...cfg.image.args, "--model", model.cliModel];
+    const args = [...cfg.args, ...cfg.image.args, cfg.model_flag, model.cliModel];
     const stdin = JSON.stringify({ event: "user", message: { role: "user", content: IMAGE_PROMPT(req.prompt) } }) + "\n";
     return { args, stdin };
   },

@@ -1,19 +1,20 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { InternalRequest, ProviderEvent } from "../core/types.js";
-import { effortValue, jsonLines, type Adapter, type Command, type ModelSpec } from "./adapter.js";
+import { effortArgs, effortValue, jsonLines, type Adapter, type Command, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
 export const codexAdapter: Adapter = {
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
     const { system, rest } = splitSystem(req.messages);
-    const args = [...cfg.args, "-m", model.cliModel];
-    const eff = effortValue(cfg, model, req.effort);
-    if (eff) args.push("-c", `model_reasoning_effort="${eff.value}"`);
+    const args = [...cfg.args, cfg.model_flag, model.cliModel];
+    args.push(...effortArgs(cfg, effortValue(cfg, model, req.effort)));
     let prompt = flatten(rest);
     if (system) {
       // JSON string escapes are a subset of TOML basic-string escapes, so
-      // JSON.stringify yields a valid TOML value for `-c key=<value>`.
+      // JSON.stringify yields a valid TOML value for `-c key=<value>`. The
+      // "-c" here is the CLI's override flag for a key that the configuration
+      // names (system_prompt_flag), not a model or effort flag.
       if (cfg.system_prompt_flag) args.push("-c", `${cfg.system_prompt_flag}=${JSON.stringify(system)}`);
       else prompt = `System instructions:\n${system}\n\n${prompt}`;
     }

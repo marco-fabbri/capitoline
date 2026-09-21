@@ -45,6 +45,17 @@ const ProviderSchema = z.object({
   // the CLI as `--effort ""` or as a model id ending in "-".
   effort: z.record(EffortSchema, z.string().min(1)),
   args: z.array(z.string()),
+  // The flag that names the model to the CLI: `<model_flag> <cli_model>`.
+  // Two of the three CLIs use --model, so that is the default; Codex's -m is
+  // written in the file. A renamed flag is then a configuration change.
+  model_flag: z.string().min(1).default("--model"),
+  // The flag that carries the effort, or null when the CLI has none
+  // (Antigravity encodes it in the model id through effort_suffix).
+  effort_flag: z.string().min(1).nullable().default(null),
+  // When set, the effort argument is `<effort_key>="<value>"` instead of the
+  // bare value: Codex takes it as a configuration override, -c
+  // model_reasoning_effort="high", not as a flag of its own.
+  effort_key: z.string().min(1).nullable().default(null),
   system_prompt_flag: z.string().nullable(),
   prompt_via: z.literal("stdin"),
   image: ImageSchema,

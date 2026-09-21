@@ -48,6 +48,22 @@ describe("antigravity adapter", () => {
     );
     expect(c.stdin.endsWith("\n")).toBe(true);
   });
+  it("takes the model flag from the configuration, for a chat and for an image", () => {
+    // This CLI carries the effort inside the model id, so the repository
+    // config declares no effort flag: the adapter must then add none.
+    expect([cfg.model_flag, cfg.effort_flag, cfg.effort_key]).toEqual(["--model", null, null]);
+    const renamed = { ...cfg, model_flag: "--model-id" };
+    const c = antigravityAdapter.buildCommand(renamed, flash, { model: "agy-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
+    expect(c.args.slice(cfg.args.length)).toEqual(["--model-id", "gemini-3.8-flash-high"]);
+    const image = models.find((m) => m.name === "agy-image")!;
+    const ci = antigravityAdapter.buildImageCommand!(renamed, image, { model: "agy-image", prompt: "a red bicycle" });
+    expect(ci.args.slice(cfg.args.length)).toEqual(["--model-id", "gemini-3.8-flash-low"]);
+  });
+  it("adds the effort flag as well when the provider declares one", () => {
+    const withFlag = { ...cfg, effort_flag: "--effort" };
+    const c = antigravityAdapter.buildCommand(withFlag, opus, { model: "agy-claude-opus", stream: true, effort: "low", messages: [{ role: "user", text: "q" }] });
+    expect(c.args.slice(cfg.args.length)).toEqual(["--model", "claude-opus-4-6-thinking", "--effort", "low"]);
+  });
   it("parses stream-json into text deltas and done with usage", async () => {
     const ev = await events(linesOf("test/fixtures/antigravity/stream-json.jsonl"));
     expect(ev.filter((e) => e.type === "text").map((e) => (e as any).delta).join("")).toBe("ok ok\n");

@@ -29,6 +29,26 @@ describe("claude adapter", () => {
     expect(c.args[c.args.indexOf("--effort") + 1]).toBe("medium");
     expect(c.args).not.toContain("--system-prompt");
   });
+  it("takes the model and effort flag names from the configuration", () => {
+    // The repository config declares the flags this CLI uses today, so a
+    // renamed flag is a configuration change and never a code change.
+    expect([cfg.model_flag, cfg.effort_flag, cfg.effort_key]).toEqual(["--model", "--effort", null]);
+    const renamed = { ...cfg, model_flag: "--model-id", effort_flag: "--reasoning", effort_key: null };
+    const c = claudeAdapter.buildCommand(renamed, opus, { model: "claude-opus", stream: false, effort: "high", messages: [{ role: "user", text: "hi" }] });
+    expect(c.args.slice(cfg.args.length)).toEqual(["--model-id", "opus", "--reasoning", "high"]);
+    expect(c.args).not.toContain("--model");
+    expect(c.args).not.toContain("--effort");
+  });
+  it("passes the effort as a key=value argument when the provider declares an effort key", () => {
+    const keyed = { ...cfg, effort_flag: "-c", effort_key: "reasoning.effort" };
+    const c = claudeAdapter.buildCommand(keyed, opus, { model: "claude-opus", stream: false, effort: "low", messages: [{ role: "user", text: "hi" }] });
+    expect(c.args.slice(cfg.args.length)).toEqual(["--model", "opus", "-c", 'reasoning.effort="low"']);
+  });
+  it("omits the effort argument when the provider declares no effort flag", () => {
+    const noEffort = { ...cfg, effort_flag: null };
+    const c = claudeAdapter.buildCommand(noEffort, opus, { model: "claude-opus", stream: false, effort: "high", messages: [{ role: "user", text: "hi" }] });
+    expect(c.args.slice(cfg.args.length)).toEqual(["--model", "opus"]);
+  });
   it("parses partial stream output into text deltas, rate limits and done with usage", async () => {
     const ev = await events("test/fixtures/claude/stream-json-partial.jsonl");
     expect(ev.filter((e) => e.type === "text").map((e) => (e as any).delta).join("")).toBe("ok ok");

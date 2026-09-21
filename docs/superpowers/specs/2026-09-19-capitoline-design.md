@@ -250,6 +250,9 @@ providers:
     models:
       <public name>: { cli_model: <alias passed to the CLI>, effort_suffix?: bool, efforts?: [..] }
     effort: { low: <v>, medium: <v>, high: <v> }
+    model_flag: <flag>                     # default --model;  <flag> <cli_model>
+    effort_flag: <flag> | null             # null = the CLI has no effort flag
+    effort_key: <key> | null               # set = <flag> <key>="<value>" (Codex)
     args: [<fixed sandbox and output flags>]
     system_prompt_flag: <flag> | null      # null = prepended to the prompt with a role marker
     prompt_via: stdin

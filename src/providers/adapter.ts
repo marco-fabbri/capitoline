@@ -46,6 +46,18 @@ export function effortValue(cfg: ProviderConfig, model: ModelSpec, wanted: Effor
   return { effort, value };
 }
 
+/**
+ * The arguments that carry the effort to the CLI, all of them named by the
+ * configuration: none when the provider declares no `effort_flag` (the effort
+ * then travels inside the model id, or not at all), `<flag> <value>` normally,
+ * and `<flag> <key>="<value>"` when `effort_key` is set, because the CLI takes
+ * the effort as a configuration override rather than as a flag of its own.
+ */
+export function effortArgs(cfg: ProviderConfig, eff: { value: string } | null): string[] {
+  if (!eff || !cfg.effort_flag) return [];
+  return [cfg.effort_flag, cfg.effort_key === null ? eff.value : `${cfg.effort_key}="${eff.value}"`];
+}
+
 export function modelSpecs(providerId: string, cfg: ProviderConfig): ModelSpec[] {
   return Object.entries(cfg.models).map(([name, m]) => ({
     name, provider: providerId, cliModel: m.cli_model, effortSuffix: m.effort_suffix, efforts: m.efforts, kind: m.kind, timeoutS: m.timeout_s,

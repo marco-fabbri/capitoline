@@ -23,6 +23,19 @@ describe("codex adapter", () => {
     expect(c.args.at(-1)).toBe("-");
     expect(c.stdin).toBe("q");
   });
+  it("takes the model flag, the effort flag and the effort key from the configuration", () => {
+    expect([cfg.model_flag, cfg.effort_flag, cfg.effort_key]).toEqual(["-m", "-c", "model_reasoning_effort"]);
+    const renamed = { ...cfg, model_flag: "--model", effort_flag: "--config", effort_key: "reasoning.effort" };
+    const c = codexAdapter.buildCommand(renamed, astra, { model: "codex-gpt-6-astra", stream: false, effort: "low", messages: [{ role: "user", text: "q" }] });
+    expect(c.args.slice(cfg.args.length)).toEqual(["--model", "gpt-6-astra", "--config", 'reasoning.effort="low"', "-"]);
+    expect(c.args).not.toContain("-m");
+    expect(c.args).not.toContain('model_reasoning_effort="low"');
+  });
+  it("passes a bare effort value when the provider declares no effort key", () => {
+    const bare = { ...cfg, effort_key: null };
+    const c = codexAdapter.buildCommand(bare, astra, { model: "codex-gpt-6-astra", stream: false, effort: "low", messages: [{ role: "user", text: "q" }] });
+    expect(c.args.slice(cfg.args.length)).toEqual(["-m", "gpt-6-astra", "-c", "low", "-"]);
+  });
   it("parses exec --json output into one text event and done with usage", async () => {
     const ev = await events(linesOf("test/fixtures/codex/exec-json-locked.jsonl"));
     expect(ev).toEqual([{ type: "text", delta: "OK" }, { type: "done", usage: { input: 10566, output: 5 } }]);

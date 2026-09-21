@@ -16,7 +16,7 @@ not one of them but a later observation from the host, still to be confirmed.
 
 ## Providers
 
-- `src/providers/claude.ts`, `src/providers/codex.ts`, `src/providers/antigravity.ts`: the CLI flag/key names (`--model`/`--effort`, `-m`/`-c model_reasoning_effort`, `--model`) are hardcoded in the adapters instead of coming from `config/capitoline.yaml`, breaking the "code never hardcodes a CLI flag" rule — add optional `model_flag`/`effort_flag`/`effort_key` fields to `ProviderSchema` and read them in each adapter.
+- `src/providers/codex.ts`: the one CLI flag still written in code after B1 is the `-c` that carries `system_prompt_flag` (`-c developer_instructions="<text>"`), because the configuration names the override *key* and not the flag that introduces it — either add a `config_flag` field for it or record the `-c` as accepted.
 - `src/providers/adapter.ts`: `effortValue()` picks the nearest effort from `model.efforts` before checking it exists in the provider's `effort` table, so a mismatched entry returns `null` and silently drops the effort instead of falling back — intersect the candidate list with the table before calling `nearestEffort`.
 - `src/providers/adapter.ts`: `nearestEffort`'s tie-break favors the higher level, so a model offering only `low`/`high` runs `high` by default when no effort is requested, with real latency/quota impact and no comment recording it's intentional — document it above `effortValue` or change the tie-break to favor the lower level.
 - `src/providers/claude.ts`: the `rate_limit_event` branch always emits a `rate_limit` event even when both windows are unparseable, which lets `Core.onRateLimit` silently clear a previously-set `windowOverBudget` — skip emission when both `fiveHour` and `sevenDay` are `undefined`.
