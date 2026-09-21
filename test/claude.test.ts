@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { claudeAdapter } from "../src/providers/claude.js";
 import { loadConfig } from "../src/config.js";
 import { modelSpecs } from "../src/providers/adapter.js";
+import { classifyError } from "../src/providers/errors.js";
 import type { AdapterEvent } from "../src/core/types.js";
 
 const cfg = loadConfig("config/capitoline.yaml").providers.claude;
@@ -68,5 +69,49 @@ describe("claude adapter", () => {
     async function* l() { yield JSON.stringify({ type: "result", is_error: true, subtype: "error_during_execution", result: "Login expired · Please run /login" }); }
     const out: AdapterEvent[] = []; for await (const e of claudeAdapter.parse(l())) out.push(e);
     expect(out).toEqual([{ type: "error", kind: "auth_expired", detail: "Login expired · Please run /login" }]);
+  });
+  it("classifies a model-limit refusal from api_error_status and marks it model-scoped", async () => {
+    // Real capture, host, 2026-09-21: the Fable model exhausted while the same
+    // subscription still answered on the others. The sentence matches neither
+    // the auth nor the rate pattern, so the prose alone says cli_crashed (502).
+    const raw = JSON.parse(readFileSync("test/fixtures/claude/rate-limited-model.json", "utf8")) as Record<string, unknown>;
+    expect(raw.subtype).toBe("success");          // never a success signal: is_error decides
+    expect(classifyError(String(raw.result))).toBe("cli_crashed");
+    const ev = await events("test/fixtures/claude/rate-limited-model.json");
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ type: "error", kind: "rate_limited", scope: "model" });
+    expect((ev[0] as any).detail).toContain("You've reached your Fable limit");
+  });
+  it("classifies the real expired-credential capture as auth_expired, provider-wide", async () => {
+    const ev = await events("test/fixtures/claude/auth-expired.json");
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ type: "error", kind: "auth_expired" });
+    expect(ev[0]).not.toHaveProperty("scope");    // an invalid credential is the subscription's, not the model's
+  });
+  it("prefers the status over the prose, and falls back to the prose without one", async () => {
+    const one = async (o: Record<string, unknown>) => {
+      const src = (async function* () { yield JSON.stringify({ type: "result", is_error: true, subtype: "success", ...o }); })();
+      const out: AdapterEvent[] = []; for await (const e of claudeAdapter.parse(src)) out.push(e); return out[0] as any;
+    };
+    expect(await one({ api_error_status: 429, result: "Login expired · Please run /login" })).toMatchObject({ kind: "rate_limited" });
+    expect(await one({ api_error_status: 403, result: "quota exceeded" })).toMatchObject({ kind: "auth_expired" });
+    expect(await one({ api_error_status: 503, result: "upstream is busy" })).toMatchObject({ kind: "cli_crashed" });
+    // A status the map says nothing about, and no status at all: the prose decides.
+    expect(await one({ api_error_status: 400, result: "429 Too Many Requests" })).toMatchObject({ kind: "rate_limited" });
+    expect(await one({ result: "429 Too Many Requests" })).toMatchObject({ kind: "rate_limited" });
+    // A provider-wide 429 keeps the provider-wide pause: no model attribution.
+    expect(await one({ api_error_status: 429, result: "Claude usage limit reached. Your limit will reset at 3pm." })).not.toHaveProperty("scope");
+  });
+  it("emits no rate_limit event when neither window can be parsed", async () => {
+    const collect = async (info: unknown) => {
+      const src = (async function* () { yield JSON.stringify({ type: "rate_limit_event", rate_limit_info: info }); })();
+      const out: AdapterEvent[] = []; for await (const e of claudeAdapter.parse(src)) out.push(e); return out;
+    };
+    // Both unparseable: emitting would hand Core an event with no window in it.
+    expect(await collect({ unifiedWindows: { five_hour: null, seven_day: "soon" } })).toEqual([]);
+    expect(await collect(undefined)).toEqual([]);
+    // One of the two parses: still reported, with the other left undefined.
+    expect(await collect({ unifiedWindows: { five_hour: { utilization: 0.5, resetsAt: 7 }, seven_day: {} } }))
+      .toEqual([{ type: "rate_limit", fiveHour: { utilization: 0.5, resetsAt: 7 }, sevenDay: undefined }]);
   });
 });

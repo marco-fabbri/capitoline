@@ -161,6 +161,22 @@ describe("antigravity adapter", () => {
     })());
     expect(ev.map((e) => e.type)).toEqual(["done"]);
   });
+  it("counts cached and thinking tokens, like the claude adapter", async () => {
+    // The CLI reports them as fields of their own; leaving them out understated
+    // every budget window of this provider as soon as caching kicked in.
+    const ev = await events((async function* () {
+      yield JSON.stringify({ event: "result", result: { status: "SUCCESS", usage: { input_tokens: 10, output_tokens: 2, thinking_tokens: 5, cache_read_tokens: 7, total_tokens: 24 } } });
+    })());
+    expect(ev).toEqual([{ type: "done", usage: { input: 17, output: 7 } }]);
+  });
+  it("maps the real expired-credential capture to auth_expired", async () => {
+    // The capture is the CLI's --print-json result object; in stream mode the
+    // same object arrives inside an `event: result` envelope.
+    const result = JSON.parse(readFileSync("test/fixtures/antigravity/auth-expired.json", "utf8")) as Record<string, unknown>;
+    expect(result.status).toBe("ERROR");
+    const ev = await events((async function* () { yield JSON.stringify({ event: "result", result }); })());
+    expect(ev).toEqual([{ type: "error", kind: "auth_expired", detail: "authentication failed or timed out" }]);
+  });
   it("maps an ERROR result to a typed error", async () => {
     const ev = await events(linesOf("test/fixtures/antigravity/stream-input-error.jsonl"));
     expect(ev.at(-1)!.type).toBe("error");

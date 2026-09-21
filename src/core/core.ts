@@ -32,12 +32,16 @@ interface State {
   imageResetAt: number | null;
   hasImageModels: boolean;
 }
+/** A model paused on its own, by a refusal that named it. Mirrors the provider's pause and strikes. */
+interface ModelPause { pausedUntil: number; strikes: number }
 interface Entry { provider: Provider; model: ModelSpec }
 interface Context { signal?: AbortSignal; source: "http" | "mcp" }
 
 export class Core {
   private readonly states = new Map<string, State>();
   private readonly modelIndex = new Map<string, Entry>();
+  /** By model name: the pause installed by a refusal that named that model alone. */
+  private readonly modelPauses = new Map<string, ModelPause>();
   /** Health checks still running; awaited by idle() before the usage store is closed. */
   private readonly inFlight = new Set<Promise<void>>();
   private readonly now: () => number;
@@ -62,14 +66,32 @@ export class Core {
     return new CapitolineError("rate_limited", `provider ${id} is paused after a rate limit`, this.remainingS(s));
   }
 
+  // Seconds left on a model's own pause, undefined when it has none standing.
+  private modelRemainingS(model: string): number | undefined {
+    const p = this.modelPauses.get(model);
+    if (!p) return undefined;
+    const left = Math.ceil((p.pausedUntil - this.now()) / 1000);
+    return left > 0 ? left : undefined;
+  }
+
+  private modelPausedError(model: string, remaining: number): CapitolineError {
+    return new CapitolineError("rate_limited", `model "${model}" is paused after a rate limit`, remaining);
+  }
+
   // Seconds until the pause installed for a provider ends, undefined when it
   // is not paused. This is what a client must be told in Retry-After: the
   // CLI's own retry-after is shorter than the pause (onError adds slack and
   // never shortens an earlier, longer pause), so echoing it back would send
   // the client into pausedError a minute early.
-  pauseRemainingS(providerId: string): number | undefined {
+  // With a model name it is the longer of the two pauses in force, since both
+  // hold that model back: a client told only the provider's would come back
+  // while the model itself is still out.
+  pauseRemainingS(providerId: string, model?: string): number | undefined {
     const s = this.states.get(providerId);
-    return s && this.isPaused(s) ? this.remainingS(s) : undefined;
+    const provider = s && this.isPaused(s) ? this.remainingS(s) : undefined;
+    const own = model === undefined ? undefined : this.modelRemainingS(model);
+    if (provider === undefined) return own;
+    return own === undefined ? provider : Math.max(provider, own);
   }
 
   private unavailableReason(s: State): string | undefined {
@@ -100,7 +122,10 @@ export class Core {
       // draws on the same quota.
       const quota = this.imageQuota(id, s);
       for (const m of s.provider.models()) {
-        out.push({ name: m.name, provider: id, kind: m.kind, available: reason === undefined, reason, overBudget, ...(m.kind === "image" && quota ? { quota } : {}) });
+        // A model paused on its own is unavailable while its provider is not:
+        // this list is the only place that difference can be read.
+        const modelReason = reason ?? (this.modelRemainingS(m.name) !== undefined ? "rate_limited" : undefined);
+        out.push({ name: m.name, provider: id, kind: m.kind, available: modelReason === undefined, reason: modelReason, overBudget, ...(m.kind === "image" && quota ? { quota } : {}) });
       }
     }
     return out;
@@ -156,13 +181,17 @@ export class Core {
     const id = entry.provider.id;
     const s = this.states.get(id)!;
     if (this.isPaused(s)) throw this.pausedError(id, s);
+    const ownPause = this.modelRemainingS(modelName);
+    if (ownPause !== undefined) throw this.modelPausedError(modelName, ownPause);
     const reason = this.unavailableReason(s);
     if (reason) throw new CapitolineError("model_unavailable", `model "${modelName}" unavailable: ${reason}`);
 
     const release = await s.sem.acquire(this.opts.maxWaitMs);
     // A pause installed while this request sat in the queue must still stop it
-    // (spec 7.1: queued requests get 429 immediately).
+    // (spec 7.1: queued requests get 429 immediately), whichever of the two it is.
     if (this.isPaused(s)) { release(); throw this.pausedError(id, s); }
+    const queuedPause = this.modelRemainingS(modelName);
+    if (queuedPause !== undefined) { release(); throw this.modelPausedError(modelName, queuedPause); }
 
     const started = this.now();
     let outcome: "ok" | ErrorKind = "bad_output";
@@ -171,8 +200,8 @@ export class Core {
     let phase: "running" | "ended" | "threw" = "running";
     try {
       for await (const ev of produce()) {
-        if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; s.strikes = 0; }
-        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, ev.kind, ev.retryAfterS, kind); }
+        if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; s.strikes = 0; this.modelPauses.delete(modelName); }
+        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, modelName, ev, kind); }
         else if (ev.type === "rate_limit") this.onRateLimit(id, ev);
         yield ev;
       }
@@ -200,8 +229,13 @@ export class Core {
   // a bare 429) must not cut a multi-day quota pause down to a minute. A
   // negative retry-after (a reset already in the past, or a provider clock
   // ahead of ours) is treated as zero so the minute of slack still applies.
-  private onError(id: string, s: State, kind: ErrorKind, retryAfterS?: number, modelKind: ModelKind = "text") {
+  private onError(id: string, s: State, modelName: string, ev: Extract<ProviderEvent, { type: "error" }>, modelKind: ModelKind = "text") {
+    const { kind, retryAfterS } = ev;
     if (kind === "rate_limited") {
+      // A refusal the CLI attributed to the model that was asked for: pausing
+      // the provider would take down the models that still answer, which is
+      // what the Fable capture of 2026-09-21 showed happening.
+      if (ev.scope === "model") { this.pauseModel(id, modelName, retryAfterS); return; }
       const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** s.strikes) * 60_000;
       s.strikes++;
       s.pausedUntil = Math.max(s.pausedUntil ?? 0, this.now() + waitMs);
@@ -218,6 +252,20 @@ export class Core {
       s.health = { ok: false, kind, detail: "auth_expired reported by a request", checkedAt: this.now() };
       this.opts.log.error({ provider: id }, "provider authentication expired");
     }
+  }
+
+  // The model's own pause, by the same rules as the provider's: an explicit
+  // reset plus a minute of slack, the doubling backoff without one, and a
+  // pause that only ever grows while it stands. Its strikes are the model's,
+  // so a second model of the same provider starts its own count, and a
+  // successful run of this model clears both (guarded(), on `done`).
+  private pauseModel(providerId: string, model: string, retryAfterS?: number) {
+    const p = this.modelPauses.get(model) ?? { pausedUntil: 0, strikes: 0 };
+    const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** p.strikes) * 60_000;
+    p.strikes++;
+    p.pausedUntil = Math.max(p.pausedUntil, this.now() + waitMs);
+    this.modelPauses.set(model, p);
+    this.opts.log.warn({ provider: providerId, model, seconds: Math.round((p.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: p.strikes }, "model paused after a rate limit");
   }
 
   private onRateLimit(id: string, ev: Extract<ProviderEvent, { type: "rate_limit" }>) {

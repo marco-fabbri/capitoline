@@ -66,6 +66,70 @@ describe("Core", () => {
     expect(await drain(core.execute(req("a-1"), { source: "http" }))).toEqual(OK);   // probe succeeded
     expect(core.providerStates().find((p) => p.id === "a")!.strikes).toBe(0);
   });
+  it("pauses only the refusing model when the refusal names it, and keeps the others answering", async () => {
+    // The Fable capture (host, 2026-09-21): one model exhausted while the same
+    // subscription still answered on the others. Pausing the provider would
+    // take the working models down with it.
+    let t = 1_000_000;
+    const { core, a } = make({ now: () => t });
+    a.script = (r) => (r.model === "a-1" ? [{ type: "error", kind: "rate_limited", detail: "reached your a-1 limit", scope: "model" }] : OK);
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(core.providerStates().find((p) => p.id === "a")).toMatchObject({ pausedUntil: null, strikes: 0 });
+    await expect(drain(core.execute(req("a-1"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited", retryAfterS: 60 });
+    expect(await drain(core.execute(req("a-2"), { source: "http" }))).toEqual(OK);
+    expect(core.listModels().map((m) => [m.name, m.available, m.reason])).toEqual([
+      ["a-1", false, "rate_limited"], ["a-2", true, undefined], ["b-1", true, undefined],
+    ]);
+    // The wait a client is told: the model's pause, not the provider's absence of one.
+    expect(core.pauseRemainingS("a")).toBeUndefined();
+    expect(core.pauseRemainingS("a", "a-1")).toBe(60);
+    expect(core.pauseRemainingS("a", "a-2")).toBeUndefined();
+    t += 61_000;                                          // the pause has run out: the model is probed again
+    a.script = OK;
+    expect(await drain(core.execute(req("a-1"), { source: "http" }))).toEqual(OK);
+    expect(core.listModels().find((m) => m.name === "a-1")!.available).toBe(true);
+  });
+  it("grows the model pause with its own strikes and honours a reported reset", async () => {
+    let t = 1_000_000;
+    const { core, a } = make({ now: () => t });
+    a.script = [{ type: "error", kind: "rate_limited", detail: "reached your a-1 limit", scope: "model" }];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    t += 61_000;
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(core.pauseRemainingS("a", "a-1")).toBe(120);    // second strike: 2 minutes
+    // An explicit reset replaces the backoff and never shortens a longer pause.
+    t += 121_000;
+    a.script = [{ type: "error", kind: "rate_limited", detail: "reached your a-1 limit", scope: "model", retryAfterS: 3600 }];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(core.pauseRemainingS("a", "a-1")).toBe(3660);
+    expect(core.listModels().find((m) => m.name === "a-2")!.available).toBe(true);
+  });
+  it("never shortens a model pause when a second, shorter refusal lands from a request already in flight", async () => {
+    const t = 1_000_000;
+    // Concurrency 2: both requests pass the gate before either one fails.
+    const p = new FakeProvider("p", ["p-1"], OK, 2);
+    p.delayMs = 20;
+    p.script = () => [{ type: "error", kind: "rate_limited", detail: "reached your p-1 limit", scope: "model", retryAfterS: p.calls.length === 1 ? 3600 : 30 }];
+    const core = new Core([p], new UsageStore(":memory:"), { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
+    const long = drain(core.execute(req("p-1"), { source: "http" }));
+    await new Promise((r) => setTimeout(r, 5));
+    const short = drain(core.execute(req("p-1"), { source: "http" }));
+    await long;
+    await short;
+    expect(core.pauseRemainingS("p", "p-1")).toBe(3660);
+  });
+  it("rejects a model-paused request that was queued when the pause landed", async () => {
+    const { core, a } = make();
+    a.delayMs = 30;
+    a.script = [{ type: "error", kind: "rate_limited", detail: "reached your a-1 limit", scope: "model" }];
+    const first = drain(core.execute(req("a-1"), { source: "http" }));
+    await new Promise((r) => setTimeout(r, 10));
+    const queued = drain(core.execute(req("a-1"), { source: "http" }));
+    await expect(queued).rejects.toMatchObject({ kind: "rate_limited" });
+    await first;
+    expect(a.calls.length).toBe(1);
+    expect(core.providerStates().find((p) => p.id === "a")).toMatchObject({ active: 0, waiting: 0, pausedUntil: null });
+  });
   it("invalidates health immediately on auth_expired", async () => {
     const { core, a } = make();
     a.script = [{ type: "error", kind: "auth_expired", detail: "Login expired" }];

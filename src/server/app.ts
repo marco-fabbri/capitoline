@@ -49,12 +49,13 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   app.use(express.json({ limit: "20mb" }));
 
   // A provider error event becomes the client's error. For a rate limit the
-  // wait comes from Core, which has just installed the pause for that provider
-  // (with its slack, and possibly a longer pause still running): telling the
-  // client the CLI's raw figure would have it retry into a second 429.
-  const providerError = (ev: Extract<ProviderEvent, { type: "error" }>, provider: string): CapitolineError => {
-    opts.log.warn({ kind: ev.kind, detail: ev.detail.slice(-2000) }, "provider error");
-    const retry = ev.kind === "rate_limited" ? core.pauseRemainingS(provider) ?? ev.retryAfterS : ev.retryAfterS;
+  // wait comes from Core, which has just installed the pause (with its slack,
+  // and possibly a longer pause still running): telling the client the CLI's
+  // raw figure would have it retry into a second 429. The model is passed too,
+  // because the pause may have been installed on the model alone.
+  const providerError = (ev: Extract<ProviderEvent, { type: "error" }>, provider: string, model: string): CapitolineError => {
+    opts.log.warn({ kind: ev.kind, model, detail: ev.detail.slice(-2000) }, "provider error");
+    const retry = ev.kind === "rate_limited" ? core.pauseRemainingS(provider, model) ?? ev.retryAfterS : ev.retryAfterS;
     return new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind], retry);
   };
 
@@ -101,7 +102,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
             res.write(sseChunk(conv.req.model, id, { content: ev.delta }, null));
           } else text += ev.delta;
         } else if (ev.type === "done") usage = ev.usage;
-        else if (ev.type === "error") throw providerError(ev, provider);
+        else if (ev.type === "error") throw providerError(ev, provider, conv.req.model);
       }
       if (ac.signal.aborted) return; // client went away: nothing left to answer
       if (conv.req.stream) {
@@ -143,7 +144,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
       if (ignored) res.setHeader("X-Capitoline-Ignored", ignored);
       for await (const ev of core.generateImage(conv.req, { signal: ac.signal, source: "http" })) {
         if (ev.type === "image") image = ev;
-        else if (ev.type === "error") throw providerError(ev, provider);
+        else if (ev.type === "error") throw providerError(ev, provider, conv.req.model);
         // text events are the agent's prose ("saved as ./image.png" and the
         // like) and never reach the client: the answer is the image or an error.
       }

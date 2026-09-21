@@ -25,7 +25,12 @@ export type ProviderEvent =
   | { type: "text"; delta: string }
   | { type: "done"; usage?: Usage }
   // retryAfterS: an explicit wait the CLI reported (quota reset); absent when unknown.
-  | { type: "error"; kind: ErrorKind; detail: string; retryAfterS?: number }
+  // scope: what the refusal is about. Absent means the provider, which is the
+  // safe reading — a subscription-wide limit must stop every model behind it.
+  // "model" is set only when the CLI attributed the refusal to the model that
+  // was asked for (Claude's per-model limits, real capture 2026-09-21): pausing
+  // the provider would then take down models that still answer.
+  | { type: "error"; kind: ErrorKind; detail: string; retryAfterS?: number; scope?: "model" }
   | { type: "rate_limit"; fiveHour?: RateLimitWindow; sevenDay?: RateLimitWindow }
   | { type: "image"; mime: ImageMime; bytes: Buffer; width: number; height: number };
 

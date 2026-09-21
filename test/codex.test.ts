@@ -44,4 +44,30 @@ describe("codex adapter", () => {
     async function* l() { yield JSON.stringify({ type: "turn.failed", error: { message: "429 Too Many Requests" } }); }
     expect(await events(l())).toEqual([{ type: "error", kind: "rate_limited", detail: "429 Too Many Requests" }]);
   });
+  it("classifies a string error instead of discarding it", async () => {
+    // `error` is not always an object: a bare string would have lost the
+    // message and been answered 502 instead of 429.
+    async function* l() { yield JSON.stringify({ type: "turn.failed", error: "429 Too Many Requests" }); }
+    expect(await events(l())).toEqual([{ type: "error", kind: "rate_limited", detail: "429 Too Many Requests" }]);
+    async function* empty() { yield JSON.stringify({ type: "turn.failed", error: {} }); }
+    expect(await events(empty())).toEqual([{ type: "error", kind: "cli_crashed", detail: "codex error" }]);
+  });
+  it("maps the real expired-credential capture to auth_expired", async () => {
+    const ev = await events(linesOf("test/fixtures/codex/auth-expired.jsonl"));
+    expect(ev).toHaveLength(1);                      // the first error ends the stream
+    expect(ev[0]).toMatchObject({ type: "error", kind: "auth_expired" });
+    expect((ev[0] as any).detail).toContain("401 Unauthorized");
+  });
+  it("replaces unpaired surrogates in the developer instructions", () => {
+    // Client-controlled text can hold a lone surrogate; JSON.stringify escapes
+    // it verbatim and the CLI's TOML parser then rejects the whole override.
+    const c = codexAdapter.buildCommand(cfg, astra, {
+      model: "codex-gpt-6-astra", stream: false,
+      messages: [{ role: "system", text: "lone \uD800 pair \u{1F680} end" }, { role: "user", text: "q" }],
+    });
+    const arg = c.args.find((a) => a.startsWith("developer_instructions="))!;
+    expect(arg).toBe('developer_instructions="lone � pair \u{1F680} end"');
+    expect(arg).not.toContain("\\ud800");
+    expect(JSON.parse(arg.slice("developer_instructions=".length))).toBe("lone � pair \u{1F680} end");
+  });
 });

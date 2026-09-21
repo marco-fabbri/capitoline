@@ -1,8 +1,23 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
-import type { InternalRequest, ProviderEvent, RateLimitWindow } from "../core/types.js";
+import type { ErrorKind, InternalRequest, ProviderEvent, RateLimitWindow } from "../core/types.js";
 import { effortArgs, effortValue, jsonLines, type Adapter, type Command, type ModelSpec } from "./adapter.js";
-import { classifyError } from "./errors.js";
+import { classifyError, isModelScoped } from "./errors.js";
+
+// The HTTP status the CLI puts in the result when the API refused the call.
+// It is the only reliable signal: the prose next to it is a product message
+// that changes with the plan and the model, and the real Fable refusal
+// (2026-09-21) matched none of the patterns in errors.ts, so it was classified
+// cli_crashed and answered 502 while the right answer was 429 plus a pause.
+// undefined for a status the map says nothing about (a 400, a bad request
+// built by this gateway): the prose then decides, as it did before.
+function fromStatus(status: unknown): ErrorKind | undefined {
+  if (typeof status !== "number") return undefined;
+  if (status === 429) return "rate_limited";
+  if (status === 401 || status === 403) return "auth_expired";
+  if (status >= 500 && status < 600) return "cli_crashed";
+  return undefined;
+}
 
 function window(w: unknown): RateLimitWindow | undefined {
   if (!w || typeof w !== "object") return undefined;
@@ -39,11 +54,22 @@ export const claudeAdapter: Adapter = {
         for (const block of msg?.content ?? []) if (block.type === "text" && block.text) yield { type: "text", delta: block.text };
       } else if (type === "rate_limit_event") {
         const info = o.rate_limit_info as { unifiedWindows?: { five_hour?: unknown; seven_day?: unknown } } | undefined;
-        yield { type: "rate_limit", fiveHour: window(info?.unifiedWindows?.five_hour), sevenDay: window(info?.unifiedWindows?.seven_day) };
+        const fiveHour = window(info?.unifiedWindows?.five_hour);
+        const sevenDay = window(info?.unifiedWindows?.seven_day);
+        // An event carrying neither window says nothing: Core would store no
+        // window from it, and emitting it only gives the gateway a chance to
+        // act on an empty report.
+        if (fiveHour || sevenDay) yield { type: "rate_limit", fiveHour, sevenDay };
       } else if (type === "result") {
+        // `subtype` stays "success" on a refusal (both real captures): only
+        // `is_error` says whether the run failed.
         if (o.is_error) {
           const detail = String(o.result ?? o.subtype ?? "unknown error");
-          yield { type: "error", kind: classifyError(detail), detail };
+          const kind = fromStatus(o.api_error_status) ?? classifyError(detail);
+          // A per-model limit is not a provider-wide one: the subscription
+          // kept answering on the other models while Fable was refused.
+          const scoped = kind === "rate_limited" && isModelScoped(detail);
+          yield { type: "error", kind, detail, ...(scoped ? { scope: "model" as const } : {}) };
           return;
         }
         const u = (o.usage ?? {}) as Record<string, number>;

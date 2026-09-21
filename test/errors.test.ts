@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { classifyError, detectQuotaExhausted } from "../src/providers/errors.js";
+import { classifyError, detectQuotaExhausted, isModelScoped } from "../src/providers/errors.js";
 
 describe("classifyError", () => {
   it.each([
@@ -17,6 +17,44 @@ describe("classifyError", () => {
     ["", "cli_crashed"],
   ])("classifies %j as %s", (text, kind) => {
     expect(classifyError(text)).toBe(kind);
+  });
+});
+
+describe("classifyError over the real expired-credential captures", () => {
+  // The three fixtures were recorded on the host with a deliberately invalid
+  // credential (A5): the patterns are checked against what the CLIs say, not
+  // against what their documentation says.
+  const fixture = (p: string) => readFileSync(join(process.cwd(), "test/fixtures", p), "utf8");
+  it("reads the claude result message as auth_expired", () => {
+    const o = JSON.parse(fixture("claude/auth-expired.json")) as { result: string; api_error_status: number };
+    expect(o.api_error_status).toBe(401);
+    expect(classifyError(o.result)).toBe("auth_expired");
+  });
+  it("reads the codex turn.failed message as auth_expired", () => {
+    const last = fixture("codex/auth-expired.jsonl").split("\n").filter((l) => l.trim().startsWith("{")).at(-1)!;
+    const o = JSON.parse(last) as { type: string; error: { message: string } };
+    expect(o.type).toBe("turn.failed");
+    expect(classifyError(o.error.message)).toBe("auth_expired");
+  });
+  it("reads the antigravity result error as auth_expired", () => {
+    const o = JSON.parse(fixture("antigravity/auth-expired.json")) as { error: string };
+    expect(classifyError(o.error)).toBe("auth_expired");
+  });
+});
+
+describe("isModelScoped", () => {
+  it.each([
+    // The real Fable refusal: the CLI itself says the other models still work.
+    ["You've reached your Fable limit. Switch to another model, or manage usage credits at claude.ai/settings/usage, to continue.", true],
+    ["Reached your Sonnet limit for now.", true],
+    // The subscription-wide wordings, which must keep pausing the provider.
+    ["Claude usage limit reached. Your limit will reset at 3pm.", false],
+    ["You've hit your usage limit. Resets at 5pm", false],
+    ["You've reached your plan limit.", false],
+    ["429 Too Many Requests", false],
+    ["", false],
+  ])("%j -> %s", (text, scoped) => {
+    expect(isModelScoped(text)).toBe(scoped);
   });
 });
 

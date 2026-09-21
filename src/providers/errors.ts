@@ -12,6 +12,23 @@ export function classifyError(text: string): ErrorKind {
   return "cli_crashed";
 }
 
+// A refusal the CLI attributes to the model that was asked for rather than to
+// the subscription behind it. Real capture on the host, 2026-09-21: "You've
+// reached your Fable limit. Switch to another model, or manage usage credits
+// at claude.ai/settings/usage…, to continue." — sent while the same
+// subscription still answered on Opus and Sonnet. Two markers, both taken from
+// wordings the CLIs actually use: the advice to change model, which says in so
+// many words that the others still work, and a limit named after something
+// that is not the plan itself. The named words are excluded because
+// "your usage limit" and "your plan limit" are the subscription-wide
+// wordings, and reading one of those as model-scoped would leave the gateway
+// hammering a provider that is out of quota altogether.
+const MODEL_SCOPED = /\bswitch to (?:another|a different) model\b|\breached your (?!usage\b|plan\b|account\b|subscription\b|weekly\b|daily\b|five|5)[\w.-]+ limit\b/i;
+
+export function isModelScoped(text: string): boolean {
+  return MODEL_SCOPED.test(text);
+}
+
 // Antigravity's image quota exhaustion is silent: the run ends SUCCESS, and the
 // only trace is the tool step in ERROR carrying a 429 body, or prose from the
 // agent. The captured shape (test/fixtures/antigravity/image-429.jsonl):

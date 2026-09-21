@@ -36,10 +36,38 @@ export interface Provider {
   health(): Promise<HealthStatus>;
 }
 
+/**
+ * The effort level a request runs at, and the value the CLI is given for it:
+ * the level the caller asked for when the model offers it, the nearest one
+ * otherwise, and null when the provider has no value to send at all.
+ *
+ * The candidates are the model's own `efforts` **intersected with the
+ * provider's effort table**. The configuration already refuses a model
+ * declaring an effort the table does not price, but the file the service reads
+ * is the hand-edited copy on the host, and the intersection is what keeps a
+ * mismatch that slips into it from dropping the effort altogether: before it,
+ * a model offering low/high against a table holding only `low` resolved to
+ * `high`, found no value for it and returned null, so the run took the CLI's
+ * own default with nothing said anywhere. With the intersection it runs at
+ * `low` — not the level asked for, but a declared one.
+ *
+ * `nearestEffort` breaks a tie towards the **higher** level: "medium" on a
+ * model offering only low/high runs high. Decided in B2 (2026-09-21) and kept
+ * rather than flipped. An effort the caller named is the quality they expect,
+ * and nothing in the response could tell them the cheap level ran instead,
+ * while the cost of the opposite mistake is latency and quota, which /health
+ * reports and the budget windows already track. The only model the rule
+ * touches today is `agy-gemini-pro` (`efforts: [low, high]`, no medium in the
+ * CLI's ids), whose default requests on the deployed host all resolve to
+ * `gemini-3.1-pro-high`: flipping the tie-break would silently downgrade every
+ * one of them with no request having asked for it. A caller who wants the
+ * cheap level asks for `low`, which is never approximated away.
+ */
 export function effortValue(cfg: ProviderConfig, model: ModelSpec, wanted: Effort | undefined): { effort: Effort; value: string } | null {
   const table = Object.keys(cfg.effort) as Effort[];
   if (table.length === 0) return null;
-  const allowed = model.efforts ?? table;
+  const allowed = (model.efforts ?? table).filter((e) => Object.hasOwn(cfg.effort, e));
+  if (allowed.length === 0) return null;
   const effort = nearestEffort(wanted ?? "medium", allowed);
   const value = cfg.effort[effort];
   if (value === undefined) return null;

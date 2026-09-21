@@ -24,11 +24,12 @@ function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
   const progressIntervalMs = Math.max(1, opts.progressIntervalMs ?? PROGRESS_INTERVAL_MS);
 
   // A provider error event becomes the tool's error. For a rate limit the wait
-  // comes from Core, which has just installed the pause for that provider (with
-  // its slack, and possibly a longer pause still running): the CLI's raw figure
-  // would have the client retry into a second 429. Same rule as the HTTP layer.
-  const providerError = (ev: Extract<ProviderEvent, { type: "error" }>, provider: string): CapitolineError => {
-    const retry = ev.kind === "rate_limited" ? core.pauseRemainingS(provider) ?? ev.retryAfterS : ev.retryAfterS;
+  // comes from Core, which has just installed the pause (with its slack, and
+  // possibly a longer pause still running): the CLI's raw figure would have the
+  // client retry into a second 429. The model is passed too, because the pause
+  // may have been installed on the model alone. Same rule as the HTTP layer.
+  const providerError = (ev: Extract<ProviderEvent, { type: "error" }>, provider: string, model: string): CapitolineError => {
+    const retry = ev.kind === "rate_limited" ? core.pauseRemainingS(provider, model) ?? ev.retryAfterS : ev.retryAfterS;
     return new CapitolineError(ev.kind, ev.kind, retry);
   };
   // The tool error text carries the kind and the wait, never the provider's
@@ -81,7 +82,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
       for await (const ev of core.execute({ model, messages, effort, stream: true }, { signal: extra.signal, source: "mcp" })) {
         if (ev.type === "text") { text += ev.delta; if (++n % 20 === 0) await progress(false); }
         else if (ev.type === "done") usage = ev.usage;
-        else if (ev.type === "error") throw providerError(ev, providerOf(model));
+        else if (ev.type === "error") throw providerError(ev, providerOf(model), model);
       }
       await progress(true);
       const structured = { model, provider: providerOf(model), usage: { prompt_tokens: usage?.input ?? 0, completion_tokens: usage?.output ?? 0 } };
@@ -128,7 +129,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions): McpServer {
       let image: Extract<ProviderEvent, { type: "image" }> | undefined;
       for await (const ev of core.generateImage({ model, prompt }, { signal: extra.signal, source: "mcp" })) {
         if (ev.type === "image") image = ev;
-        else if (ev.type === "error") throw providerError(ev, provider);
+        else if (ev.type === "error") throw providerError(ev, provider, model);
         // text events are the agent's prose ("saved as ./image.png" and the
         // like) and never reach the client: the answer is the image or an error.
       }
