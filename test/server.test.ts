@@ -135,11 +135,19 @@ describe("POST /v1/chat/completions", () => {
     expect(r.body.error.code).toBe(kind);
     expect(JSON.stringify(r.body)).not.toContain("secret stderr");
   });
-  it("passes an explicit retry-after from the provider into Retry-After", async () => {
+  it("answers Retry-After with the pause Core installed (provider figure plus the minute of slack)", async () => {
     const { app } = make([{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 120 }]);
     const r = await request(app).post("/v1/chat/completions").send(body());
     expect(r.status).toBe(429);
-    expect(r.headers["retry-after"]).toBe("120");
+    expect(r.headers["retry-after"]).toBe("180");
+  });
+  it("keeps a header-unsafe unknown key out of X-Capitoline-Ignored and still answers 200", async () => {
+    const { app } = make();
+    const r = await request(app).post("/v1/chat/completions").send(body({ "weird\r\nX-Evil: 1": "v", max_tokens: 10 }));
+    expect(r.status).toBe(200);
+    expect(r.headers["x-capitoline-ignored"]).toBe("max_tokens");
+    expect(r.headers["x-evil"]).toBeUndefined();
+    expect(r.body.capitoline.ignored.sort()).toEqual(["max_tokens", "weird\r\nX-Evil: 1"]);
   });
   it("returns 400 for a chat request against an image model", async () => {
     const { app, p } = makeImages();
@@ -215,6 +223,19 @@ describe("POST /v1/images/generations", () => {
     expect(r.body.capitoline.model).toBe("agy-image");
     expect(p.imageCalls[0].model).toBe("agy-image");
   });
+  it("defaults to an available image model, skipping one whose provider is unhealthy", async () => {
+    const first = new FakeProvider("one", [{ name: "one-image", kind: "image" }], OK, 1);
+    const second = new FakeProvider("two", [{ name: "two-image", kind: "image" }], OK, 1);
+    first.imageScript = [IMG, { type: "done" }]; second.imageScript = [IMG, { type: "done" }];
+    first.healthResult = { ok: false, kind: "auth_expired", detail: "expired", checkedAt: 0 };
+    const core = new Core([first, second], new UsageStore(":memory:"), { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+    await core.checkHealth();
+    const app = createApp(core, { log: createLogger("t") });
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
+    expect(r.status).toBe(200);
+    expect(r.body.capitoline).toMatchObject({ provider: "two", model: "two-image" });
+    expect(first.imageCalls).toHaveLength(0);
+  });
   it("returns 400 when model is omitted and no image model exists", async () => {
     const { app } = make();
     const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
@@ -229,8 +250,39 @@ describe("POST /v1/images/generations", () => {
     expect(r.body.capitoline.ignored.sort()).toEqual(["quality", "size", "style"]);
     expect(r.body.capitoline.width).toBe(1376);
   });
+  it("lists every unknown key, not only the style ones, in the header and the body", async () => {
+    const { app } = makeImages();
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "x", user: "u", banana: 1 });
+    expect(r.status).toBe(200);
+    expect(r.headers["x-capitoline-ignored"].split(",").sort()).toEqual(["banana", "user"]);
+    expect(r.body.capitoline.ignored.sort()).toEqual(["banana", "user"]);
+  });
+  it("keeps a header-unsafe unknown key out of X-Capitoline-Ignored and still answers 200", async () => {
+    const { app } = makeImages();
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "x", "weird\r\nX-Evil: 1": "v" });
+    expect(r.status).toBe(200);
+    expect(r.headers["x-capitoline-ignored"]).toBeUndefined();
+    expect(r.headers["x-evil"]).toBeUndefined();
+    expect(r.body.capitoline.ignored).toEqual(["weird\r\nX-Evil: 1"]);
+  });
+  it("caps the header at 32 names while the body keeps them all", async () => {
+    const { app } = makeImages();
+    const extra = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`k${i}`, 1]));
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "x", ...extra });
+    expect(r.status).toBe(200);
+    expect(r.headers["x-capitoline-ignored"].split(",")).toHaveLength(32);
+    expect(r.body.capitoline.ignored).toHaveLength(40);
+  });
+  it("drops the agent's prose: only the image reaches the client", async () => {
+    const { app } = makeImages([{ type: "text", delta: "saved as ./image.png" }, IMG, { type: "done" }]);
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
+    expect(r.status).toBe(200);
+    expect(r.text).not.toContain("./image.png");
+    expect(Buffer.from(r.body.data[0].b64_json, "base64")).toEqual(JPEG);
+  });
   it.each([
-    [{ n: 2 }, /"n" must be 1/], [{ response_format: "url" }, /response_format/], [{ prompt: "" }, /prompt/], [{ prompt: undefined }, /prompt/],
+    [{ n: 2 }, /"n" must be 1/], [{ response_format: "url" }, /response_format/], [{ output_format: "png" }, /output_format/],
+    [{ prompt: "" }, /prompt/], [{ prompt: undefined }, /prompt/],
   ])("rejects %j with 400", async (extra, re) => {
     const { app, p } = makeImages();
     const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", ...extra });
@@ -239,7 +291,7 @@ describe("POST /v1/images/generations", () => {
     expect(r.body.error.message).toMatch(re);
     expect(p.imageCalls).toHaveLength(0);
   });
-  it.each([[{ n: 1 }], [{ response_format: "b64_json" }], [{ n: null }]])("accepts %j with 200", async (extra) => {
+  it.each([[{ n: 1 }], [{ response_format: "b64_json" }], [{ output_format: "jpeg" }], [{ n: null }]])("accepts %j with 200", async (extra) => {
     const { app } = makeImages();
     const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", ...extra });
     expect(r.status).toBe(200);
@@ -257,14 +309,22 @@ describe("POST /v1/images/generations", () => {
     const { app } = makeImages();
     expect((await request(app).post("/v1/images/generations").send({ prompt: "x", model: "nope" })).status).toBe(404);
   });
-  it("maps rate_limited with an explicit retry-after to 429 and Retry-After", async () => {
-    const { app } = makeImages([{ type: "error", kind: "rate_limited", detail: "429 secret body", retryAfterS: 442_209 }]);
+  it("maps rate_limited with an explicit retry-after to 429 and the Retry-After Core installed", async () => {
+    const { app, core } = makeImages([{ type: "error", kind: "rate_limited", detail: "429 secret body", retryAfterS: 442_209 }]);
     const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
     expect(r.status).toBe(429);
-    expect(r.headers["retry-after"]).toBe("442209");
+    expect(r.headers["retry-after"]).toBe("442269");
+    expect(Number(r.headers["retry-after"])).toBe(core.pauseRemainingS("antigravity"));
     expect(r.body.error.code).toBe("rate_limited");
     expect(r.body.error.message).toBe("provider rate limit reached");
     expect(r.text).not.toContain("secret body");
+  });
+  it("still sends Retry-After on a 429 when the provider's reset instant is already behind us (retryAfterS 0)", async () => {
+    const { app } = makeImages([{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 0 }]);
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
+    expect(r.status).toBe(429);
+    expect(r.headers["retry-after"]).toBeDefined();
+    expect(Number(r.headers["retry-after"])).toBeGreaterThanOrEqual(1);
   });
   it.each([
     ["auth_expired", 503], ["timeout", 504], ["cli_crashed", 502], ["bad_output", 502],

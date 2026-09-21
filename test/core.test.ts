@@ -210,10 +210,14 @@ describe("Core images", () => {
     c.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }];
     await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
     expect(core.providerStates().find((p) => p.id === "c")).toMatchObject({ pausedUntil: t + (442_209 + 60) * 1000, strikes: 1 });
+    // The wait a client is told is the installed pause, not the CLI's figure.
+    expect(core.pauseRemainingS("c")).toBe(442_269);
+    expect(core.pauseRemainingS("a")).toBeUndefined();
     await expect(drain(core.generateImage(imgReq("c-image"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited", retryAfterS: 442_269 });
     // Chat shares the provider, so the pause holds it too.
     await expect(drain(core.execute(req("c-text"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited", retryAfterS: 442_269 });
     t += (442_209 + 61) * 1000;
+    expect(core.pauseRemainingS("c")).toBeUndefined();
     c.imageScript = IMG_OK;
     expect(await drain(core.generateImage(imgReq("c-image"), { source: "http" }))).toEqual(IMG_OK);
     expect(core.providerStates().find((p) => p.id === "c")!.strikes).toBe(0);

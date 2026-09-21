@@ -34,6 +34,17 @@ function requested(v: unknown): boolean {
 
 export interface Converted { req: InternalRequest; ignored: string[] }
 
+// The ignored list goes into the JSON body as is; the header copy is built
+// from client-supplied keys, so only HTTP token characters are allowed (a key
+// with CR/LF would make setHeader throw and turn "ignored" into a 502) and the
+// count is capped so a body full of unknown keys cannot grow the header past
+// what an upstream proxy accepts. The full list is still in capitoline.ignored.
+const HEADER_TOKEN = /^[A-Za-z0-9_.-]{1,64}$/;
+export function ignoredHeader(ignored: string[]): string | undefined {
+  const safe = ignored.filter((f) => HEADER_TOKEN.test(f)).slice(0, 32);
+  return safe.length ? safe.join(",") : undefined;
+}
+
 export function convertChatRequest(body: unknown): Converted {
   const parsed = Body.safeParse(body);
   if (!parsed.success) throw new CapitolineError("bad_request", parsed.error.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; "));

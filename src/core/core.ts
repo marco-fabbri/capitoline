@@ -32,9 +32,20 @@ export class Core {
 
   private isPaused(s: State): boolean { return s.pausedUntil !== null && s.pausedUntil > this.now(); }
 
+  private remainingS(s: State): number { return Math.ceil((s.pausedUntil! - this.now()) / 1000); }
+
   private pausedError(id: string, s: State): CapitolineError {
-    const retry = Math.ceil((s.pausedUntil! - this.now()) / 1000);
-    return new CapitolineError("rate_limited", `provider ${id} is paused after a rate limit`, retry);
+    return new CapitolineError("rate_limited", `provider ${id} is paused after a rate limit`, this.remainingS(s));
+  }
+
+  // Seconds until the pause installed for a provider ends, undefined when it
+  // is not paused. This is what a client must be told in Retry-After: the
+  // CLI's own retry-after is shorter than the pause (onError adds slack and
+  // never shortens an earlier, longer pause), so echoing it back would send
+  // the client into pausedError a minute early.
+  pauseRemainingS(providerId: string): number | undefined {
+    const s = this.states.get(providerId);
+    return s && this.isPaused(s) ? this.remainingS(s) : undefined;
   }
 
   private unavailableReason(s: State): string | undefined {

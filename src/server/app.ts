@@ -1,9 +1,9 @@
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import type { Core } from "../core/core.js";
-import { CapitolineError, type Usage } from "../core/types.js";
+import { CapitolineError, type ProviderEvent, type Usage } from "../core/types.js";
 import type { Logger } from "../log.js";
 import { convertImageRequest, imageResponse, type ImageEvent } from "./images.js";
-import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, sseChunk } from "./openai.js";
+import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, ignoredHeader, sseChunk } from "./openai.js";
 
 function beginSse(res: Response) {
   res.status(200).setHeader("Content-Type", "text/event-stream").setHeader("Cache-Control", "no-cache");
@@ -14,7 +14,10 @@ function sendError(res: Response, e: unknown, log: Logger) {
   const err = e instanceof CapitolineError ? e : new CapitolineError("bad_output", "internal error");
   if (!(e instanceof CapitolineError)) log.error({ err: e }, "unhandled error");
   const { status, retryAfterS } = httpStatus(err);
-  if (retryAfterS) res.setHeader("Retry-After", String(retryAfterS));
+  // Zero is a value, not an absence: a reset instant already behind us reaches
+  // here as 0 and the 429 must still carry Retry-After (spec 8.3), so the
+  // header is emitted whenever a wait is known and never below one second.
+  if (retryAfterS !== undefined) res.setHeader("Retry-After", String(Math.max(1, Math.ceil(retryAfterS))));
   res.status(status).json({ error: { message: err.message, type: status >= 500 ? "server_error" : "invalid_request_error", code: err.kind } });
 }
 
@@ -28,6 +31,16 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   const access = opts.access;
   if (access) app.use((req, res, next) => (req.path === "/health" ? next() : access(req, res, next)));
   app.use(express.json({ limit: "20mb" }));
+
+  // A provider error event becomes the client's error. For a rate limit the
+  // wait comes from Core, which has just installed the pause for that provider
+  // (with its slack, and possibly a longer pause still running): telling the
+  // client the CLI's raw figure would have it retry into a second 429.
+  const providerError = (ev: Extract<ProviderEvent, { type: "error" }>, provider: string): CapitolineError => {
+    opts.log.warn({ kind: ev.kind, detail: ev.detail.slice(-2000) }, "provider error");
+    const retry = ev.kind === "rate_limited" ? core.pauseRemainingS(provider) ?? ev.retryAfterS : ev.retryAfterS;
+    return new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind], retry);
+  };
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, providers: core.providerStates(), models: core.listModels() });
@@ -43,7 +56,6 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   app.post("/v1/chat/completions", async (req: Request, res: Response) => {
     let conv;
     try { conv = convertChatRequest(req.body); } catch (e) { return sendError(res, e, opts.log); }
-    if (conv.ignored.length) res.setHeader("X-Capitoline-Ignored", conv.ignored.join(","));
     const ac = new AbortController();
     res.on("close", () => { if (!res.writableFinished) ac.abort(); });
     const provider = core.listModels().find((m) => m.name === conv.req.model)?.provider ?? "unknown";
@@ -52,6 +64,8 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     let usage: Usage | undefined;
     let started = false;
     try {
+      const ignored = ignoredHeader(conv.ignored);
+      if (ignored) res.setHeader("X-Capitoline-Ignored", ignored);
       for await (const ev of core.execute(conv.req, { signal: ac.signal, source: "http" })) {
         if (ev.type === "text") {
           if (conv.req.stream) {
@@ -59,7 +73,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
             res.write(sseChunk(conv.req.model, id, { content: ev.delta }, null));
           } else text += ev.delta;
         } else if (ev.type === "done") usage = ev.usage;
-        else if (ev.type === "error") { opts.log.warn({ kind: ev.kind, detail: ev.detail.slice(-2000) }, "provider error"); throw new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind], ev.retryAfterS); }
+        else if (ev.type === "error") throw providerError(ev, provider);
       }
       if (ac.signal.aborted) return; // client went away: nothing left to answer
       if (conv.req.stream) {
@@ -81,25 +95,41 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // One image per request, returned inline (b64_json): there is nothing to
   // stream, so the answer is either the whole document or a spec 8.3 error.
   app.post("/v1/images/generations", async (req: Request, res: Response) => {
+    // One listing per request: each call recomputes the budget flags with
+    // store queries per provider, and both the default and the owner come
+    // from the same snapshot. The default is the first image model a client
+    // would actually see in /v1/models (available), falling back to the first
+    // declared one so a paused provider still answers with its own 404/429.
+    const models = core.listModels();
     let conv;
     try {
-      const defaultModel = core.listModels().find((m) => m.kind === "image")?.name;
+      const defaultModel = (models.find((m) => m.kind === "image" && m.available) ?? models.find((m) => m.kind === "image"))?.name;
       conv = convertImageRequest(req.body, defaultModel);
     } catch (e) { return sendError(res, e, opts.log); }
-    if (conv.ignored.length) res.setHeader("X-Capitoline-Ignored", conv.ignored.join(","));
     const ac = new AbortController();
     res.on("close", () => { if (!res.writableFinished) ac.abort(); });
-    const provider = core.listModels().find((m) => m.name === conv.req.model)?.provider ?? "unknown";
+    const provider = models.find((m) => m.name === conv.req.model)?.provider ?? "unknown";
     let image: ImageEvent | undefined;
     try {
+      const ignored = ignoredHeader(conv.ignored);
+      if (ignored) res.setHeader("X-Capitoline-Ignored", ignored);
       for await (const ev of core.generateImage(conv.req, { signal: ac.signal, source: "http" })) {
         if (ev.type === "image") image = ev;
-        else if (ev.type === "error") { opts.log.warn({ kind: ev.kind, detail: ev.detail.slice(-2000) }, "provider error"); throw new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind], ev.retryAfterS); }
+        else if (ev.type === "error") throw providerError(ev, provider);
+        // text events are the agent's prose ("saved as ./image.png" and the
+        // like) and never reach the client: the answer is the image or an error.
       }
       if (ac.signal.aborted) return; // client went away: nothing left to answer
       if (!image) throw new CapitolineError("bad_output", "the provider finished without returning an image");
       res.json(imageResponse(image, { provider, model: conv.req.model, ignored: conv.ignored }));
     } catch (e) {
+      if (res.headersSent) {
+        // res.json failed mid-way (socket gone under a multi-MB body): the
+        // status is out already, so only the connection can be closed.
+        opts.log.warn({ err: e }, "error after the image response started");
+        res.end();
+        return;
+      }
       sendError(res, e, opts.log);
     }
   });
