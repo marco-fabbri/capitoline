@@ -28,14 +28,19 @@ done
 
 # Image models: one real generation, which is also the only end-to-end check of
 # the sudoers entry (docs/deploy.md §5) and of the helper installed in §7.1.
-# Skipped when the configuration declares no image model; it spends one unit of
-# the image quota (12 per 5 hours), so it runs once, last.
+# Off by default, because it spends one unit of a quota that is 12 per 5 hours
+# and 58 per week, and this script is meant to be run after every CLI update.
+# Turn it on with SMOKE_IMAGE=1 when the image path is what you are checking.
+# A 429 is reported and does not fail the run: an exhausted quota says nothing
+# about whether an update broke the gateway, which is what this script is for.
 IMG=$(yq -r '.providers[].models | to_entries[] | select(.value.kind == "image") | .key' "$CFG" 2>/dev/null | head -1 || true)
 [[ -n "${IMG// /}" ]] || IMG=$(grep -E 'kind:[[:space:]]*image' "$CFG" | grep -vE '^[[:space:]]*#' | head -1 | awk -F: '{print $1}' | tr -d ' ' || true)
 MIN=$(yq -r '[.providers[].image.min_bytes] | map(select(. != null)) | .[0] // ""' "$CFG" 2>/dev/null || true)
 [[ -n "${MIN// /}" ]] || MIN=$(grep -E '^[[:space:]]+min_bytes:' "$CFG" | head -1 | awk '{print $2}' || true)
 [[ "$MIN" =~ ^[0-9]+$ ]] || MIN=0
-if [[ -n "${IMG// /}" ]]; then
+if [[ -n "${IMG// /}" && "${SMOKE_IMAGE:-0}" != "1" ]]; then
+  printf '%-22s %s\n' "$IMG" "skipped (SMOKE_IMAGE=1 to spend one image of the quota)"
+elif [[ -n "${IMG// /}" ]]; then
   : > "$TMP"
   resp=$(curl -sS --max-time 300 ${HDR[@]+"${HDR[@]}"} -o "$TMP" -w '%{http_code}' -H 'content-type: application/json' \
     -d "{\"model\":\"$IMG\",\"prompt\":\"a red fox in the snow, 16:9\"}" \
@@ -43,8 +48,11 @@ if [[ -n "${IMG// /}" ]]; then
   [[ -n "$resp" ]] || resp=000
   bytes=$(jq -r '.capitoline.bytes // 0' "$TMP" 2>/dev/null || echo 0)
   [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
+  code=$(jq -r '.error.code // empty' "$TMP" 2>/dev/null || true)
   if [[ "$resp" == "200" && "$bytes" -gt "$MIN" ]]; then
     printf '%-22s %s  %-40s bytes=%s\n' "$IMG" "$resp" "$(jq -r '"\(.capitoline.mime) \(.capitoline.width)x\(.capitoline.height)"' "$TMP")" "$bytes"
+  elif [[ "$resp" == "429" && "$code" == "rate_limited" ]]; then
+    printf '%-22s %s  %s\n' "$IMG" "$resp" "image quota exhausted, not a regression$(jq -r 'if .capitoline.quota.resetAt then " (reopens \(.capitoline.quota.resetAt))" else "" end' "$TMP" 2>/dev/null || true)"
   else
     printf '%-22s %s  %s\n' "$IMG" "$resp" "$(jq -r '.error.message // empty' "$TMP" 2>/dev/null) [bytes=$bytes min_bytes=$MIN; see docs/deploy.md §7.1]"; fail=1
   fi

@@ -754,6 +754,9 @@ on the host:
 
 ```sh
 cd /var/lib/capitoline/app && CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml scripts/smoke.sh http://127.0.0.1:8080
+# add SMOKE_IMAGE=1 to include one real generation: it spends a unit of a quota
+# that is 12 per 5 hours and 58 per week, so it is off by default. A 429 on the
+# image model is printed and does not fail the run.
 ```
 
 Once §9 is done the loopback form no longer authenticates: the gateway
