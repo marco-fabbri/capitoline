@@ -1,8 +1,14 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
-import type { InternalRequest, ProviderEvent } from "../core/types.js";
-import { effortValue, jsonLines, type Adapter, type Command, type ModelSpec } from "./adapter.js";
+import type { ImageRequest, InternalRequest, ProviderEvent } from "../core/types.js";
+import { effortValue, jsonLines, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
+
+// The CLI is an agent: the prompt names the one tool it may use and forbids
+// everything else. The provider still guards the tool calls it reports.
+export const IMAGE_PROMPT = (prompt: string): string =>
+  `Use the generate_image tool exactly once, with ImageName "image", to create this image: ${prompt}\n` +
+  "Do not create, read, copy or modify any file, do not run commands, do not open a browser. When the tool has finished, reply only with the single word: done";
 
 export const antigravityAdapter: Adapter = {
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
@@ -14,6 +20,12 @@ export const antigravityAdapter: Adapter = {
     let prompt = flatten(rest);
     if (system) prompt = `System instructions:\n${system}\n\n${prompt}`;
     const stdin = JSON.stringify({ event: "user", message: { role: "user", content: prompt } }) + "\n";
+    return { args, stdin };
+  },
+
+  buildImageCommand(cfg: ProviderConfig, model: ModelSpec, req: ImageRequest): ImageCommand {
+    const args = [...cfg.args, ...cfg.image.args, "--model", model.cliModel];
+    const stdin = JSON.stringify({ event: "user", message: { role: "user", content: IMAGE_PROMPT(req.prompt) } }) + "\n";
     return { args, stdin };
   },
 

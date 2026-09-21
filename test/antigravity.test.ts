@@ -29,6 +29,16 @@ describe("antigravity adapter", () => {
     expect(c.args[c.args.indexOf("--model") + 1]).toBe("claude-opus-4-6-thinking");
     expect(JSON.parse(c.stdin).message.content).toBe("System instructions:\nS\n\nq");
   });
+  it("builds an image command with the image args and a fixed tool prompt", () => {
+    const image = models.find((m) => m.name === "agy-image")!;
+    const c = antigravityAdapter.buildImageCommand!(cfg, image, { model: "agy-image", prompt: "a red bicycle" });
+    expect(c.args).toEqual([...cfg.args, ...cfg.image.args, "--model", "gemini-3.8-flash-low"]);
+    const msg = JSON.parse(c.stdin.trim());
+    expect(msg.event).toBe("user");
+    expect(msg.message.content).toContain('Use the generate_image tool exactly once, with ImageName "image", to create this image: a red bicycle');
+    expect(msg.message.content).toContain("reply only with the single word: done");
+    expect(c.stdin.endsWith("\n")).toBe(true);
+  });
   it("parses stream-json into text deltas and done with usage", async () => {
     const ev = await events(linesOf("test/fixtures/antigravity/stream-json.jsonl"));
     expect(ev.filter((e) => e.type === "text").map((e) => (e as any).delta).join("")).toBe("ok ok\n");

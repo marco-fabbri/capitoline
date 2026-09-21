@@ -13,6 +13,11 @@ export function buildProviders(cfg: Config, runner: Runner, log: Logger): Provid
   return Object.entries(cfg.providers).map(([id, pc]) => {
     const adapter = ADAPTERS[id];
     if (!adapter) throw new Error(`no adapter for provider "${id}" (known: ${Object.keys(ADAPTERS).join(", ")})`);
+    // Caught at startup rather than on the first image request: an image model
+    // on a text-only CLI is a configuration mistake, not a runtime condition.
+    if (Object.values(pc.models).some((m) => m.kind === "image") && !adapter.buildImageCommand) {
+      throw new Error(`provider "${id}" has image models but its adapter cannot generate images`);
+    }
     return new CliProvider(id, pc, adapter, runner, log.child({ provider: id }));
   });
 }

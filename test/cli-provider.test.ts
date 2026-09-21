@@ -126,4 +126,20 @@ describe("buildProviders", () => {
   it("throws on a provider id without an adapter", () => {
     expect(() => buildProviders({ ...config, providers: { unknown: base } }, runner, createLogger("t"))).toThrow(/no adapter/);
   });
+  it("throws when a provider has image models but its adapter cannot generate images", () => {
+    const codex = config.providers.codex;
+    const withImage = {
+      ...codex,
+      models: { ...codex.models, "codex-image": { cli_model: "gpt-image", effort_suffix: false, kind: "image" as const } },
+      image: { ...codex.image, collect: ["/usr/local/bin/capitoline-collect-image"] },
+    };
+    expect(() => buildProviders({ ...config, providers: { codex: withImage } }, runner, createLogger("t")))
+      .toThrow(/provider "codex" has image models but its adapter cannot generate images/);
+  });
+  it("copies kind and timeoutS into the model specs", () => {
+    const ps = buildProviders(config, runner, createLogger("t"));
+    const agy = ps.find((p) => p.id === "antigravity")!;
+    expect(agy.models().find((m) => m.name === "agy-image")).toMatchObject({ kind: "image", timeoutS: 240 });
+    expect(agy.models().find((m) => m.name === "agy-gemini-flash")).toMatchObject({ kind: "text", timeoutS: undefined });
+  });
 });

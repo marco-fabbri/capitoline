@@ -12,15 +12,25 @@ export interface InternalRequest {
   stream: boolean;
 }
 
+// An image generation: one prompt, one image back. Size is not a parameter
+// (the CLI tool has none); the response reports the real dimensions.
+export interface ImageRequest { model: string; prompt: string }
+
 export type ErrorKind = "auth_expired" | "rate_limited" | "timeout" | "cli_crashed" | "bad_output";
 export interface RateLimitWindow { utilization: number; resetsAt: number }
 export interface Usage { input: number; output: number }
+export type ImageMime = "image/jpeg" | "image/png";
 
 export type ProviderEvent =
   | { type: "text"; delta: string }
   | { type: "done"; usage?: Usage }
-  | { type: "error"; kind: ErrorKind; detail: string }
-  | { type: "rate_limit"; fiveHour?: RateLimitWindow; sevenDay?: RateLimitWindow };
+  // retryAfterS: an explicit wait the CLI reported (quota reset); absent when unknown.
+  | { type: "error"; kind: ErrorKind; detail: string; retryAfterS?: number }
+  | { type: "rate_limit"; fiveHour?: RateLimitWindow; sevenDay?: RateLimitWindow }
+  | { type: "image"; mime: ImageMime; bytes: Buffer; width: number; height: number }
+  // Adapter-internal events: consumed by the provider, never forwarded to Core.
+  | { type: "meta"; conversationId: string }
+  | { type: "tool"; phase: "call" | "done" | "error"; name: string; raw: string };
 
 export type FailureKind = ErrorKind | "unknown_model" | "model_unavailable" | "queue_full" | "bad_request" | "unauthorized";
 
