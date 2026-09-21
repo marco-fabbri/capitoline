@@ -50,11 +50,22 @@ On the host, as root:
      `docs/spike-2026-09.md` §3 for that CLI, sanitize paths and user names,
      and put it next to the existing ones in `test/fixtures/<id>/`;
    - fix the config and/or the parser, run `npx vitest run`, commit;
-   - deploy the fix (`git pull`, `npm ci`, `npm run build`, copy any config
-     change to `/etc/capitoline/capitoline.yaml`, `systemctl restart
-     capitoline`) and run the smoke test again.
+   - deploy the fix: `git pull`, `npm ci`, `npm run build`, re-install the
+     collection helper (`install -o root -g root -m 0755
+     /var/lib/capitoline/app/scripts/capitoline-collect-image
+     /usr/local/bin/capitoline-collect-image`, `docs/deploy.md` §7.1 — the
+     installed copy is a snapshot of the clone, not a link, so without this
+     a change to the helper has no effect), copy any config change to
+     `/etc/capitoline/capitoline.yaml`, `systemctl restart capitoline`; then
+     run the smoke test again.
 
 4. Update the table above with the new version, the date and what changed.
+
+If only the `image` line of the smoke test fails, the CLI flags are not the
+place to look: that line exercises the sudoers entry of `docs/deploy.md` §5,
+the helper installed in §7.1 and the `strict` settings of §6.4. Start at
+§7.1 — a `/usr/local/bin/capitoline-collect-image` left over from a previous
+version is the usual cause.
 
 If the smoke test fails for reasons unrelated to flags or output format
 (expired token, rate limit), the response's `error.message` says which; see

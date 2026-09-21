@@ -93,10 +93,10 @@ invoked by the gateway as `sudo -n -H -u runner -- <binary> ...` with an
 environment reduced to `PATH`, so nothing from the gateway's environment
 reaches the CLI.
 
-The fourth entry is not a CLI: it is the image collection helper of §6.5,
+The fourth entry is not a CLI: it is the image collection helper of §7.1,
 run the same way, with a conversation id as its only argument. Write the
 rule now — `visudo -cf` does not check that the path exists — but remember
-that until §6.5 has installed the file an image request fails with a `sudo`
+that until §7.1 has installed the file an image request fails with a `sudo`
 error.
 
 ## 6. Authentication, as runner
@@ -286,54 +286,6 @@ call, which is exactly the case the gateway's own timeout covers). If
 `uid=` appears, stop: the permission model changed and the provider must
 stay disabled until `settings.json` locks it again.
 
-### 6.5 Image collection helper
-
-The helper ships in the repository, so this step follows the clone of §7
-even though what it configures belongs to the runner's setup.
-
-`agy` writes a generated image inside its own home, never into the sandbox:
-`/home/runner/.gemini/antigravity-cli/brain/<conversation-id>/image_<ts>.jpg`
-(JPEG, about one megabyte). `/home/runner` is `0700`, so the gateway user
-cannot read it, and the agent's claim that it saved `./image.png` in the
-working directory is invented. `scripts/capitoline-collect-image` is the
-only way across that boundary: it checks that its argument is a UUID,
-prints the newest `image_*` file of that conversation to stdout and removes
-the conversation directory.
-
-```sh
-install -o root -g root -m 0755 \
-  /var/lib/capitoline/app/scripts/capitoline-collect-image \
-  /usr/local/bin/capitoline-collect-image
-```
-
-Owned by `root` and not writable by `capitoline`: the sudoers rule of §5
-lets `capitoline` run this exact path as `runner`, so a copy the gateway
-user could edit would hand it the `runner` account. Exit codes: 2 invalid
-conversation id, 3 no such conversation, 4 no image (the directory is
-removed anyway). The gateway maps 4 and an empty output to `bad_output`, or
-to `rate_limited` when the run also carried a quota refusal.
-
-Image generation needs no change to the `strict` settings of §6.4: for
-`agy` a `generate_image` call is not a file write, so it runs headless with
-no approval prompt, while `run_command` and real file writes keep stalling.
-The tool takes only `ImageName` and `Prompt` — there is no size parameter,
-which is why the API accepts `size` and reports it as ignored.
-
-Verify, after §8 has the service running:
-
-```sh
-sudo -n -H -u capitoline -- sudo -n -H -u runner -- \
-  /usr/local/bin/capitoline-collect-image not-a-uuid; echo $?   # prints 2
-curl -s localhost:8080/v1/images/generations -H 'content-type: application/json' \
-  -d '{"prompt":"a red fox in the snow, 16:9"}' | jq '.capitoline'
-```
-
-Expected: `mime` `image/jpeg`, dimensions around 1376x768 and `bytes`
-around a million. `bad_output` with "too small" means the CLI wrote a
-placeholder instead of a picture (the `min_bytes` gate of §7); a 429 with
-`Retry-After` means the image quota is exhausted — there are two rolling
-windows and the longer one resets in days, see `docs/spike-2026-09.md` §8.
-
 ## 7. Application
 
 ```sh
@@ -362,13 +314,68 @@ Edit `/etc/capitoline/capitoline.yaml`:
 | `providers.claude.args` | append `--settings` and `/home/runner/.claude/capitoline.json` as two list items |
 | `providers.codex.binary` | `/home/runner/.npm-global/bin/codex` |
 | `providers.antigravity.binary` | `/home/runner/.local/bin/agy` |
-| `providers.antigravity.image.collect` | `[/usr/local/bin/capitoline-collect-image]` — already the value in the repository copy; it must match the sudoers path of §5 (a developer machine points it at `scripts/capitoline-collect-image` instead, which reads its own `$HOME` without sudo) |
-| `providers.antigravity.image.min_bytes` | `200000` — keep it: below this the collected file is a placeholder, not a picture, and the request fails with `bad_output` rather than returning a grey rectangle |
+| `providers.antigravity.image.collect` | `[/usr/local/bin/capitoline-collect-image]` — already the value in the repository copy; it must match the sudoers path of §5 (a developer machine sets `runner.user: null` and points `image.collect` at `scripts/capitoline-collect-image`; the runner then spawns it directly, as the developer, so it reads that machine's own `$HOME`) |
+| `providers.antigravity.image.min_bytes` | `200000` — keep it: below this the collected file is a placeholder, not a picture, and the request fails with `bad_output` rather than returning a grey rectangle (placeholders were observed at 2-65 KB against 1.8-2.4 MB for a real image, hence the threshold) |
+| `providers.antigravity.image.allowed_tools` | `[generate_image]` — do not extend: any other tool call aborts the run, which is what keeps an image request from turning into an agent session |
 | `server.access.team_domain`, `server.access.audience` | filled in §9; both empty until then |
 
 Everything else (flags, model aliases, effort mapping) stays as in the
 repository copy; it is the verified set for the CLI versions in
 `docs/update-clis.md`.
+
+### 7.1 Image collection helper
+
+The helper ships in the repository, so it is installed from the clone made
+above, even though what it configures belongs to the runner's setup.
+
+`agy` writes a generated image inside its own home, never into the sandbox:
+`/home/runner/.gemini/antigravity-cli/brain/<conversation-id>/image_<ts>.jpg`
+(JPEG, about one megabyte). `/home/runner` is `0700`, so the gateway user
+cannot read it, and the agent's claim that it saved `./image.png` in the
+working directory is invented. `scripts/capitoline-collect-image` is the
+only way across that boundary: it checks that its argument is a UUID,
+prints the newest `image_*` file of that conversation to stdout and removes
+the conversation directory.
+
+```sh
+install -o root -g root -m 0755 \
+  /var/lib/capitoline/app/scripts/capitoline-collect-image \
+  /usr/local/bin/capitoline-collect-image
+```
+
+Owned by `root` and not writable by `capitoline`: the sudoers rule of §5
+lets `capitoline` run this exact path as `runner`, so a copy the gateway
+user could edit would hand it the `runner` account. Exit codes: 2 invalid
+conversation id, 3 no such conversation, 4 no image (the directory is
+removed anyway). The gateway maps 4 and an empty output to `bad_output`, or
+to `rate_limited` when the run also carried a quota refusal.
+
+Re-run this install after every `git pull`: the installed copy is a
+snapshot, not a link, and `sudo` runs the installed path, never the one in
+the clone (`docs/update-clis.md` step 3).
+
+Image generation needs no change to the `strict` settings of §6.4: for
+`agy` a `generate_image` call is not a file write, so it runs headless with
+no approval prompt, while `run_command` and real file writes keep stalling.
+The tool takes only `ImageName` and `Prompt` — there is no size parameter,
+which is why the API accepts `size` and reports it as ignored.
+
+Verify, after §8 has the service running:
+
+```sh
+sudo -n -H -u capitoline -- sudo -n -H -u runner -- \
+  /usr/local/bin/capitoline-collect-image not-a-uuid; echo $?   # prints 2
+curl -s http://127.0.0.1:8080/v1/images/generations -H 'content-type: application/json' \
+  -d '{"prompt":"a red fox in the snow, 16:9"}' | jq '.capitoline'
+```
+
+Expected: `mime` `image/jpeg`, dimensions around 1376x768 and `bytes`
+around a million. `bad_output` with "too small" means the collected file is
+not a picture (the `min_bytes` gate of the table above) — with the `strict`
+settings of §6.4 the CLI writes no placeholder, so it points at a broken or
+changed CLI, not at a quota hit. A quota hit is a 429 with `Retry-After`:
+there are two rolling windows and the longer one resets in days, see
+`docs/spike-2026-09.md` §8.
 
 ## 8. systemd
 
@@ -468,9 +475,10 @@ export MCP_TOOL_TIMEOUT=600000
 ```
 
 This is the only thing that keeps a long call alive. `generate_image` sends
-a progress notification every 5 s, but a notification postpones the client's
-deadline only when that client sets `resetTimeoutOnProgress`, off by default
-in the MCP TypeScript SDK (spec §6.2); treat it as a sign of life, not as a
+a progress notification every 5 s to clients that ask for one (a request
+with a progress token), but a notification postpones the client's deadline
+only when that client sets `resetTimeoutOnProgress`, off by default in the
+MCP TypeScript SDK (spec §6.2); treat it as a sign of life, not as a
 timeout extension.
 
 Test: in Claude Code run `/mcp` (the server must show as connected), then
@@ -500,8 +508,12 @@ mechanism (rsync to the Mac, or a bucket).
 ## 12. Smoke test
 
 One real call per provider with its `health_model`, read from the same
-configuration the service uses. The script needs `curl` and `jq` on the
-machine it runs from.
+configuration the service uses, plus — when that configuration declares an
+image model — one `POST /v1/images/generations` whose result must be larger
+than `image.min_bytes`. The script needs `curl` and `jq` on the machine it
+runs from. The image line is the only end-to-end check of the sudoers entry
+of §5 and of the helper installed in §7.1, and it spends one unit of the
+image quota (12 per 5 hours).
 
 Before §9 (Access not yet configured, `server.access.team_domain` empty),
 on the host:
@@ -525,5 +537,6 @@ CF_ACCESS_CLIENT_ID=<id> CF_ACCESS_CLIENT_SECRET=<secret> \
 (on the host, prefix `CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml` as
 above so the model list matches the production configuration.)
 
-Expected: three lines with status `200`, a short answer and a token count;
-exit code 0. Run it again after every CLI update (`docs/update-clis.md`).
+Expected: three lines with status `200`, a short answer and a token count,
+then an `image` line with `200` and the size of the collected picture; exit
+code 0. Run it again after every CLI update (`docs/update-clis.md`).

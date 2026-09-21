@@ -110,7 +110,8 @@ providers:
       # Image models: the CLI writes the file into its own home, never into the
       # sandbox. `collect` receives the conversation id as its last argument and
       # prints the image to stdout. On the host it is run through sudo as `runner`
-      # (see docs/deploy.md); on a developer machine scripts/capitoline-collect-image
-      # works directly against $HOME.
+      # (see docs/deploy.md §7.1); a developer machine sets runner.user: null and
+      # points this at scripts/capitoline-collect-image, which then runs directly
+      # as the developer, against that machine's own $HOME.
       collect: [/usr/local/bin/capitoline-collect-image]
       min_bytes: 200000       # anything smaller is a placeholder, not a picture
