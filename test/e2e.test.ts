@@ -1,10 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { start } from "../src/main.js";
+import { IMAGE_PROMPT } from "../src/providers/antigravity.js";
 
-const SAMPLE = readFileSync(join(process.cwd(), "test/fixtures/images/sample.jpg"));
+// Resolved from this module, not from process.cwd(): vitest runs from wherever
+// it was invoked, and a path that misses would blow up at import time.
+const SAMPLE = readFileSync(fileURLToPath(new URL("fixtures/images/sample.jpg", import.meta.url)));
 
 let app: Awaited<ReturnType<typeof start>>;
 beforeAll(async () => { app = await start("test/e2e.config.yaml", { port: 0 }); });
@@ -50,12 +53,14 @@ describe("end to end with fake CLIs", () => {
 // the image route would be exercised against the chat recording, which carries
 // no tool step at all.
 describe("the fake antigravity CLI picks its recording from the prompt", () => {
-  const AGY = join(process.cwd(), "test/fake-cli/fake-agy.sh");
+  const AGY = fileURLToPath(new URL("fake-cli/fake-agy.sh", import.meta.url));
   const userEvent = (content: string) => JSON.stringify({ event: "user", message: { role: "user", content } }) + "\n";
   const run = (stdin: string) => spawnSync(AGY, ["--output-format", "stream-json"], { input: stdin, encoding: "utf8" });
 
   it("replays the recorded image run when the prompt asks for the generate_image tool", () => {
-    const r = run(userEvent('Use the generate_image tool exactly once, with ImageName "image", to create this image: a lighthouse'));
+    // The production prompt itself, so that rewording it breaks this test
+    // instead of silently sending the image route back to the chat recording.
+    const r = run(userEvent(IMAGE_PROMPT("a lighthouse")));
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`"step_type":"tool"`);
     expect(r.stdout).toContain(`"tool_name":"generate_image"`);
@@ -70,6 +75,12 @@ describe("the fake antigravity CLI picks its recording from the prompt", () => {
 });
 
 describe("image generation end to end", () => {
+  // The fake collect helper hands back the sample JPEG only for the conversation
+  // id of the recorded image run: if the fake CLI ever replayed the chat stream
+  // instead, these tests fail rather than being handed an image out of nowhere.
+  beforeAll(() => { process.env.FAKE_COLLECT = "image-run"; });
+  afterAll(() => { delete process.env.FAKE_COLLECT; });
+
   const post = (body: unknown, path = "/v1/images/generations") =>
     fetch(`http://127.0.0.1:${app.port}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
@@ -81,9 +92,12 @@ describe("image generation end to end", () => {
     // FF D8: the bytes really are the JPEG the collect helper handed over.
     expect(bytes.subarray(0, 2).toString("hex")).toBe("ffd8");
     expect(bytes.equals(SAMPLE)).toBe(true);
-    expect(body.capitoline).toMatchObject({
+    // Exact, not partial: no provider detail (stderr, conversation id, host
+    // paths) may leak into the response, here or in the body's top level.
+    expect(body.capitoline).toEqual({
       provider: "antigravity", model: "agy-image", mime: "image/jpeg", width: 1376, height: 768, bytes: SAMPLE.length, ignored: [],
     });
+    expect(Object.keys(body).sort()).toEqual(["capitoline", "created", "data"]);
   });
   it("ignores size and says so in the header", async () => {
     const r = await post({ prompt: "a lighthouse", size: "1024x1024" });
@@ -93,11 +107,15 @@ describe("image generation end to end", () => {
   it("refuses an image request against a text model", async () => {
     const r = await post({ model: "agy-gemini-flash", prompt: "a lighthouse" });
     expect(r.status).toBe(400);
-    expect((await r.json()) as { error: { code: string } }).toMatchObject({ error: { code: "bad_request" } });
+    // The message pins the refusal to the kind check in core, not to some other
+    // bad_request (a zod rejection carries the same code).
+    expect((await r.json()) as { error: { code: string; message: string } })
+      .toMatchObject({ error: { code: "bad_request", message: expect.stringContaining("use the chat endpoint") } });
   });
   it("refuses a chat request against the image model", async () => {
     const r = await post({ model: "agy-image", messages: [{ role: "user", content: "hi" }] }, "/v1/chat/completions");
     expect(r.status).toBe(400);
-    expect((await r.json()) as { error: { code: string } }).toMatchObject({ error: { code: "bad_request" } });
+    expect((await r.json()) as { error: { code: string; message: string } })
+      .toMatchObject({ error: { code: "bad_request", message: expect.stringContaining("use the images endpoint") } });
   });
 });
