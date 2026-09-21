@@ -8,6 +8,8 @@ import { FakeProvider } from "./fake-provider.js";
 import type { ProviderEvent } from "../src/core/types.js";
 
 const CONFIG = "test/e2e.config.yaml";
+/** The line configWithSandbox() replaces; kept next to CONFIG so the two are read together. */
+const SANDBOX_ROOT_LINE = "sandbox_root: tmp/capitoline-e2e";
 
 /** A port nobody is listening on, obtained by binding and releasing one. */
 function freePort(): Promise<number> {
@@ -52,7 +54,13 @@ function configWithDbFile(): { path: string; db: string } {
   const dir = mkdtempSync(join(tmpdir(), "capitoline-main-"));
   const db = join(dir, "usage.sqlite");
   const path = join(dir, "config.yaml");
-  writeFileSync(path, readFileSync(CONFIG, "utf8").replace(`db_path: ":memory:"`, `db_path: "${db}"`));
+  const text = readFileSync(CONFIG, "utf8");
+  const out = text.replace(`db_path: ":memory:"`, `db_path: "${db}"`);
+  // A literal that stopped matching would leave the shared configuration in
+  // place — the in-memory database here, the shared sandbox root below — and
+  // the test would then fail for another reason, after having worked on it.
+  expect(out).not.toBe(text);
+  writeFileSync(path, out);
   return { path, db };
 }
 
@@ -62,7 +70,10 @@ function configWithSandbox(): { path: string; sandboxRoot: string } {
   const sandboxRoot = join(dir, "sandboxes");
   mkdirSync(sandboxRoot);
   const path = join(dir, "config.yaml");
-  writeFileSync(path, readFileSync(CONFIG, "utf8").replace("sandbox_root: /tmp/capitoline-e2e", `sandbox_root: ${sandboxRoot}`));
+  const text = readFileSync(CONFIG, "utf8");
+  const out = text.replace(SANDBOX_ROOT_LINE, `sandbox_root: ${sandboxRoot}`);
+  expect(out).not.toBe(text);
+  writeFileSync(path, out);
   return { path, sandboxRoot };
 }
 

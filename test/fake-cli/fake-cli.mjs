@@ -4,6 +4,7 @@
 //   stdin-len      : read all stdin, print {"stdin_length": N}
 //   slow           : print 5 JSON lines, one every 200 ms
 //   hang           : read stdin, then sleep forever (ignores SIGTERM for 10 s)
+//   leak-stdout    : spawn a detached grandchild inheriting stdout, print one line, then hang like "hang"
 //   replay-linger <file> : like replay, then stay alive 10 s (exits on SIGTERM)
 //   crash          : print "boom" to stderr, exit 2
 //   secret-stderr  : print a fake secret to stderr, then exit 0 with no stdout
@@ -11,6 +12,7 @@
 //   big-stderr     : write ~200 KiB to stderr (last line is "END"), exit 0
 //   emit-bytes --bytes N : write N deterministic pseudo-random bytes to stdout (xorshift32, seed 0x9e3779b9), exit 0
 //   write-image --out <path> --bytes N : write a baseline JPEG (1376x768 header, N filler bytes, EOI) to <path>, exit 0
+import { spawn } from "node:child_process";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 const argv = process.argv.slice(2);
 const modeIdx = argv.indexOf("--mode");
@@ -73,6 +75,17 @@ switch (mode) {
     process.on("SIGTERM", () => {});
     await sleep(10_000);
     break;
+  case "leak-stdout": {
+    // What a real CLI does when it starts a helper: the grandchild inherits
+    // stdout and survives the SIGKILL aimed at its parent, so the pipe never
+    // reaches EOF and the parent's 'close' event never fires.
+    const grandchild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], { stdio: ["ignore", "inherit", "ignore"], detached: true });
+    grandchild.unref();
+    process.stdout.write(JSON.stringify({ spawned: true }) + "\n");
+    process.on("SIGTERM", () => {});
+    await sleep(10_000);
+    break;
+  }
   case "replay-linger": {
     for (const line of readFileSync(file, "utf8").split("\n")) if (line.trim()) process.stdout.write(line + "\n");
     await sleep(10_000);

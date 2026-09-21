@@ -13,7 +13,7 @@ server:
 
 runner:
   user: null
-  sandbox_root: /tmp/capitoline-e2e
+  sandbox_root: tmp/capitoline-e2e   # under the repository (git-ignored), not a predictable path in a world-writable /tmp
   kill_grace_s: 5         # SIGTERM → SIGKILL delay
 
 usage:

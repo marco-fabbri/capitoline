@@ -86,14 +86,19 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   } catch (e) { usage.close(); throw e; }
   const actualPort = (server.address() as { port: number }).port;
   log.info({ port: actualPort, providers: providers.map((p) => p.id) }, "listening");
-  // Before the first check, after the port is up: the run-* directories of a
-  // previous process are removed once, measured against the longest timeout any
-  // model may run for, which is the age above which no live run can own one.
-  // Not before listen(): the port must come up regardless of how slow the disk is.
-  const longestTimeoutS = Math.max(...Object.values(cfg.providers).flatMap((p) => [p.timeout_s, ...Object.values(p.models).map((m) => m.timeout_s ?? p.timeout_s)]));
-  await runner.sweep(longestTimeoutS * 1000);
-
   try {
+    // Before the first check, after the port is up: the run-* directories of a
+    // previous process are removed once. Not before listen(), because the port
+    // must come up regardless of how slow the disk is; inside this try, because
+    // whatever fails here must still leave nothing listening and no open store.
+    // The threshold is the longest a run of this configuration can take: the
+    // longest timeout any model may run for, plus twice kill_grace_s — once for
+    // SIGTERM → SIGKILL, once for the stdio pipes to reach EOF afterwards. It
+    // bounds the runs this gateway starts, not a directory an orphaned CLI of
+    // an earlier instance may still be writing into.
+    const longestTimeoutS = Math.max(...Object.values(cfg.providers).flatMap((p) => [p.timeout_s, ...Object.values(p.models).map((m) => m.timeout_s ?? p.timeout_s)]));
+    await runner.sweep((longestTimeoutS + 2 * cfg.runner.kill_grace_s) * 1000);
+
     await core.checkHealth();
     ready = true;
   } catch (e) {

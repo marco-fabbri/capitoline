@@ -429,6 +429,27 @@ every request but `/health` is answered `503` with `Retry-After: 5`, so a
 `curl` issued right after `systemctl start` can legitimately get one; the state
 itself is visible throughout with `curl -s http://127.0.0.1:8080/health | jq`.
 
+Between `listening` and the health checks the gateway sweeps `sandbox_root`
+once: the `run-*` directories older than the longest `timeout_s` of the
+configuration (per-model overrides included) plus twice `kill_grace_s` are
+removed, and their names are logged as `removed stale sandboxes`. Those are the
+working directories of runs an earlier instance was killed in the middle of; a
+restart that left nothing behind logs nothing, which is the normal case. The
+threshold is what a run of this configuration can take at most, so a run of a
+second instance sharing the root would survive the sweep — but a CLI orphaned
+by a previous instance has no timeout left to kill it, so one sandbox root per
+gateway remains the rule.
+
+`stale sandbox removal failed` names one `run-…` directory the gateway could
+not delete, and it comes back at every restart until the directory is gone. The
+usual cause is a subdirectory that the `runner` user created inside the sandbox
+with a umask that leaves out the `capitoline` group: `ls -la
+/var/lib/capitoline/sandboxes` shows owner and mode (§3 has the group the two
+users share), and `rm -rf` of the named directory as root clears it. A `run-…`
+directory that appears there *while* the service is running is another matter —
+a run that hung rather than one that was killed — and is worth reading the
+journal around its timestamp.
+
 `invalid configuration:` in the journal, followed by a restart every three
 seconds, means the file named by `CAPITOLINE_CONFIG` was rejected: the lines
 below it name the key and the reason (`runner: Unrecognized key(s) in object:

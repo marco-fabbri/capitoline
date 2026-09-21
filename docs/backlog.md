@@ -5,7 +5,8 @@ findings only; each was checked against the current code and dropped if
 already fixed or superseded), plus phase 2 and beyond. Findings that were
 duplicated across tasks are merged into one line. Runner (`src/runner/runner.ts`)
 had two review findings and both are already fixed in the current code
-(attachment name validation, eager line buffering), so it has no section below.
+(attachment name validation, eager line buffering); the Runner section below is
+not one of them but a later observation from the host, still to be confirmed.
 
 ## Core
 
@@ -22,6 +23,10 @@ had two review findings and both are already fixed in the current code
 - `src/providers/codex.ts`: the JSON→TOML escaping comment is wrong for unpaired surrogates (client-controlled input can produce one), which TOML rejects as invalid — strip/replace unpaired surrogates before `JSON.stringify` and fix the comment.
 - `src/providers/codex.ts`: `(o.error ?? o) as { message?: string }` assumes `error` is always an object; if Codex ever emits a string `error` (e.g. for a 429), the real message is discarded and it's misclassified as `cli_crashed` (502) instead of `rate_limited` (429) — handle the string case explicitly.
 - `src/providers/antigravity.ts`: usage accounting only sums `input_tokens`/`output_tokens`, ignoring `cache_read_tokens`/`thinking_tokens` that Claude's adapter does include, so budget windows understate real consumption for this provider once caching kicks in — align the formula with `claude.ts` or document the difference.
+
+## Runner
+
+- Observation to confirm on the host: watch `/var/lib/capitoline/sandboxes` while the service is up. The one empty `run-…` directory seen on the Mac now has an explanation and a fix (a grandchild inheriting stdout kept `close` from firing, so the run never settled: `src/runner/runner.ts` bounds that wait since A6), and the startup sweep removes whatever an earlier process left behind — which is exactly why the remaining symptom is a `run-…` directory appearing there *between* two restarts. That means a run that hung rather than one that was killed, and it is the only thing left that would show a second leak path. Nothing else in the repository looks at that directory while the gateway is running.
 
 ## MCP
 
@@ -41,7 +46,6 @@ had two review findings and both are already fixed in the current code
 - `test/e2e.test.ts`: "streams through the fake claude" only checks the text ends with `data: [DONE]`, so an empty stream would pass identically — parse the SSE lines and assert the concatenated delta, first/last chunk shape and non-zero usage.
 - `test/e2e.config.yaml`: is a hand-copied duplicate of `config/capitoline.yaml` with nothing checking they stay aligned beyond the intended diffs (port, runner user, sandbox root, db path, binaries, timeouts) — add a test that loads both and asserts they differ only in those keys.
 - `test/runner.test.ts`: every case uses `user: null`, so the production `sudo -n -H -u <user> --` branch of `src/runner/runner.ts` (argv shape, reduced env) is never exercised by any test — add a case with a fake `sudo` script on `PATH` asserting argv and env.
-- `test/e2e.config.yaml`: `sandbox_root: /tmp/capitoline-e2e` is a fixed, predictable path in a world-writable directory and is never cleaned up after the suite — move it under the repo's own tmp dir or add an `afterAll` cleanup.
 - `test/e2e.test.ts`: `beforeAll` has no explicit timeout, so it can exceed vitest's default 10s hook timeout under load and fail with an opaque "hook timed out" instead of a readable error — pass an explicit timeout (e.g. 30s).
 - `test/mcp.test.ts`: no test exercises the `ask_model` progress notifications, so the "must increase" bug above would go unnoticed — add a 45-event script and assert strictly increasing `progress` values.
 - `test/mcp.test.ts`: the last test mutates the shared `provider.script` and never restores it, so a test appended afterward would silently run against the rate-limited script — capture and restore the original script (or reset it within the same test).

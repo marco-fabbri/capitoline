@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunner } from "../src/runner/runner.js";
@@ -76,6 +76,20 @@ describe("runner", () => {
     expect(r.aborted).toBe(true);
     expect(r.timedOut).toBe(false);
     expect(Date.now() - t0).toBeLessThan(3000);
+    expect(existsSync(h.sandboxDir)).toBe(false);
+  });
+  it("settles when a grandchild holds stdout open after the process is killed", async () => {
+    // 'close' never fires here: the detached grandchild keeps the write end of
+    // the pipe. Without the bound on the wait for EOF the result promise would
+    // stay pending, the line iterator would never end (so the provider's
+    // generator would never complete and its concurrency slot never come back)
+    // and the sandbox would stay on disk for the life of the process.
+    const t0 = Date.now();
+    const h = await runner.run({ binary: FAKE, args: ["--mode", "leak-stdout"], stdin: null, timeoutMs: 500 });
+    expect(await collect(h.lines)).toEqual(['{"spawned":true}']);
+    const r = await h.result;
+    expect(r.timedOut).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(4000);
     expect(existsSync(h.sandboxDir)).toBe(false);
   });
   it("keeps lines emitted before the consumer starts iterating", async () => {
@@ -184,9 +198,17 @@ describe("runner.sweep", () => {
     age(join(dir, "keep-me"), 10 * 60 * 1000);
     writeFileSync(join(dir, "run-loose.txt"), "x");           // a file, not a run directory
     age(join(dir, "run-loose.txt"), 10 * 60 * 1000);
+    // A symlink is never followed: in a sandbox root shared with the runner
+    // user, one named run-… would otherwise be a way to have the gateway
+    // delete a directory of the planter's choosing.
+    const outside = mkdtempSync(join(tmpdir(), "capitoline-outside-"));
+    age(outside, 10 * 60 * 1000);
+    symlinkSync(outside, join(dir, "run-link"));
 
     expect(await r.sweep(5 * 60 * 1000)).toEqual([]);
-    expect(readdirSync(dir).sort()).toEqual(["keep-me", "run-loose.txt"]);
+    expect(readdirSync(dir).sort()).toEqual(["keep-me", "run-link", "run-loose.txt"]);
+    expect(existsSync(outside)).toBe(true);
+    rmSync(outside, { recursive: true });
   });
 
   it("reports nothing instead of throwing when the sandbox root does not exist", async () => {

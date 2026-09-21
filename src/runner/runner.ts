@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { Logger } from "../log.js";
@@ -21,8 +21,9 @@ export interface Runner {
   // Runs a helper command (through sudo when configured) and returns its stdout
   // as bytes: for collecting an image produced by a CLI outside the sandbox.
   capture(spec: CaptureSpec): Promise<CaptureResult>;
-  // Removes the run-* directories under sandbox_root that no live run can own
-  // any more, and returns their names. Called once at startup.
+  // Removes the run-* directories under sandbox_root older than olderThanMs
+  // and returns their names. Called once at startup, where the ones left over
+  // are runs an earlier process was killed in the middle of.
   sweep(olderThanMs: number): Promise<string[]>;
 }
 export interface RunnerOptions { sandboxRoot: string; user: string | null; killGraceMs: number; log: Logger }
@@ -132,7 +133,8 @@ export function createRunner(o: RunnerOptions): Runner {
       // 'abort' is not re-dispatched to listeners added after the fact.
       if (spec.signal?.aborted) onAbort();
 
-      const lines = bufferedLines(createInterface({ input: child.stdout, crlfDelay: Infinity }));
+      const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
+      const lines = bufferedLines(rl);
 
       const result = new Promise<RunResult>((done) => {
         let finished = false;
@@ -151,6 +153,26 @@ export function createRunner(o: RunnerOptions): Runner {
           }
         };
         child.on("close", (code) => { void finish(code); });
+        // 'close' fires when the stdio pipes reach EOF, which is not when the CLI
+        // dies: a grandchild that inherited stdout (real CLIs do spawn helpers)
+        // holds the write end open, and SIGTERM/SIGKILL reach only the child we
+        // spawned. Without a bound nothing would ever settle — the sandbox would
+        // stay on disk, the line iterator would never end, so the provider's
+        // generator would never complete, its concurrency slot never be released
+        // and the request never be answered. Once the process itself is gone, the
+        // pipes get one kill grace to drain and are then destroyed.
+        child.on("exit", (code) => {
+          const t = setTimeout(() => {
+            // rl.close() as well as destroy(): the interface ends on the input's
+            // 'end' event, which a destroyed stream never emits, so without it
+            // the iterator would stay open although the pipe is gone.
+            rl.close();
+            child.stdout.destroy();
+            child.stderr.destroy();
+            void finish(code);
+          }, o.killGraceMs);
+          t.unref();
+        });
         // A failed spawn (ENOENT) emits 'error' and may never emit 'close'.
         child.on("error", () => { setImmediate(() => { void finish(-1); }); });
       });
@@ -213,6 +235,12 @@ export function createRunner(o: RunnerOptions): Runner {
           done({ exitCode, stdout: Buffer.concat(chunks), stderr, timedOut });
         };
         child.on("close", (code) => { finish(code); });
+        // Same bound as run(): 'close' waits for the pipes to reach EOF, which a
+        // helper spawned by the collect command can postpone for ever.
+        child.on("exit", (code) => {
+          const t = setTimeout(() => { child.stdout.destroy(); child.stderr.destroy(); finish(code); }, o.killGraceMs);
+          t.unref();
+        });
         // A failed spawn (ENOENT) emits 'error' and may never emit 'close'.
         child.on("error", () => { setImmediate(() => { finish(-1); }); });
       });
@@ -222,28 +250,40 @@ export function createRunner(o: RunnerOptions): Runner {
     // spawn and the close, or rm failed on a busy entry) leaves its directory
     // behind for good: nothing else ever looks at sandbox_root. The sweep runs
     // at startup, when this process owns no sandbox yet, and it measures the
-    // age on mtime against the longest timeout the configuration allows, so a
-    // directory it removes cannot belong to a run of another instance either.
+    // age on mtime against the age the caller gives it: the longest a run of
+    // that configuration can take, its timeout plus the grace it is given to
+    // die. That bounds the runs a gateway controls, and no more — a CLI
+    // orphaned by an earlier instance has no timeout enforcer left (the timer
+    // died with its parent), so it can own a directory of any age. The
+    // threshold makes an over-eager removal unlikely, it does not make it
+    // impossible, which is why a shared sandbox root between two live
+    // instances stays a thing to avoid rather than a supported layout.
     // It reports what it removed and never throws: a gateway that will not
     // start because of a leftover directory would be the worse failure.
     async sweep(olderThanMs: number): Promise<string[]> {
       const cutoff = Date.now() - olderThanMs;
-      let entries;
+      let entries: string[];
       try {
-        entries = await readdir(o.sandboxRoot, { withFileTypes: true });
+        entries = await readdir(o.sandboxRoot);
       } catch (e) {
         // ENOENT is the normal state of a deployment that has not run a CLI yet.
         if ((e as NodeJS.ErrnoException).code !== "ENOENT") o.log.warn({ dir: o.sandboxRoot, err: (e as Error).message }, "stale sandbox sweep failed");
         return [];
       }
       const removed: string[] = [];
-      for (const entry of entries) {
-        if (!entry.isDirectory() || !entry.name.startsWith("run-")) continue;
-        const dir = join(o.sandboxRoot, entry.name);
+      for (const name of entries) {
+        if (!name.startsWith("run-")) continue;
+        const dir = join(o.sandboxRoot, name);
         try {
-          if ((await stat(dir)).mtimeMs >= cutoff) continue;
+          // lstat, not the readdir Dirent: a filesystem that does not report
+          // d_type (XFS with ftype=0, several overlay and FUSE mounts) calls
+          // every entry unknown, and the sweep would then remove nothing,
+          // silently and forever. lstat and not stat, so a symlink named
+          // run-… planted in a shared root is skipped instead of followed.
+          const st = await lstat(dir);
+          if (!st.isDirectory() || st.mtimeMs >= cutoff) continue;
           await rm(dir, { recursive: true, force: true, maxRetries: 3 });
-          removed.push(entry.name);
+          removed.push(name);
         } catch (e) {
           o.log.warn({ dir, err: (e as Error).message }, "stale sandbox removal failed");
         }

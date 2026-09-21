@@ -229,7 +229,8 @@ For each execution:
 - the runner's own timeout is the only reliable one: Antigravity's `--print-timeout` does not fire on a stalled tool call;
 - per-request timeout from configuration; on expiry SIGTERM then SIGKILL;
 - process termination if the client disconnects;
-- directory removal in `finally`, always.
+- directory removal in `finally`, always; the wait for the stdio pipes to reach EOF is bounded by one `kill_grace_s` after the process's own exit, because a helper the CLI spawned can inherit stdout and hold the pipes open after the CLI is killed, which would otherwise postpone the removal — and the completion of the request — for ever;
+- at startup, a sweep of `sandbox_root` removes the `run-*` directories older than the longest `timeout_s` plus twice `kill_grace_s`, i.e. the ones a previous process was killed before removing.
 
 ### 8.5 Configuration (shape)
 
