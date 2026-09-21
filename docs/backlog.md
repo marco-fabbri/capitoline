@@ -39,7 +39,6 @@ not one of them but a later observation from the host, still to be confirmed.
 - `test/mcp.test.ts`: no test exercises the `ask_model` progress notifications, so the "must increase" bug above would go unnoticed — add a 45-event script and assert strictly increasing `progress` values.
 - `test/mcp.test.ts`: the last test mutates the shared `provider.script` and never restores it, so a test appended afterward would silently run against the rate-limited script — capture and restore the original script (or reset it within the same test).
 - `test/mcp.test.ts`: nothing asserts that CLI `detail` (potential stderr) stays out of the MCP tool-error response — script a detail that looks like stderr and assert it's absent from the returned text.
-- `test/mcp.test.ts`: nothing pins that `/mcp` is mounted behind the Access middleware, so a refactor that reorders them would pass every existing test while leaving MCP unauthenticated — add a test with a denying `access` middleware asserting 401 on `/mcp` and 200 on `/health`.
 
 ## Phase 2 and beyond
 

@@ -18,14 +18,17 @@ const MAX_CALLER = 320;
  * The name a usage row is attributed to, or null when nothing identified the
  * caller — Access verification disabled, or a token with nothing in it.
  *
- * The email first, because that is what an operator reading `/health`
+ * The email first, because that is what an operator reading `/v1/usage`
  * recognises; then the service token's name; the subject last, as an opaque
- * but stable fallback. It takes `unknown` on purpose: `res.locals` is untyped
- * at runtime, and a caller is never worth a crash inside a request.
+ * but stable fallback. The parameter is bound to `Identity` so that renaming
+ * or dropping one of its fields breaks here instead of silently falling
+ * through to the next candidate; the runtime guards stay all the same,
+ * because `res.locals` is untyped at runtime and a caller is never worth a
+ * crash inside a request.
  */
-export function callerOf(identity: unknown): string | null {
+export function callerOf(identity: Partial<Identity> | undefined | null): string | null {
   if (typeof identity !== "object" || identity === null) return null;
-  const { email, name, sub } = identity as { email?: unknown; name?: unknown; sub?: unknown };
+  const { email, name, sub } = identity;
   for (const value of [email, name, sub]) {
     if (typeof value !== "string") continue;
     const trimmed = value.trim();

@@ -8,6 +8,7 @@ import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
 import type { ProviderEvent } from "../src/core/types.js";
 import type { RequestHandler } from "express";
+import type { Identity } from "../src/server/access.js";
 
 const OK: ProviderEvent[] = [{ type: "text", delta: "hel" }, { type: "text", delta: "lo" }, { type: "done", usage: { input: 3, output: 2 } }];
 function make(script: ProviderEvent[] = OK, access?: RequestHandler) {
@@ -20,7 +21,7 @@ function make(script: ProviderEvent[] = OK, access?: RequestHandler) {
 }
 // Stand-in for a verified Access token: the middleware's only job here is to
 // leave the identity behind, which is where the caller of a row comes from.
-const asCaller = (who: object): RequestHandler => (_req, res, next) => { res.locals.identity = who; next(); };
+const asCaller = (who: Identity): RequestHandler => (_req, res, next) => { res.locals.identity = who; next(); };
 // Stand-in for the Access middleware: any request without the header is refused.
 const deny: RequestHandler = (req, res, next) => (req.header("Cf-Access-Jwt-Assertion") ? next() : res.status(401).json({ error: { code: "unauthorized" } }));
 const body = (extra: object = {}) => ({ model: "claude-opus", messages: [{ role: "user", content: "hi" }], ...extra });
@@ -458,12 +459,16 @@ describe("usage attribution", () => {
     expect((await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" })).status).toBe(200);
     expect(usage.callers(60_000)).toEqual([{ caller: "me@example.com", calls: 1, inputTokens: 0, outputTokens: 0 }]);
   });
-  it("breaks the last 24 hours down by caller in /health", async () => {
+  // The breakdown names people, so it lives under /v1, behind Access, and not
+  // on the one route left open to anyone who can reach 127.0.0.1 on the host.
+  it("breaks the last 24 hours down by caller on /v1/usage, and never on /health", async () => {
     const { app } = make(OK, asCaller({ email: "me@example.com", sub: "u1", type: "user" }));
     await request(app).post("/v1/chat/completions").send(body());
     await request(app).post("/v1/chat/completions").send(body());
-    const r = await request(app).get("/health");
+    const r = await request(app).get("/v1/usage");
+    expect(r.status).toBe(200);
     expect(r.body.callers).toEqual([{ caller: "me@example.com", calls: 2, inputTokens: 6, outputTokens: 4 }]);
+    expect((await request(app).get("/health")).body).not.toHaveProperty("callers");
   });
 });
 
@@ -471,6 +476,7 @@ describe("access middleware placement", () => {
   it("protects /v1 and /mcp before the body is parsed, leaves /health open", async () => {
     const { app } = make(OK, deny);
     expect((await request(app).get("/v1/models")).status).toBe(401);
+    expect((await request(app).get("/v1/usage")).status).toBe(401);
     expect((await request(app).post("/mcp").send({})).status).toBe(401);
     expect((await request(app).get("/health")).status).toBe(200);
     // A malformed body without a token is refused as unauthenticated, not as a bad request.

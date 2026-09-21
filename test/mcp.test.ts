@@ -11,6 +11,8 @@ import pino from "pino";
 import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
 import type { RequestHandler } from "express";
+import type { Identity } from "../src/server/access.js";
+import request from "supertest";
 
 // A JPEG header is enough for the fake: the tool never inspects the bytes.
 const JPEG = Buffer.from("ffd8ffe000104a464946", "hex");
@@ -33,8 +35,11 @@ beforeEach(async () => {
   warnings = [];
   const mcpLog = pino({ name: "t", level: "warn" }, { write: (line: string) => { warnings.push(JSON.parse(line) as Record<string, unknown>); } });
   // /mcp sits behind Access in production, so the handler sees an identity:
-  // the service token Claude Code is configured with.
-  const access: RequestHandler = (_req, res, next) => { res.locals.identity = { sub: "", type: "service", name: "claude-code" }; next(); };
+  // the service token Claude Code is configured with. This stub authenticates
+  // every request — it is here for attribution, not for placement, which the
+  // last test of this file and test/server.test.ts pin with a denying one.
+  const identity: Identity = { sub: "", type: "service", name: "claude-code" };
+  const access: RequestHandler = (_req, res, next) => { res.locals.identity = identity; next(); };
   const app = createApp(core, { log: createLogger("t"), access, mcp: createMcpHandler(core, mcpLog, { progressIntervalMs: 20 }) });
   await new Promise<void>((r) => { server = app.listen(0, () => r()); });
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
@@ -255,5 +260,16 @@ describe("MCP", () => {
     expect(r.isError).toBe(true);
     expect((r.content as { text: string }[])[0].text).toMatch(/rate_limited/);
     await c.close();
+  });
+
+  // Every other test in this file runs behind a stub that authenticates
+  // unconditionally, so none of them would notice a refactor that mounted
+  // /mcp ahead of the Access middleware. This one builds its own app with a
+  // denying stub: the tool call never gets that far, a 401 does.
+  it("is mounted behind the Access middleware, unlike /health", async () => {
+    const deny: RequestHandler = (_req, res) => { res.status(401).json({ error: { code: "unauthorized" } }); };
+    const app = createApp(core, { log: createLogger("t"), access: deny, mcp: createMcpHandler(core, createLogger("t")) });
+    expect((await request(app).post("/mcp").send({ jsonrpc: "2.0", id: 1, method: "tools/list" })).status).toBe(401);
+    expect((await request(app).get("/health")).status).toBe(200);
   });
 });

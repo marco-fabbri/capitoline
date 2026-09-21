@@ -47,6 +47,11 @@ export class UsageStore {
         input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
         outcome TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', caller TEXT);
       CREATE INDEX IF NOT EXISTS calls_provider_ts ON calls(provider, ts);
+      -- The per-caller breakdown filters on ts alone, which the composite
+      -- index above cannot serve: without this one it is a full scan of a
+      -- table nothing ever prunes. IF NOT EXISTS also upgrades the deployed
+      -- database in place.
+      CREATE INDEX IF NOT EXISTS calls_ts ON calls(ts);
       CREATE TABLE IF NOT EXISTS rate_windows (
         provider TEXT NOT NULL, window TEXT NOT NULL, utilization REAL NOT NULL, resets_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL, PRIMARY KEY (provider, window));

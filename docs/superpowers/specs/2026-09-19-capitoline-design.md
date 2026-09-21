@@ -59,7 +59,7 @@ Capitoline targets **any Debian or Ubuntu host**: a VM on Nutanix AHV, a Proxmox
 - **Two natures, two deployment shapes.** With the subscription CLIs (this spec) the deployment needs persistence: refreshed credentials on disk, a keyring for Antigravity, two Linux users. That is a host, or a single-replica StatefulSet with a persistent volume, one container with both users (`allowPrivilegeEscalation` on, because sudo is one), `cloudflared` as a sidecar. With self-hosted API providers only (an OpenAI-compatible adapter for the platform, Ollama, vLLM; phase 2 backlog) the process is stateless and runs anywhere, including Kubernetes/NKP next to the platform. Heroku-style ephemeral platforms fit only the second shape. Pay-per-use public APIs are excluded by the owner's rule.
 - **Cloudflare Tunnel** (`cloudflared` as a service in the LXC) to `localhost:8080`. No inbound ports open. The tunnel creates the DNS record `api.example.com` in the zone already on Cloudflare.
 - **Cloudflare Access**, free Zero Trust plan. Two policies: email login for the owner (browser), service token for apps and for Claude Code.
-- **The gateway verifies the Access JWT** on every request (`Cf-Access-Jwt-Assertion`), before the body is read. Anyone reaching port 8080 from inside the Proxmox network without going through Cloudflare is rejected. The one deliberate exemption is `GET /health`, which is unauthenticated so that local monitoring on 127.0.0.1 works without a service token; it only reports cached state and never reaches a CLI. On the corporate Proxmox the network is not the owner's: twenty lines of verification are worth the guarantee.
+- **The gateway verifies the Access JWT** on every request (`Cf-Access-Jwt-Assertion`), before the body is read. Anyone reaching port 8080 from inside the Proxmox network without going through Cloudflare is rejected. The one deliberate exemption is `GET /health`, which is unauthenticated so that local monitoring on 127.0.0.1 works without a service token; it only reports cached state, never reaches a CLI and names no caller. The per-caller usage breakdown is `GET /v1/usage`, behind Access, because on a host that also runs the `runner` user "anyone who can reach 127.0.0.1:8080" is not the owner alone. On the corporate Proxmox the network is not the owner's: twenty lines of verification are worth the guarantee.
 - Alternatives evaluated and discarded: Cloudflare Workers (no processes or filesystem), Cloudflare Containers (ephemeral, paid plan, refreshed tokens lost on restart), Oracle Cloud Always Free (valid as plan B), Fly/Railway/Render (free tiers gone or sleeping).
 - Note for reuse by a company: same Tunnel + Access scheme on separate account and zone. Cloudflare's "subdomain setup" (a subdomain as its own zone) is Enterprise only; two-level hosts need Advanced Certificate Manager (10 $/month) or a single-level host.
 
@@ -115,7 +115,9 @@ Declared subset. Rule for edge cases: **reject explicitly what cannot be honored
 
 Response: standard format with `usage` (tokens from the CLI when available) plus the proprietary `capitoline` field (warnings; in phase 2 council details). OpenAI clients ignore unknown fields.
 
-`GET /health`: process and provider state, without consuming subscription (reads the `health` cache).
+`GET /health`: process and provider state, without consuming subscription (reads the `health` cache). The one unauthenticated route (§4), so it carries nothing that names a caller.
+
+`GET /v1/usage`: the last 24 hours grouped by caller — the email of a user token or the name of a service token — busiest first, the gateway's own health probes excluded. Authenticated like the rest of `/v1`: it is the one report that names people.
 
 ### 6.2 MCP
 

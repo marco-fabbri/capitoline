@@ -60,12 +60,23 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     return new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind], retry);
   };
 
-  // `callers` is the last 24 hours broken down by who asked: with more than
-  // one application behind the same tunnel, it is the only way to see which
-  // one is spending the window. It carries no provider detail and no prompt,
-  // only what the Access token already said about the caller.
+  // The exempt route (spec 4) carries cached state only and names nobody:
+  // "anyone who can open 127.0.0.1:8080" is not the owner alone on a host that
+  // also runs the `runner` user, the account docs/deploy.md §11 keeps away
+  // from the usage database on purpose. The per-caller breakdown is below,
+  // behind Access.
   app.get("/health", (_req, res) => {
-    res.json({ ok: true, providers: core.providerStates(), models: core.listModels(), callers: core.callers() });
+    res.json({ ok: true, providers: core.providerStates(), models: core.listModels() });
+  });
+
+  // The last 24 hours broken down by who asked: with more than one application
+  // behind the same tunnel, it is the only way to see which one is spending
+  // the window. It names callers — an email, a service token name — so it sits
+  // under /v1, where the app-wide Access middleware protects it like every
+  // other route. It carries no provider detail and no prompt, only what the
+  // Access token already said about the caller.
+  app.get("/v1/usage", (_req, res) => {
+    res.json({ callers: core.callers() });
   });
 
   // The quota block is only there for image models, and its keys follow this

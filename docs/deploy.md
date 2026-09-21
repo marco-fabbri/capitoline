@@ -529,12 +529,17 @@ From the host, `curl -s http://127.0.0.1:8080/v1/models` now answers 401
 that is the intended exemption for local monitoring.
 
 A verified token also says who is calling, and every usage row records it: the
-email of a user token, the name (`common_name`) of a service token. `/health`
-reports the last 24 hours grouped by it, which is how two applications sharing
-one gateway are told apart:
+email of a user token, the name (`common_name`) of a service token.
+`GET /v1/usage` reports the last 24 hours grouped by it, which is how two
+applications sharing one gateway are told apart. It is deliberately not on
+`/health`: that route is the exemption above, readable by anyone who can open
+127.0.0.1:8080 on this host — including `runner` — and this breakdown names
+people. So it is read through the tunnel, with the service token, like any
+other `/v1` route:
 
 ```sh
-curl -s http://127.0.0.1:8080/health | jq .callers
+curl -s https://api.example.com/v1/usage \
+  -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" | jq .callers
 # [ { "caller": "claude-code", "calls": 12, "inputTokens": 4210, "outputTokens": 980 } ]
 ```
 
