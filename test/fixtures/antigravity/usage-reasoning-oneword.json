@@ -1,0 +1,1 @@
+{"event":"result","result":{"conversation_id":"49155b66-637c-41f8-862c-8060e0ae9bdc","status":"SUCCESS","response":"Paris\n","duration_seconds":4.045061898,"num_turns":1,"usage":{"input_tokens":12886,"output_tokens":203,"thinking_tokens":202,"cache_read_tokens":0,"total_tokens":13089}}}
