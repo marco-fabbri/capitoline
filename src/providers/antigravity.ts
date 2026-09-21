@@ -88,15 +88,25 @@ export const antigravityAdapter: Adapter = {
           yield { type: "error", kind: classifyError(detail), detail };
           return;
         }
-        // Measured on the host, 2026-09-22, on the capture in
-        // test/fixtures/antigravity/usage-reasoning.json (gemini-3.1-pro-high,
-        // the same prompt twice so the second run reads cache, both runs with
-        // non-zero thinking tokens): the CLI's own total_tokens is exactly
-        // input_tokens + output_tokens. So the thinking tokens are already
-        // inside output_tokens — as in Anthropic's API, which folds thinking
-        // into output_tokens — and adding them would count them twice, while
-        // the cached reads sit outside that sum and are input the turn was
-        // billed for, exactly as claude.ts treats cache_read_input_tokens.
+        // The run recorded in test/fixtures/antigravity/usage-reasoning.json
+        // (gemini-3.1-pro-high, the same prompt twice so the second one reads
+        // cache, both with non-zero thinking tokens) shows one identity and no
+        // more: the CLI's own total_tokens is input_tokens + output_tokens
+        // exactly. That settles the cached reads — the second run's 8092 sit
+        // outside the total, so they are input this turn was billed for and
+        // are added here, as claude.ts adds cache_read_input_tokens. It does
+        // not settle the thinking tokens: a total that already leaves one
+        // sibling field out is no proof that it folds another one in, and
+        // Google's own API reports thoughtsTokenCount outside
+        // candidatesTokenCount. So the output below is a choice and not a
+        // measurement: output_tokens alone counts the thinking tokens once if
+        // the CLI folds them in and misses them if it does not, where adding
+        // them would count them twice in the first case — and overstating the
+        // windows is the defect this replaces. The capture that would decide
+        // it is written down in docs/backlog.md. codex.ts stays the known
+        // exception: it adds neither cached_input_tokens nor
+        // reasoning_output_tokens, so the three providers' figures are not
+        // comparable with each other yet (same bullet).
         const u = r.usage ?? {};
         yield { type: "done", usage: { input: (u.input_tokens ?? 0) + (u.cache_read_tokens ?? 0), output: u.output_tokens ?? 0 } };
         return;

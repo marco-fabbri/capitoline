@@ -161,13 +161,19 @@ describe("antigravity adapter", () => {
     })());
     expect(ev.map((e) => e.type)).toEqual(["done"]);
   });
-  it("counts the cached reads as input and the thinking tokens only once", async () => {
-    // The capture that settled it (host, 2026-09-22, gemini-3.1-pro-high, the
-    // same prompt twice so the second run reads cache). Both runs have
-    // non-zero thinking tokens, and the second non-zero cached reads, which is
-    // what no earlier fixture had: the two assertions at the end are the
-    // measurement itself, so a formula that counts the thinking tokens again
-    // or drops the cached reads fails here.
+  it("counts the cached reads as input and the thinking tokens no more than once", async () => {
+    // Reconstructed on purpose: the fixture is not a CLI print but the two
+    // usage objects a host run of 2026-09-22 left written down in
+    // plans/2026-09-22-backlog-close.md (gemini-3.1-pro-high, the same prompt
+    // twice so the second run reads cache, both runs with non-zero thinking
+    // tokens), so it carries status and usage where every other fixture here
+    // is the whole result object. Recapture it as the CLI prints it, response
+    // field included, when the host is next in reach.
+    // What it pins is the one identity those numbers show, asserted at the
+    // end: total_tokens is input_tokens + output_tokens, so the cached reads
+    // are outside the total and belong in the input. It says nothing about
+    // which side the thinking tokens sit on — docs/backlog.md keeps that open
+    // — so the two expectations below pin today's choice, not a measurement.
     const runs = JSON.parse(readFileSync("test/fixtures/antigravity/usage-reasoning.json", "utf8")) as { result: { usage: Record<string, number> } }[];
     const usage: { input: number; output: number }[] = [];
     for (const line of runs) {
@@ -179,8 +185,8 @@ describe("antigravity adapter", () => {
     expect(usage[1]).toEqual({ input: 12881, output: 357 });
     runs.forEach((line, i) => {
       const u = line.result.usage;
-      // The CLI's own total is input + output, so the thinking tokens are
-      // already inside it and the cached reads are outside it.
+      // The identity itself: the CLI's total is input plus output and
+      // nothing else, which is what puts the cached reads in the input.
       expect(u.total_tokens).toBe(u.input_tokens + u.output_tokens);
       expect(u.thinking_tokens).toBeGreaterThan(0);
       expect(usage[i].input + usage[i].output - u.cache_read_tokens).toBe(u.total_tokens);
