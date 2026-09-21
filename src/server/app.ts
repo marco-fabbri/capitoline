@@ -182,7 +182,22 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // The MCP handler is mounted inside createApp so the Access middleware above
   // protects it like every other route. express.json() has already parsed the
   // body, which is why the handler passes req.body to the SDK transport.
-  if (opts.mcp) app.all("/mcp", opts.mcp);
+  //
+  // POST only. In stateless mode (no session id) the transport answers a GET
+  // with the standalone SSE stream, which nothing ever ends: a stray GET — a
+  // browser, a naive checker — would then hold a connection open and keep
+  // server.close() waiting until the shutdown grace destroys the sockets. 405
+  // with Allow is what the MCP spec prescribes for a verb the endpoint does
+  // not serve, and the SDK's own client reads it as "no GET stream here" and
+  // carries on. The body stays JSON-RPC rather than the spec 8.3 envelope of
+  // the /v1 routes, because the caller of /mcp is an MCP client.
+  if (opts.mcp) {
+    app.post("/mcp", opts.mcp);
+    app.all("/mcp", (_req, res) => {
+      res.status(405).setHeader("Allow", "POST");
+      res.json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null });
+    });
+  }
 
   // Errors raised before a route runs (express.json on a malformed or oversized
   // body) would otherwise fall into Express's default handler, which answers in

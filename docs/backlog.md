@@ -17,13 +17,6 @@ not one of them but a later observation from the host, still to be confirmed.
 
 - Observation to confirm on the host: watch `/var/lib/capitoline/sandboxes` while the service is up. The one empty `run-…` directory seen on the Mac now has an explanation and a fix (a grandchild inheriting stdout kept `close` from firing, so the run never settled: `src/runner/runner.ts` bounds that wait since A6), and the startup sweep removes whatever an earlier process left behind — which is exactly why the remaining symptom is a `run-…` directory appearing there *between* two restarts. That means a run that hung rather than one that was killed, and it is the only thing left that would show a second leak path. Nothing else in the repository looks at that directory while the gateway is running.
 
-## MCP
-
-- `src/mcp/server.ts`: the progress notification can send the same `progress` value twice (at the last `n % 20 === 0` mark and again at completion), which violates the MCP spec's "must increase" rule — use a counter that always advances.
-- `src/mcp/server.ts`: a provider error's `detail` is discarded on the MCP path (`throw new CapitolineError(ev.kind, ev.kind)` and `log.warn` without it), unlike the HTTP path which logs it — log and drop only the kind from the thrown error, same as `app.ts`.
-- `src/mcp/server.ts`: `app.all("/mcp", handler)` also answers GET with an endless SSE stream in stateless mode, which can hang `server.close()` on shutdown — reject GET (and other non-POST verbs) with 405.
-- `src/mcp/server.ts`: the `ask_model` tool has no `attachments` parameter, so images can't be sent over MCP even though the HTTP path supports them — add the parameter or record the gap as a deliberate phase 1 deferral.
-
 ## Tests
 
 - `test/adapter.test.ts`: does not exist, so `effortValue`, `modelSpecs` and `jsonLines` in `src/providers/adapter.ts` have zero direct test coverage — add it with the null-effort-table, effort-fallback and malformed-JSON-line cases.
@@ -65,6 +58,8 @@ Not configurable: the anonymity of the peer-ranking stage. It is the mechanism t
 **Antigravity text rate limits.** The same "reports success but the error is in the text" pattern, now confirmed and handled for image generation, may also occur for text output — verify this and, if confirmed, call `detectQuotaExhausted` (`src/providers/errors.ts`, already written for the image path) from the text path of `CliProvider.execute()` too.
 
 **Real error fixtures.** Capture real fixtures (expired token, exhausted window) for all three CLIs, recorded when the conditions actually occur rather than synthesized. One is now in: `test/fixtures/antigravity/image-429.jsonl`, the image quota refusal captured on 2026-09-21. Still synthetic: every expired-token case, and the text-side window for all three.
+
+**Attachments over MCP.** The `ask_model` tool takes a prompt and nothing else, so an image can be sent to a model through `POST /v1/chat/completions` (data-URL content parts, `InternalRequest.attachments`) but not through MCP. **Deliberately deferred in B5, 2026-09-22**, as that task's own text recommends: the council of phase 2 deliberates on text, no caller has asked for it, and adding it is not one parameter but a decision about how bytes travel over JSON-RPC — base64 inside a tool argument, counted against the client's own context and repeated in every retry, against a file path the gateway would have to be allowed to read from the client's machine, which it is not. Revisit when a caller needs it, and take the HTTP path as the shape to mirror.
 
 **Two-container pod shape.** Gateway and runner as separate containers in one pod, communicating over a local socket, as the clean alternative to running sudo inside a single container.
 

@@ -109,6 +109,44 @@ describe("MCP", () => {
     await c.close();
   });
 
+  // B5: the MCP spec requires the progress value of every notification to be
+  // larger than the one before. Forty text events is the case that breaks the
+  // event count: the last periodic mark lands on event 40 and the completion
+  // notification follows it with the same number. Forty-five would pass
+  // whatever the implementation does (20, 40, 45), which is why this script is
+  // a multiple of the interval.
+  it("sends ask_model progress values that always increase", async () => {
+    provider.script = [
+      ...Array.from({ length: 40 }, (): ProviderEvent => ({ type: "text", delta: "x" })),
+      { type: "done", usage: { input: 5, output: 1 } },
+    ];
+    const c = await client();
+    const seen: number[] = [];
+    const r = await c.callTool({ name: "ask_model", arguments: { model: "claude-opus", prompt: "q" } }, undefined, { onprogress: (p) => { seen.push(p.progress); } });
+    expect(r.isError).toBeFalsy();
+    // Two periodic marks and the completion.
+    expect(seen).toHaveLength(3);
+    expect(seen.every((v, i) => i === 0 || v > seen[i - 1])).toBe(true);
+    await c.close();
+  });
+
+  // B5: the HTTP layer logs the provider's detail on a "provider error" line
+  // and sends the client the kind alone (spec 8.3). The MCP path was throwing
+  // the kind twice and dropping the detail, so the one line an operator has to
+  // diagnose a broken CLI existed only for HTTP callers.
+  it("logs the provider detail on the MCP path and keeps it out of the tool error", async () => {
+    const detail = "Traceback (most recent call last): /home/runner/.claude/secret";
+    provider.script = [{ type: "error", kind: "cli_crashed", detail }];
+    const c = await client();
+    const r = await c.callTool({ name: "ask_model", arguments: { model: "claude-opus", prompt: "q" } });
+    expect(r.isError).toBe(true);
+    const text = (r.content as Block[])[0].text!;
+    expect(text).toMatch(/cli_crashed/);
+    expect(text).not.toContain("Traceback");
+    expect(warnings.find((w) => w.msg === "provider error")).toMatchObject({ kind: "cli_crashed", model: "claude-opus", detail });
+    await c.close();
+  });
+
   describe("generate_image", () => {
     it("returns the image as an image block plus the structured description, without the agent's prose", async () => {
       const c = await client();
@@ -271,5 +309,27 @@ describe("MCP", () => {
     const app = createApp(core, { log: createLogger("t"), access: deny, mcp: createMcpHandler(core, createLogger("t")) });
     expect((await request(app).post("/mcp").send({ jsonrpc: "2.0", id: 1, method: "tools/list" })).status).toBe(401);
     expect((await request(app).get("/health")).status).toBe(200);
+  });
+
+  // B5: POST is the only verb the stateless transport needs. A GET asking for
+  // the standalone SSE stream is answered by the SDK with a stream that never
+  // ends, so a stray one holds a socket open and hangs server.close() until
+  // the shutdown grace kills it; the response timeout below is what a hanging
+  // stream looks like from a client. 405 + Allow is what the MCP spec asks
+  // for, and the SDK's own client reads it as "this server has no GET stream".
+  it("answers 405 to GET and other non-POST verbs on /mcp", async () => {
+    const ok: RequestHandler = (_req, res, next) => { res.locals.identity = { sub: "", type: "service", name: "claude-code" } satisfies Identity; next(); };
+    const app = createApp(core, { log: createLogger("t"), access: ok, mcp: createMcpHandler(core, createLogger("t")) });
+    const sse = await request(app).get("/mcp").set("Accept", "text/event-stream").timeout({ response: 2_000, deadline: 2_000 });
+    expect(sse.status).toBe(405);
+    expect(sse.headers.allow).toBe("POST");
+    // The body stays a JSON-RPC error: the caller here is an MCP client, not
+    // an OpenAI one, and it is the shape the SDK's own transport returns.
+    expect(sse.body).toMatchObject({ jsonrpc: "2.0", error: { code: -32000 }, id: null });
+    for (const verb of ["delete", "put"] as const) {
+      const r = await request(app)[verb]("/mcp").timeout({ response: 2_000, deadline: 2_000 });
+      expect(r.status, verb).toBe(405);
+      expect(r.headers.allow, verb).toBe("POST");
+    }
   });
 });

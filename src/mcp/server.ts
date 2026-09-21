@@ -33,6 +33,13 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
   // client retry into a second 429. The model is passed too, because the pause
   // may have been installed on the model alone. Same rule as the HTTP layer.
   const providerError = (ev: Extract<ProviderEvent, { type: "error" }>, provider: string, model: string): CapitolineError => {
+    // The detail is logged here and nowhere else: the CapitolineError below
+    // carries the kind as its message, so by the time toolError sees it the
+    // provider's own words are gone. Logging it is what gives an operator on
+    // this path the same line the HTTP one writes — the CLI's stderr, the raw
+    // 429 body — while the client keeps getting the kind alone (spec 8.3).
+    // Tail-bounded like the HTTP layer: a crashed CLI can dump a lot.
+    log.warn({ kind: ev.kind, model, detail: ev.detail.slice(-2000) }, "provider error");
     const retry = ev.kind === "rate_limited" ? core.pauseRemainingS(provider, model) ?? ev.retryAfterS : ev.retryAfterS;
     return new CapitolineError(ev.kind, ev.kind, retry);
   };
@@ -81,7 +88,15 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     let text = "";
     let usage: Usage | undefined;
     let n = 0;
-    const progress = (done: boolean) => token !== undefined && extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: n, message: done ? "done" : `${text.length} chars` } });
+    // Two counters on purpose. `n` counts text events and only decides when a
+    // mark is due; the notification carries `sent`, which counts the
+    // notifications themselves. The MCP spec requires every progress value to
+    // be larger than the previous one, and the event count is not: a stream of
+    // exactly 20, 40, 60... events sends its last mark and then the completion
+    // with the same number. There is no total to report, so a plain sequence
+    // is as much as this tool can honestly say.
+    let sent = 0;
+    const progress = (done: boolean) => token !== undefined && extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: ++sent, message: done ? "done" : `${text.length} chars` } });
     try {
       for await (const ev of core.execute({ model, messages, effort, stream: true }, { signal: extra.signal, source: "mcp", caller })) {
         if (ev.type === "text") { text += ev.delta; if (++n % 20 === 0) await progress(false); }
