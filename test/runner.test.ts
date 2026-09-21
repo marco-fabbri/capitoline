@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunner } from "../src/runner/runner.js";
@@ -11,6 +11,19 @@ const root = mkdtempSync(join(tmpdir(), "capitoline-runner-"));
 const runner = createRunner({ sandboxRoot: root, user: null, killGraceMs: 300, log });
 
 async function collect(it: AsyncIterable<string>) { const out: string[] = []; for await (const l of it) out.push(l); return out; }
+
+// Same generator as fake-cli.mjs "emit-bytes" (the fake cannot be imported: it runs on load).
+function pseudoRandomBytes(n: number, seed = 0x9e3779b9): Buffer {
+  const out = Buffer.alloc(n);
+  let x = seed >>> 0;
+  for (let i = 0; i < n; i++) {
+    x ^= x << 13; x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5; x >>>= 0;
+    out[i] = x & 0xff;
+  }
+  return out;
+}
 
 describe("runner", () => {
   it("writes stdin, streams stdout lines, removes the sandbox", async () => {
@@ -98,6 +111,45 @@ describe("runner", () => {
     const h = await runner.run({ binary: "/nonexistent/binary", args: [], stdin: null, timeoutMs: 5000 });
     await collect(h.lines);
     const r = await h.result;
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toMatch(/ENOENT|spawn/);
+  });
+});
+
+describe("runner.capture", () => {
+  it("returns the whole stdout as bytes, byte for byte, without a sandbox", async () => {
+    const before = readdirSync(root).length;
+    const r = await runner.capture({ binary: FAKE, args: ["--mode", "emit-bytes", "--bytes", "300000"], timeoutMs: 5000, maxBytes: 1024 * 1024 });
+    expect(r.exitCode).toBe(0);
+    expect(r.timedOut).toBe(false);
+    expect(r.stdout.length).toBe(300_000);
+    expect(r.stdout.equals(pseudoRandomBytes(300_000))).toBe(true);
+    expect(readdirSync(root).length).toBe(before);
+  });
+  it("kills the child once stdout exceeds maxBytes and does not report success", async () => {
+    const t0 = Date.now();
+    const r = await runner.capture({ binary: FAKE, args: ["--mode", "emit-bytes", "--bytes", "4000000"], timeoutMs: 10000, maxBytes: 64 * 1024 });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.timedOut).toBe(false);
+    expect(r.stdout.length).toBeLessThanOrEqual(64 * 1024);
+    expect(r.stderr).toMatch(/exceeded 65536 bytes/);
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
+  it("reports a non-zero exit code and the captured stderr", async () => {
+    const r = await runner.capture({ binary: FAKE, args: ["--mode", "crash"], timeoutMs: 5000, maxBytes: 1024 });
+    expect(r.exitCode).toBe(2);
+    expect(r.stdout.length).toBe(0);
+    expect(r.stderr).toContain("boom");
+  });
+  it("kills a hanging process at the timeout and reports it", async () => {
+    const t0 = Date.now();
+    const r = await runner.capture({ binary: FAKE, args: ["--mode", "hang"], timeoutMs: 500, maxBytes: 1024 });
+    expect(r.timedOut).toBe(true);
+    expect(r.exitCode).not.toBe(0);
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
+  it("reports a missing binary as a failed capture, not an exception", async () => {
+    const r = await runner.capture({ binary: "/nonexistent/binary", args: [], timeoutMs: 5000, maxBytes: 1024 });
     expect(r.exitCode).not.toBe(0);
     expect(r.stderr).toMatch(/ENOENT|spawn/);
   });

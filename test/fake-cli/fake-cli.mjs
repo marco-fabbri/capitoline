@@ -9,12 +9,28 @@
 //   secret-stderr  : print a fake secret to stderr, then exit 0 with no stdout
 //   cwd            : print {"cwd": process.cwd(), "files": [...]}
 //   big-stderr     : write ~200 KiB to stderr (last line is "END"), exit 0
+//   emit-bytes --bytes N : write N deterministic pseudo-random bytes to stdout (xorshift32, seed 0x9e3779b9), exit 0
 import { readFileSync, readdirSync } from "node:fs";
 const argv = process.argv.slice(2);
 const modeIdx = argv.indexOf("--mode");
 const mode = modeIdx >= 0 ? argv[modeIdx + 1] : process.env.FAKE_MODE ?? "stdin-len";
 const fileIdx = argv.indexOf("--file");
 const file = fileIdx >= 0 ? argv[fileIdx + 1] : process.env.FAKE_FILE;
+const bytesIdx = argv.indexOf("--bytes");
+const bytes = bytesIdx >= 0 ? Number(argv[bytesIdx + 1]) : 0;
+
+// Deterministic so tests can rebuild the expected buffer (same generator in test/runner.test.ts).
+function pseudoRandomBytes(n, seed = 0x9e3779b9) {
+  const out = Buffer.alloc(n);
+  let x = seed >>> 0;
+  for (let i = 0; i < n; i++) {
+    x ^= x << 13; x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5; x >>>= 0;
+    out[i] = x & 0xff;
+  }
+  return out;
+}
 
 async function readStdin() {
   const chunks = [];
@@ -58,6 +74,12 @@ switch (mode) {
     let buf = "";
     for (let i = 0; i < 20_000; i++) buf += String(i).padStart(9, "0") + "\n";
     process.stderr.write(buf + "END\n");
+    break;
+  }
+  case "emit-bytes": {
+    // Written in one go and flushed by a natural exit; a large N blocks on the pipe
+    // until the parent reads or kills the process.
+    process.stdout.write(pseudoRandomBytes(bytes));
     break;
   }
   default:

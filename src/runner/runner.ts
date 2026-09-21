@@ -14,7 +14,14 @@ export interface RunSpec {
 }
 export interface RunResult { exitCode: number | null; timedOut: boolean; aborted: boolean; stderr: string; sandboxDir: string }
 export interface RunHandle { lines: AsyncIterable<string>; result: Promise<RunResult>; sandboxDir: string }
-export interface Runner { run(spec: RunSpec): Promise<RunHandle> }
+export interface CaptureSpec { binary: string; args: string[]; timeoutMs: number; maxBytes: number }
+export interface CaptureResult { exitCode: number | null; stdout: Buffer; stderr: string; timedOut: boolean }
+export interface Runner {
+  run(spec: RunSpec): Promise<RunHandle>;
+  // Runs a helper command (through sudo when configured) and returns its stdout
+  // as bytes: for collecting an image produced by a CLI outside the sandbox.
+  capture(spec: CaptureSpec): Promise<CaptureResult>;
+}
 export interface RunnerOptions { sandboxRoot: string; user: string | null; killGraceMs: number; log: Logger }
 
 const STDERR_CAP = 64 * 1024;
@@ -45,6 +52,17 @@ function bufferedLines(rl: ReturnType<typeof createInterface>): AsyncIterable<st
       wake = null;
     }
   })();
+}
+
+// sudo wrapping and environment reduction shared by run() and capture().
+function command(o: RunnerOptions, binarySpec: string, specArgs: string[]): { binary: string; cmd: string; args: string[]; env: NodeJS.ProcessEnv } {
+  // A binary given as a relative path is relative to the gateway's cwd, not to the sandbox.
+  const binary = binarySpec.includes("/") ? resolve(binarySpec) : binarySpec;
+  const [cmd, args] = o.user
+    ? ["sudo", ["-n", "-H", "-u", o.user, "--", binary, ...specArgs]]
+    : [binary, specArgs];
+  const env = o.user ? { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin" } : process.env;
+  return { binary, cmd, args, env };
 }
 
 export function createRunner(o: RunnerOptions): Runner {
@@ -85,13 +103,7 @@ export function createRunner(o: RunnerOptions): Runner {
         };
       }
 
-      // A binary given as a relative path is relative to the gateway's cwd, not to the sandbox.
-      const binary = spec.binary.includes("/") ? resolve(spec.binary) : spec.binary;
-      const [cmd, args] = o.user
-        ? ["sudo", ["-n", "-H", "-u", o.user, "--", binary, ...spec.args]]
-        : [binary, spec.args];
-      const env = o.user ? { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin" } : process.env;
-
+      const { binary, cmd, args, env } = command(o, spec.binary, spec.args);
       const child = spawn(cmd, args, { cwd: dir, env, stdio: ["pipe", "pipe", "pipe"] });
       let stderr = "";
       let timedOut = false;
@@ -141,6 +153,66 @@ export function createRunner(o: RunnerOptions): Runner {
       });
 
       return { lines, result, sandboxDir: dir };
+    },
+
+    async capture(spec: CaptureSpec): Promise<CaptureResult> {
+      // No sandbox: the helper reads nothing from the working directory, so it
+      // runs in the sandbox root, which is created on demand as in run().
+      await mkdir(o.sandboxRoot, { recursive: true });
+      const { binary, cmd, args, env } = command(o, spec.binary, spec.args);
+      const child = spawn(cmd, args, { cwd: o.sandboxRoot, env, stdio: ["pipe", "pipe", "pipe"] });
+      const chunks: Buffer[] = [];
+      let received = 0;
+      let overflow = false;
+      let stderr = "";
+      let timedOut = false;
+      let spawnError: Error | null = null;
+
+      child.on("error", (e) => { spawnError = e; });
+      child.stdin.on("error", () => { /* child may exit before noticing */ });
+      child.stdin.end();
+      child.stderr.on("data", (d: Buffer) => {
+        stderr += d.toString("utf8");
+        if (stderr.length > STDERR_CAP) stderr = stderr.slice(-STDERR_CAP);
+      });
+
+      const kill = () => {
+        if (child.exitCode !== null || child.signalCode !== null) return;
+        child.kill("SIGTERM");
+        setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); }, o.killGraceMs).unref();
+      };
+      child.stdout.on("data", (d: Buffer) => {
+        if (overflow) return;
+        received += d.length;
+        if (received > spec.maxBytes) {
+          // Keep exactly maxBytes, stop consuming and kill: the caller must never
+          // mistake a truncated stdout for a complete one, whatever the exit code.
+          overflow = true;
+          chunks.push(d.subarray(0, d.length - (received - spec.maxBytes)));
+          child.stdout.destroy();
+          kill();
+          return;
+        }
+        chunks.push(d);
+      });
+      const timer = setTimeout(() => { timedOut = true; kill(); }, spec.timeoutMs);
+
+      return new Promise<CaptureResult>((done) => {
+        let finished = false;
+        const finish = (code: number | null) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          if (spawnError) stderr += `\n${spawnError.message}`;
+          if (overflow) stderr += `\nstdout exceeded ${spec.maxBytes} bytes`;
+          const exitCode = spawnError || overflow ? -1 : code;
+          if (exitCode !== 0 || timedOut) o.log.warn({ binary, exitCode, timedOut, overflow, stderr: stderr.slice(-2000) }, "capture ended abnormally");
+          done({ exitCode, stdout: Buffer.concat(chunks), stderr, timedOut });
+        };
+        child.on("close", (code) => { finish(code); });
+        // A failed spawn (ENOENT) emits 'error' and may never emit 'close'.
+        child.on("error", () => { setImmediate(() => { finish(-1); }); });
+      });
     },
   };
 }

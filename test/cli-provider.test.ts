@@ -19,7 +19,7 @@ const runner = createRunner({ sandboxRoot: mkdtempSync(join(tmpdir(), "cp-")), u
 // Wraps the runner so a test can observe the underlying run's result.
 function spyRunner(): Runner & { handles: RunHandle[] } {
   const handles: RunHandle[] = [];
-  return { handles, async run(spec) { const h = await runner.run(spec); handles.push(h); return h; } };
+  return { handles, async run(spec) { const h = await runner.run(spec); handles.push(h); return h; }, capture: (spec) => runner.capture(spec) };
 }
 
 function provider(mode: string, extra: Partial<typeof base> = {}, r: Runner = runner, adapter: Adapter = claudeAdapter, opts = {}) {
