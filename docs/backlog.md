@@ -43,14 +43,6 @@ had two review findings and both are already fixed in the current code
 - `src/usage/store.ts`: `close()` is not idempotent (`node:sqlite` throws on a second call), so a process that receives both SIGTERM and SIGINT can turn a clean shutdown into an unhandled rejection — guard it with a `closed` flag.
 - `src/usage/store.ts`: the constructor opens `db_path` without ensuring its parent directory exists, so a fresh deployment with a nested path (e.g. `/var/lib/capitoline/usage.sqlite`) fails at startup with an opaque `unable to open database file` — `mkdirSync(dirname(path), { recursive: true })` before opening.
 
-## Server
-
-- `src/main.ts`: `close()` calls `server.close()` without closing open connections, so an in-flight SSE stream (production `timeout_s: 600`) keeps the shutdown hanging until systemd sends SIGKILL — call `closeIdleConnections()`/`closeAllConnections()` with a bounded grace period.
-- `src/main.ts`: the SIGTERM/SIGINT handler is not idempotent and doesn't handle rejection, so a second signal calls `close()` on an already-closed server/store and can exit uncleanly — add a `closing` guard and `.catch()`.
-- `src/main.ts`: the `app.listen()` promise only resolves on `"listening"` with no `"error"` listener, so an `EADDRINUSE` in production surfaces as an uncaught exception with no diagnostic message — listen for `"error"` and reject.
-- `src/main.ts`: entrypoint detection builds the file URL manually (`` `file://${process.argv[1]}` ``) instead of `pathToFileURL`, so a path containing `#` or `?` is misparsed and the service silently doesn't start (exit 0) — use `pathToFileURL(process.argv[1])`.
-- `src/main.ts`: the server starts listening before `await core.checkHealth()` completes, so in that window every model looks available and a request can be routed to a broken CLI (502 instead of 404/503) — run the first health check before creating the listener.
-
 ## MCP
 
 - `src/mcp/server.ts`: the progress notification can send the same `progress` value twice (at the last `n % 20 === 0` mark and again at completion), which violates the MCP spec's "must increase" rule — use a counter that always advances.
