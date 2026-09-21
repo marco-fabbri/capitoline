@@ -34,10 +34,6 @@ had two review findings and both are already fixed in the current code
 - `src/mcp/server.ts`: `app.all("/mcp", handler)` also answers GET with an endless SSE stream in stateless mode, which can hang `server.close()` on shutdown — reject GET (and other non-POST verbs) with 405.
 - `src/mcp/server.ts`: the `ask_model` tool has no `attachments` parameter, so images can't be sent over MCP even though the HTTP path supports them — add the parameter or record the gap as a deliberate phase 1 deferral.
 
-## Docs/deploy
-
-- `docs/deploy.md` (§ backup cron): the backup command `tar czf` runs against the live `usage.sqlite` while WAL mode is on, so a restore can silently miss committed data still in the `-wal` sidecar — take a consistent snapshot first (`sqlite3 ... ".backup"` or `VACUUM INTO`) and tar that.
-
 ## Tests
 
 - `test/adapter.test.ts`: does not exist, so `effortValue`, `modelSpecs` and `jsonLines` in `src/providers/adapter.ts` have zero direct test coverage — add it with the null-effort-table, effort-fallback and malformed-JSON-line cases.

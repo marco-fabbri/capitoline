@@ -1,0 +1,56 @@
+#!/bin/bash
+# capitoline-backup <dest-dir>
+#
+# Daily backup of the usage database and the configuration. Run as root.
+#
+# The database is copied with `sqlite3 ... "VACUUM INTO"`, never with `tar` or
+# `cp`: the service keeps it open in WAL mode, so committed rows live in the
+# `-wal` sidecar until a checkpoint and an archive of the main file alone would
+# silently restore a database missing them. VACUUM INTO takes a read lock and
+# writes a self-contained snapshot, with no sidecar to keep together.
+#
+# Credentials are deliberately not backed up: if lost, log in again (deploy.md
+# §6). A copy of a token is one more thing to protect.
+#
+# Overridable for testing and for a non-standard install:
+#   CAPITOLINE_DB, CAPITOLINE_CONFIG, CAPITOLINE_BACKUP_KEEP.
+set -euo pipefail
+
+dest="${1:-}"
+db="${CAPITOLINE_DB:-/var/lib/capitoline/usage.sqlite}"
+config="${CAPITOLINE_CONFIG:-/etc/capitoline/capitoline.yaml}"
+keep="${CAPITOLINE_BACKUP_KEEP:-14}"
+
+[ -n "$dest" ] || { echo "usage: capitoline-backup <dest-dir>" >&2; exit 2; }
+[ -d "$dest" ] || { echo "no such destination directory: $dest" >&2; exit 2; }
+[ -f "$db" ] || { echo "no such database: $db" >&2; exit 3; }
+[ -f "$config" ] || { echo "no such configuration: $config" >&2; exit 3; }
+command -v sqlite3 >/dev/null 2>&1 || { echo "sqlite3 is not installed" >&2; exit 4; }
+
+stage=$(mktemp -d "${TMPDIR:-/tmp}/capitoline-backup.XXXXXX")
+trap 'rm -rf "$stage"' EXIT
+
+sqlite3 "$db" "VACUUM INTO '$stage/usage.sqlite'"
+cp "$config" "$stage/capitoline.yaml"
+
+# Flat archive, two entries: a restore is an extraction plus two copies, and
+# tar has no absolute path to strip.
+archive="$dest/capitoline-$(date +%F).tgz"
+tar czf "$archive" -C "$stage" usage.sqlite capitoline.yaml
+chmod 0600 "$archive"
+
+# Retention. The names are ISO dates, so the glob's own ascending order is
+# chronological; the array form keeps it correct for a destination path
+# containing spaces, and works on the bash 3.2 of a developer Mac.
+archives=()
+for f in "$dest"/capitoline-*.tgz; do
+  if [ -e "$f" ]; then archives+=("$f"); fi   # an unmatched glob stays literal
+done
+count=${#archives[@]}
+if [ "$count" -gt "$keep" ]; then
+  i=0
+  while [ "$i" -lt $((count - keep)) ]; do
+    rm -f "${archives[$i]}"
+    i=$((i + 1))
+  done
+fi

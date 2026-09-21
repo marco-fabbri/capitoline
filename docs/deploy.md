@@ -516,32 +516,127 @@ capitoline generate_image: a red fox in the snow".
 
 ## 11. Backup
 
-Daily, as root, of the configuration and the usage database. Credentials
-are deliberately not included: if lost, log in again (§6); a token backup
-is one more copy to protect.
+Daily, as root, of the usage database and the configuration. Credentials are
+deliberately not backed up: if one is lost, log in again (§6). A copy of a
+token is one more secret to protect, and it buys nothing — the CLIs bind a
+credential to the machine that obtained it.
+
+`scripts/capitoline-backup` ships in the repository and is installed from the
+clone of §7, like the image helper of §7.1:
 
 ```sh
-cat > /etc/cron.daily/capitoline-backup <<'CRON'
-#!/bin/sh
-set -e
-tar czf /var/backups/capitoline-$(date +%F).tgz /etc/capitoline /var/lib/capitoline/usage.sqlite
-ls -1t /var/backups/capitoline-*.tgz | tail -n +15 | xargs -r rm -f
-CRON
-chmod 0755 /etc/cron.daily/capitoline-backup
-/etc/cron.daily/capitoline-backup && ls -l /var/backups/
+apt-get install -y sqlite3
+install -o root -g root -m 0755 \
+  /var/lib/capitoline/app/scripts/capitoline-backup \
+  /usr/local/bin/capitoline-backup
+mkdir -p /var/backups
 ```
 
-Copy `/var/backups/capitoline-*.tgz` off the host with the owner's usual
-mechanism (rsync to the Mac, or a bucket).
+Owned by `root` and not writable by `capitoline`, for the same reason as
+§7.1, and a snapshot of the clone rather than a link: re-install it after a
+`git pull` that changes it.
 
-Restoring replaces `/etc/capitoline/capitoline.yaml`, so validate it before
-restarting rather than after, and let the archive's copy answer for itself:
+`capitoline-backup <dest-dir>` writes `<dest-dir>/capitoline-<date>.tgz`,
+mode `0600`, holding two flat entries: `usage.sqlite` and `capitoline.yaml`.
+The database goes in through `sqlite3 "VACUUM INTO"`, never through `tar` or
+`cp` over the live file: the service keeps the database open in WAL mode, so
+the most recent committed rows sit in the `-wal` sidecar until a checkpoint,
+and an archive of the main file alone restores a database that has silently
+lost them. `VACUUM INTO` takes a read lock — the service does not have to be
+stopped — and writes one self-contained file, with no sidecar to keep
+together. The script keeps the 14 most recent archives and exits non-zero,
+with the reason on stderr, when the destination directory, the database, the
+configuration or `sqlite3` itself is missing. The two paths default to the
+production ones and can be overridden with `CAPITOLINE_DB` and
+`CAPITOLINE_CONFIG`, the retention with `CAPITOLINE_BACKUP_KEEP`.
+
+A systemd timer, not `/etc/cron.daily`: the last run, its exit code and its
+output are then visible with `systemctl status`, in the journal, next to the
+service's own lines — a cron failure on an unwatched machine is an email
+nobody reads.
 
 ```sh
+cat > /etc/systemd/system/capitoline-backup.service <<'UNIT'
+[Unit]
+Description=Capitoline backup
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/capitoline-backup /var/backups
+UNIT
+cat > /etc/systemd/system/capitoline-backup.timer <<'UNIT'
+[Unit]
+Description=Daily Capitoline backup
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=15m
+Persistent=true
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now capitoline-backup.timer
+```
+
+`Persistent=true` runs a backup missed while the host was off at the next
+boot instead of skipping the day.
+
+Verify one run by hand, with the service running — that is the case the
+archive has to survive:
+
+```sh
+systemctl start capitoline-backup
+systemctl status capitoline-backup     # "Deactivated successfully", no "status=1"
+ls -l /var/backups/
+systemctl list-timers capitoline-backup.timer
+```
+
+Then copy `/var/backups/capitoline-*.tgz` off the host with the owner's usual
+mechanism (rsync to the Mac, or a bucket). An archive that never leaves the
+host is not a backup.
+
+### 11.1 Restore
+
+Into a scratch directory first, always, and verify it there: an archive is
+worth nothing until it has been read once.
+
+```sh
+mkdir -p /var/tmp/restore && tar xzf /var/backups/capitoline-<date>.tgz -C /var/tmp/restore
+sqlite3 /var/tmp/restore/usage.sqlite 'PRAGMA integrity_check; SELECT COUNT(*), MAX(ts) FROM calls;'
 cd /var/lib/capitoline/app && sudo -Hu capitoline \
-  env CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml npm run check-config
-systemctl restart capitoline
+  env CAPITOLINE_CONFIG=/var/tmp/restore/capitoline.yaml npm run check-config   # prints "configuration OK"
 ```
+
+`integrity_check` prints `ok`, the count is non-zero and `MAX(ts)` is a
+millisecond epoch from the day the backup ran (`date -d @$(( <ts> / 1000 ))`).
+A count that stops days before the backup means the snapshot lost the WAL —
+the failure this whole section exists to prevent — and the archive is not
+usable. The configuration is validated here, before the restart rather than
+after, because restoring replaces the file the service reads at startup and a
+rejected one under `Restart=always` is a restart loop whose only trace is the
+journal (§8).
+
+Putting it back:
+
+```sh
+systemctl stop capitoline
+install -o root -g capitoline -m 0640 /var/tmp/restore/capitoline.yaml /etc/capitoline/capitoline.yaml
+install -o capitoline -g capitoline -m 0640 /var/tmp/restore/usage.sqlite /var/lib/capitoline/usage.sqlite
+rm -f /var/lib/capitoline/usage.sqlite-wal /var/lib/capitoline/usage.sqlite-shm
+systemctl start capitoline
+curl -s http://127.0.0.1:8080/health | jq
+```
+
+Stop the service first: replacing the file under a running process leaves it
+writing into the database it still holds open, and the restored one is
+overwritten the moment it checkpoints. The old `-wal`/`-shm` must go with it —
+they describe the file being replaced, and sqlite would try to apply them to
+the new one. The ownership is the one of §7: the configuration is read by
+`capitoline`, the database is written by it.
+
+What a restore does not bring back: the CLI credentials (§6, log in again) and
+the Cloudflare service token (§9). The gateway comes up degraded until the
+first `claude`/`codex`/`agy` login is done, and `/health` names the provider
+that is still unauthenticated.
 
 ## 12. Smoke test
 
