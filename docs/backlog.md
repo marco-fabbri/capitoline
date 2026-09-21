@@ -23,10 +23,6 @@ had two review findings and both are already fixed in the current code
 - `src/providers/codex.ts`: `(o.error ?? o) as { message?: string }` assumes `error` is always an object; if Codex ever emits a string `error` (e.g. for a 429), the real message is discarded and it's misclassified as `cli_crashed` (502) instead of `rate_limited` (429) — handle the string case explicitly.
 - `src/providers/antigravity.ts`: usage accounting only sums `input_tokens`/`output_tokens`, ignoring `cache_read_tokens`/`thinking_tokens` that Claude's adapter does include, so budget windows understate real consumption for this provider once caching kicks in — align the formula with `claude.ts` or document the difference.
 
-## Runner
-
-- `src/runner/runner.ts` — observed once on the Mac with the real `claude` CLI: after a streaming request the client closed early, one empty `run-…` directory remained under `sandbox_root`; not reproducible with the fake CLIs, whose abort path cleans up. Fix: reproduce with the real CLI at `LOG_LEVEL=debug`, and add a startup sweep removing stale `run-*` directories older than the provider timeout.
-
 ## MCP
 
 - `src/mcp/server.ts`: the progress notification can send the same `progress` value twice (at the last `n % 20 === 0` mark and again at completion), which violates the MCP spec's "must increase" rule — use a counter that always advances.

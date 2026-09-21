@@ -25,6 +25,7 @@ function spyRunner(): Runner & { handles: RunHandle[]; captures: CaptureSpec[] }
     handles, captures,
     async run(spec) { const h = await runner.run(spec); handles.push(h); return h; },
     capture(spec) { captures.push(spec); return runner.capture(spec); },
+    sweep(olderThanMs) { return runner.sweep(olderThanMs); },
   };
 }
 

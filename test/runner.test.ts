@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { existsSync, mkdtempSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunner } from "../src/runner/runner.js";
@@ -152,5 +152,46 @@ describe("runner.capture", () => {
     const r = await runner.capture({ binary: "/nonexistent/binary", args: [], timeoutMs: 5000, maxBytes: 1024 });
     expect(r.exitCode).not.toBe(0);
     expect(r.stderr).toMatch(/ENOENT|spawn/);
+  });
+});
+
+describe("runner.sweep", () => {
+  /** A sandbox root of its own: the sweep looks at every entry of the directory. */
+  function sweptRunner() {
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-sweep-"));
+    return { dir, runner: createRunner({ sandboxRoot: dir, user: null, killGraceMs: 300, log }) };
+  }
+  /** Moves an entry's mtime into the past; the sweep decides on mtime, not on the name. */
+  function age(path: string, ms: number) {
+    const t = (Date.now() - ms) / 1000;
+    utimesSync(path, t, t);
+  }
+
+  it("removes the sandboxes older than the given age and keeps the fresh ones", async () => {
+    const { dir, runner: r } = sweptRunner();
+    mkdirSync(join(dir, "run-old"));
+    writeFileSync(join(dir, "run-old", "prompt.txt"), "x");   // not empty: the removal must be recursive
+    age(join(dir, "run-old"), 10 * 60 * 1000);
+    mkdirSync(join(dir, "run-fresh"));
+
+    expect(await r.sweep(5 * 60 * 1000)).toEqual(["run-old"]);
+    expect(readdirSync(dir)).toEqual(["run-fresh"]);
+  });
+
+  it("leaves alone what is not a sandbox, however old", async () => {
+    const { dir, runner: r } = sweptRunner();
+    mkdirSync(join(dir, "keep-me"));
+    age(join(dir, "keep-me"), 10 * 60 * 1000);
+    writeFileSync(join(dir, "run-loose.txt"), "x");           // a file, not a run directory
+    age(join(dir, "run-loose.txt"), 10 * 60 * 1000);
+
+    expect(await r.sweep(5 * 60 * 1000)).toEqual([]);
+    expect(readdirSync(dir).sort()).toEqual(["keep-me", "run-loose.txt"]);
+  });
+
+  it("reports nothing instead of throwing when the sandbox root does not exist", async () => {
+    const { dir, runner: r } = sweptRunner();
+    rmSync(dir, { recursive: true });
+    await expect(r.sweep(5 * 60 * 1000)).resolves.toEqual([]);
   });
 });

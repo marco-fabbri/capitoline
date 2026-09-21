@@ -1,5 +1,5 @@
 import { createServer, connect, type AddressInfo } from "node:net";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
@@ -54,6 +54,16 @@ function configWithDbFile(): { path: string; db: string } {
   const path = join(dir, "config.yaml");
   writeFileSync(path, readFileSync(CONFIG, "utf8").replace(`db_path: ":memory:"`, `db_path: "${db}"`));
   return { path, db };
+}
+
+/** A copy of the e2e configuration with a sandbox root of its own. */
+function configWithSandbox(): { path: string; sandboxRoot: string } {
+  const dir = mkdtempSync(join(tmpdir(), "capitoline-sweep-"));
+  const sandboxRoot = join(dir, "sandboxes");
+  mkdirSync(sandboxRoot);
+  const path = join(dir, "config.yaml");
+  writeFileSync(path, readFileSync(CONFIG, "utf8").replace("sandbox_root: /tmp/capitoline-e2e", `sandbox_root: ${sandboxRoot}`));
+  return { path, sandboxRoot };
 }
 
 const OK: ProviderEvent[] = [{ type: "text", delta: "ok" }, { type: "done", usage: { input: 1, output: 1 } }];
@@ -122,6 +132,24 @@ describe("start()", () => {
       // rather than being offered and answering 502.
       const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
       expect(((await r.json()) as { data: unknown[] }).data).toEqual([]);
+    } finally { await app.close(); }
+  });
+
+  it("sweeps the sandboxes left behind by an earlier run, measured on the longest timeout", async () => {
+    const { path, sandboxRoot } = configWithSandbox();
+    const old = new Date(Date.now() - 10 * 60 * 1000);
+    const recent = new Date(Date.now() - 100 * 1000);
+    for (const [name, when] of [["run-old", old], ["run-recent", recent]] as const) {
+      mkdirSync(join(sandboxRoot, name));
+      utimesSync(join(sandboxRoot, name), when, when);
+    }
+    const p = new FakeProvider("claude", ["claude-opus"], OK);
+    const app = await start(path, { port: 0, providers: [p] });
+    try {
+      // 100 s is past every text timeout of the configuration (10 s) but well
+      // inside the image model's 240 s, so a run still in flight survives a
+      // restart of the gateway while a leaked one does not.
+      expect(readdirSync(sandboxRoot)).toEqual(["run-recent"]);
     } finally { await app.close(); }
   });
 });

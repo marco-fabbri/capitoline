@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { Logger } from "../log.js";
@@ -21,6 +21,9 @@ export interface Runner {
   // Runs a helper command (through sudo when configured) and returns its stdout
   // as bytes: for collecting an image produced by a CLI outside the sandbox.
   capture(spec: CaptureSpec): Promise<CaptureResult>;
+  // Removes the run-* directories under sandbox_root that no live run can own
+  // any more, and returns their names. Called once at startup.
+  sweep(olderThanMs: number): Promise<string[]>;
 }
 export interface RunnerOptions { sandboxRoot: string; user: string | null; killGraceMs: number; log: Logger }
 
@@ -213,6 +216,40 @@ export function createRunner(o: RunnerOptions): Runner {
         // A failed spawn (ENOENT) emits 'error' and may never emit 'close'.
         child.on("error", () => { setImmediate(() => { finish(-1); }); });
       });
+    },
+
+    // A run() whose cleanup never happened (the process was killed between the
+    // spawn and the close, or rm failed on a busy entry) leaves its directory
+    // behind for good: nothing else ever looks at sandbox_root. The sweep runs
+    // at startup, when this process owns no sandbox yet, and it measures the
+    // age on mtime against the longest timeout the configuration allows, so a
+    // directory it removes cannot belong to a run of another instance either.
+    // It reports what it removed and never throws: a gateway that will not
+    // start because of a leftover directory would be the worse failure.
+    async sweep(olderThanMs: number): Promise<string[]> {
+      const cutoff = Date.now() - olderThanMs;
+      let entries;
+      try {
+        entries = await readdir(o.sandboxRoot, { withFileTypes: true });
+      } catch (e) {
+        // ENOENT is the normal state of a deployment that has not run a CLI yet.
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") o.log.warn({ dir: o.sandboxRoot, err: (e as Error).message }, "stale sandbox sweep failed");
+        return [];
+      }
+      const removed: string[] = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !entry.name.startsWith("run-")) continue;
+        const dir = join(o.sandboxRoot, entry.name);
+        try {
+          if ((await stat(dir)).mtimeMs >= cutoff) continue;
+          await rm(dir, { recursive: true, force: true, maxRetries: 3 });
+          removed.push(entry.name);
+        } catch (e) {
+          o.log.warn({ dir, err: (e as Error).message }, "stale sandbox removal failed");
+        }
+      }
+      if (removed.length > 0) o.log.info({ count: removed.length, dirs: removed, olderThanMs }, "removed stale sandboxes");
+      return removed;
     },
   };
 }
