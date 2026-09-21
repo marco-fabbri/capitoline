@@ -31,42 +31,44 @@ export interface QuotaHit {
   matched: string;
 }
 
-const PROSE_MARKER = /\b429\b|quota/i;
+// Failure context is required: the bare noun "quota" also appears in
+// legitimate prompts the agent echoes ("the fishing quota chart").
+const PROSE_MARKER = /\b429\b|too many requests|RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED|quota\s+(?:\w+\s+)?(?:exhaust|exceed|limit|reset)|exhausted your (?:capacity|quota)|rate.?limit/i;
 // "quota will reset after 4h14m59s", "resets in 2h", "reset in 1h 5m 3s".
 const PROSE_RESET = /reset(?:s)?\s+(?:after|in)\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/i;
 // "122h50m8.592940533s" or "442208.592940533s" (google.rpc duration strings).
 const DURATION = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/;
-const LOOSE_MARKERS: RegExp[] = [/"code"\s*:\s*429/, /RESOURCE_EXHAUSTED/, /QUOTA_EXHAUSTED/];
+const LOOSE_MARKERS: RegExp[] = [/"code"\s*:\s*"?429\b/, /RESOURCE_EXHAUSTED/, /QUOTA_EXHAUSTED/];
 const JSON_STRING_FIELD = (key: string) => new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`);
+// The model named inside the quota metadata, not any "model" field of the text.
+const METADATA_MODEL = /"metadata"\s*:\s*\{[^}]*"model"\s*:\s*"([^"]+)"/;
 const MODEL_WORD = /\b(gemini-[a-z0-9][a-z0-9.-]*[a-z0-9])\b/i;
+// Keys under which an event carries what the backend said; everything else
+// in a structured event (notably tool_info.parameters.Prompt) is text chosen
+// by the API client and must never produce a hit.
+const ERROR_KEYS = new Set(["error", "message", "detail", "details"]);
 
 export function detectQuotaExhausted(text: string, now: number = Date.now()): QuotaHit | null {
-  return fromEmbeddedJson(text, now) ?? fromLooseMarkers(text, now) ?? fromProse(text);
+  const event = tryParse(text.trim());
+  if (event !== undefined) {
+    // A structured event (the adapter's raw step_update, or a bare body):
+    // only its error channel is read, and the prose pass never runs on it;
+    // the agent's prose reaches the caller separately as text events.
+    const channel = [...errorStrings(event)];
+    return fromBodies([event, ...channel.map(bodyAfterMarker)], now) ?? fromLooseMarkers(channel.join("\n"), now);
+  }
+  return fromBodies([bodyAfterMarker(text)], now) ?? fromLooseMarkers(text, now) ?? fromProse(text);
 }
 
-// (1) The JSON body the backend returned. `text` may be the tool error message
-// itself, the whole body, or the adapter's raw event (JSON.stringify of the
-// step_update), where the message is a string value with the body escaped
-// inside it: hence the walk over string values of a parsed outer object.
-function fromEmbeddedJson(text: string, now: number): QuotaHit | null {
-  for (const candidate of jsonCandidates(text)) {
+// (1) The JSON body the backend returned, in the tool error message ("...,
+// body: {...}") or given bare.
+function fromBodies(candidates: Iterable<unknown>, now: number): QuotaHit | null {
+  for (const candidate of candidates) {
+    if (candidate === undefined) continue;
     const hit = readBody(candidate, now);
     if (hit) return hit;
   }
   return null;
-}
-
-function* jsonCandidates(text: string): Iterable<unknown> {
-  const direct = tryParse(text.trim());
-  if (direct !== undefined) {
-    yield direct;
-    for (const s of stringValues(direct)) {
-      const body = bodyAfterMarker(s);
-      if (body !== undefined) yield body;
-    }
-  }
-  const body = bodyAfterMarker(text);
-  if (body !== undefined) yield body;
 }
 
 function bodyAfterMarker(s: string): unknown {
@@ -100,10 +102,20 @@ function tryParse(s: string): unknown {
   try { return JSON.parse(s); } catch { return undefined; }
 }
 
-function* stringValues(v: unknown): Iterable<string> {
-  if (typeof v === "string") yield v;
-  else if (Array.isArray(v)) for (const x of v) yield* stringValues(x);
-  else if (v && typeof v === "object") for (const x of Object.values(v)) yield* stringValues(x);
+// The string values of `v` that sit under an error key (tool_info.error.message
+// in the captured shape). `parameters` is skipped outright: those are the
+// tool's arguments.
+function* errorStrings(v: unknown, inError = false): Iterable<string> {
+  if (typeof v === "string") {
+    if (inError) yield v;
+  } else if (Array.isArray(v)) {
+    for (const x of v) yield* errorStrings(x, inError);
+  } else if (v && typeof v === "object") {
+    for (const [k, x] of Object.entries(v)) {
+      if (k === "parameters") continue;
+      yield* errorStrings(x, inError || ERROR_KEYS.has(k));
+    }
+  }
 }
 
 type Rec = Record<string, unknown>;
@@ -112,7 +124,7 @@ const rec = (v: unknown): Rec | undefined => (v && typeof v === "object" && !Arr
 function readBody(body: unknown, now: number): QuotaHit | null {
   const err = rec(rec(body)?.error);
   if (!err) return null;
-  const code = err.code;
+  const code = typeof err.code === "string" ? Number(err.code) : err.code;
   const status = err.status;
   if (code !== 429 && status !== "RESOURCE_EXHAUSTED") return null;
 
@@ -130,11 +142,14 @@ function readBody(body: unknown, now: number): QuotaHit | null {
     }
     if (typeof detail?.retryDelay === "string") retryS ??= parseDuration(detail.retryDelay);
   }
+  const matched: string[] = [];
+  if (code !== undefined) matched.push(`error.code=${String(code)}`);
+  if (status !== undefined) matched.push(`status=${String(status)}`);
   return compact({
-    matched: `error.code=${String(code)} status=${String(status ?? "")}`.trim(),
+    matched: matched.join(" "),
     model,
     resetAt,
-    retryAfterS: delayS ?? retryS ?? untilInstant(resetAt, now),
+    retryAfterS: boundedWait(delayS ?? retryS, resetAt, now),
   });
 }
 
@@ -149,9 +164,9 @@ function fromLooseMarkers(text: string, now: number): QuotaHit | null {
     ?? proseDelay(text);
   return compact({
     matched: marker.exec(text)![0],
-    model: JSON_STRING_FIELD("model").exec(text)?.[1] ?? MODEL_WORD.exec(text)?.[1],
+    model: METADATA_MODEL.exec(text)?.[1] ?? MODEL_WORD.exec(text)?.[1],
     resetAt,
-    retryAfterS: delayS ?? untilInstant(resetAt, now),
+    retryAfterS: boundedWait(delayS, resetAt, now),
   });
 }
 
@@ -184,6 +199,15 @@ function parseInstant(s: string | undefined): number | undefined {
 
 function untilInstant(resetAt: number | undefined, now: number): number | undefined {
   return resetAt === undefined ? undefined : Math.max(0, Math.ceil((resetAt - now) / 1000));
+}
+
+// The delay is relative to the moment the backend answered, the instant is
+// not: on a message read late (delayed, replayed) the instant is the reliable
+// one, so it caps the delay and never lets a pause outlive a reset.
+function boundedWait(delayS: number | undefined, resetAt: number | undefined, now: number): number | undefined {
+  const untilReset = untilInstant(resetAt, now);
+  if (untilReset === undefined) return delayS;
+  return delayS === undefined ? untilReset : Math.min(delayS, untilReset);
 }
 
 // Drop undefined fields so callers can compare hits with toEqual/toMatchObject.
