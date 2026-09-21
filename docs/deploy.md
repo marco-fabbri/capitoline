@@ -404,9 +404,13 @@ journalctl -u capitoline -f
 ```
 
 `NoNewPrivileges` must stay off: `sudo` needs it. The service listens on
-`127.0.0.1:8080` only. The startup log should show `listening` and one
-`health check` line per provider with `ok: true`; the same is visible with
-`curl -s http://127.0.0.1:8080/health | jq`.
+`127.0.0.1:8080` only. The startup log shows `listening` first, then one
+`health check` line per provider with `ok: true`: the port is bound before the
+checks run, so a CLI that is slow to answer (the probe waits up to a minute)
+never turns a restart into a connection refused. Until that first round lands
+every request but `/health` is answered `503` with `Retry-After: 5`, so a
+`curl` issued right after `systemctl start` can legitimately get one; the state
+itself is visible throughout with `curl -s http://127.0.0.1:8080/health | jq`.
 
 ## 9. Cloudflare Tunnel and Access
 

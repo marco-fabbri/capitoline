@@ -38,6 +38,8 @@ interface Context { signal?: AbortSignal; source: "http" | "mcp" }
 export class Core {
   private readonly states = new Map<string, State>();
   private readonly modelIndex = new Map<string, Entry>();
+  /** Health checks still running; awaited by idle() before the usage store is closed. */
+  private readonly inFlight = new Set<Promise<void>>();
   private readonly now: () => number;
 
   constructor(providers: Provider[], private readonly usage: UsageStore, private readonly opts: CoreOptions) {
@@ -223,7 +225,24 @@ export class Core {
     if (ev.sevenDay) this.usage.setWindow(id, "seven_day", ev.sevenDay, this.now());
   }
 
-  async checkHealth(providerId?: string): Promise<void> {
+  // Wrapper, so a shutdown can wait for a check already in flight: a probe runs
+  // a real CLI (up to the health deadline) and writes a row when it lands, so
+  // closing the usage store under it makes node:sqlite throw — during a
+  // shutdown that throw becomes an unhandled rejection and a non-zero exit.
+  checkHealth(providerId?: string): Promise<void> {
+    const run = this.runHealthCheck(providerId);
+    const tracked = run.then(() => {}, () => {});   // idle() waits, it does not report
+    this.inFlight.add(tracked);
+    void tracked.finally(() => this.inFlight.delete(tracked));
+    return run;
+  }
+
+  /** Resolves when no health check is in flight. Never rejects. */
+  idle(): Promise<void> {
+    return Promise.all([...this.inFlight]).then(() => {});
+  }
+
+  private async runHealthCheck(providerId?: string): Promise<void> {
     const one = providerId ? this.states.get(providerId) : undefined;
     if (providerId && !one) throw new CapitolineError("unknown_model", `unknown provider "${providerId}"`);
     const targets = one ? [one] : [...this.states.values()];
@@ -236,7 +255,12 @@ export class Core {
   }
 
   startHealthLoop(intervalMs: number): () => void {
-    const timer = setInterval(() => { void this.checkHealth(); }, intervalMs);
+    // .catch, not a bare `void`: a check that rejects (a store gone during a
+    // shutdown, a provider throwing outside its own try) would otherwise be an
+    // unhandled rejection, which on Node 24 ends the process.
+    const timer = setInterval(() => {
+      this.checkHealth().catch((err: unknown) => this.opts.log.error({ err }, "health check failed"));
+    }, intervalMs);
     timer.unref();
     return () => clearInterval(timer);
   }

@@ -1,6 +1,9 @@
 import { createServer, connect, type AddressInfo } from "node:net";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { start } from "../src/main.js";
+import { start, SHUTDOWN_GRACE_MS } from "../src/main.js";
 import { FakeProvider } from "./fake-provider.js";
 import type { ProviderEvent } from "../src/core/types.js";
 
@@ -44,6 +47,15 @@ async function firstAccept(port: number, timeoutMs = 10_000): Promise<number> {
   }
 }
 
+/** A copy of the e2e configuration with `usage.db_path` pointing at a real file. */
+function configWithDbFile(): { path: string; db: string } {
+  const dir = mkdtempSync(join(tmpdir(), "capitoline-main-"));
+  const db = join(dir, "usage.sqlite");
+  const path = join(dir, "config.yaml");
+  writeFileSync(path, readFileSync(CONFIG, "utf8").replace(`db_path: ":memory:"`, `db_path: "${db}"`));
+  return { path, db };
+}
+
 const OK: ProviderEvent[] = [{ type: "text", delta: "ok" }, { type: "done", usage: { input: 1, output: 1 } }];
 
 describe("start()", () => {
@@ -57,24 +69,57 @@ describe("start()", () => {
     } finally { await taken.release(); }
   });
 
-  it("checks provider health before the port accepts a connection", async () => {
+  it("closes the usage store when the start fails", async () => {
+    const { path, db } = configWithDbFile();
+    const taken = await occupy();
+    try {
+      const p = new FakeProvider("claude", ["claude-opus"], OK);
+      await expect(start(path, { port: taken.port, providers: [p] })).rejects.toThrow(/cannot listen/);
+      // The WAL sidecar exists exactly while a connection is open, so its
+      // absence is the observable proof that the sqlite handle was released
+      // rather than leaked by the rejected start().
+      expect(existsSync(db)).toBe(true);
+      expect(existsSync(`${db}-wal`)).toBe(false);
+    } finally { await taken.release(); }
+  });
+
+  // retry once: freePort() releases the port before start() takes it, so another
+  // process can slip in between the two and the run fails with EADDRINUSE.
+  it("accepts connections before the first health check and answers 503 until it lands", { retry: 1 }, async () => {
     const port = await freePort();
     const p = new FakeProvider("claude", ["claude-opus"], OK);
     let healthFinishedAt = 0;
+    let land = () => {};
+    const landed = new Promise<void>((r) => { land = r; });
     p.health = async () => {
-      await new Promise((r) => setTimeout(r, 300));
+      await landed;
       healthFinishedAt = performance.now();
       return { ok: false, kind: "cli_crashed", checkedAt: Date.now() };
     };
 
     const starting = start(CONFIG, { port, providers: [p] });
-    const acceptedAt = await firstAccept(port);
+    // Raced, so a start() that fails for an unrelated reason surfaces as itself
+    // instead of as "the port never accepted a connection" ten seconds later.
+    const guard = starting.then(() => { throw new Error("start() resolved before the port accepted a connection"); });
+    const acceptedAt = await Promise.race([firstAccept(port), guard]);
+    void guard.catch(() => {});   // the race is decided; the guard must not resurface as an unhandled rejection
+
+    // The socket is open while the check is still blocked: a CLI that takes a
+    // minute to answer cannot turn a restart into connection-refused.
+    expect(healthFinishedAt).toBe(0);
+    const early = await fetch(`http://127.0.0.1:${port}/v1/models`);
+    expect(early.status).toBe(503);
+    expect(early.headers.get("retry-after")).toBe("5");
+    expect((await early.json() as { error: { code: string } }).error.code).toBe("model_unavailable");
+    // /health is never gated: the local monitor must see the startup.
+    expect((await fetch(`http://127.0.0.1:${port}/health`)).status).toBe(200);
+
+    land();
     const app = await starting;
     try {
-      expect(healthFinishedAt).toBeGreaterThan(0);
-      // The first connection the port ever accepted came after the health
-      // check had already landed: no request can meet a stale "available".
-      expect(acceptedAt).toBeGreaterThan(healthFinishedAt);
+      expect(healthFinishedAt).toBeGreaterThan(acceptedAt);
+      // The check landed unhealthy, so the model is gone from the listing
+      // rather than being offered and answering 502.
       const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
       expect(((await r.json()) as { data: unknown[] }).data).toEqual([]);
     } finally { await app.close(); }
@@ -82,6 +127,13 @@ describe("start()", () => {
 });
 
 describe("close()", () => {
+  it("waits five seconds for an in-flight response by default", () => {
+    // Pinned: every other test here overrides the grace, so a production value
+    // of 0 (every SSE stream destroyed the instant SIGTERM arrives) would
+    // otherwise keep the suite green.
+    expect(SHUTDOWN_GRACE_MS).toBe(5000);
+  });
+
   it("resolves while an SSE response is still open", async () => {
     // Long enough that the stream cannot end by itself within the assertion.
     const script: ProviderEvent[] = Array.from({ length: 200 }, () => ({ type: "text", delta: "x" }) as ProviderEvent);
@@ -104,10 +156,13 @@ describe("close()", () => {
     await reader.cancel().catch(() => {});
   });
 
-  it("resolves both times when called twice", async () => {
+  it("returns the same promise when called twice", async () => {
     const p = new FakeProvider("claude", ["claude-opus"], OK);
     const app = await start(CONFIG, { port: 0, providers: [p], shutdownGraceMs: 100 });
-    await expect(app.close()).resolves.toBeUndefined();
-    await expect(app.close()).resolves.toBeUndefined();
+    // Identity, not just "both resolve": a second shutdown must join the first
+    // one, and only the memoized promise proves the store is closed once.
+    const first = app.close();
+    expect(app.close()).toBe(first);
+    await expect(first).resolves.toBeUndefined();
   });
 });

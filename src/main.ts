@@ -1,8 +1,9 @@
 import type { Server } from "node:http";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "./config.js";
 import { Core } from "./core/core.js";
-import { createLogger } from "./log.js";
+import { createLogger, type Logger } from "./log.js";
 import { createMcpHandler } from "./mcp/server.js";
 import { buildProviders } from "./providers/index.js";
 import type { Provider } from "./providers/adapter.js";
@@ -12,7 +13,7 @@ import { createApp } from "./server/app.js";
 import { UsageStore } from "./usage/store.js";
 
 /** How long close() waits for in-flight responses before destroying their connections. */
-const SHUTDOWN_GRACE_MS = 5000;
+export const SHUTDOWN_GRACE_MS = 5000;
 
 export interface StartOverrides {
   /** Listening port, overriding server.port (0 = any free port). */
@@ -23,10 +24,38 @@ export interface StartOverrides {
   shutdownGraceMs?: number;
 }
 
+/**
+ * Binds the port, rejecting instead of hanging on an error.
+ *
+ * Without an error path an EADDRINUSE leaves the promise pending forever and
+ * surfaces as an uncaught exception with no mention of the port. Both paths are
+ * covered because express hands a listen error to the callback as well (it
+ * registers one on "error" too); whichever settles the promise first wins.
+ * Once it has settled the startup listener is swapped for one that logs: a
+ * later "error" (EMFILE on accept, for one) would otherwise reject an
+ * already-settled promise, i.e. disappear without a trace.
+ */
+function listen(app: ReturnType<typeof createApp>, port: number, log: Logger): Promise<Server> {
+  return new Promise<Server>((resolve, reject) => {
+    const fail = (e: Error) => reject(new Error(`cannot listen on 127.0.0.1:${port}: ${e.message}`, { cause: e }));
+    const s = app.listen(port, "127.0.0.1", (e?: Error) => {
+      if (e) return fail(e);
+      s.off("error", fail);
+      s.on("error", (err: unknown) => log.error({ err }, "http server error"));
+      resolve(s);
+    });
+    s.once("error", fail);
+  });
+}
+
 export async function start(configPath: string, overrides: StartOverrides = {}) {
   const log = createLogger("capitoline");
   const cfg = loadConfig(configPath);
-  const providers = overrides.providers ?? buildProviders(cfg, createRunner({ sandboxRoot: cfg.runner.sandbox_root, user: cfg.runner.user, killGraceMs: cfg.runner.kill_grace_s * 1000, log: log.child({ mod: "runner" }) }), log);
+  // Named and always built, even when providers are injected: it is the one
+  // instance that knows sandbox_root, and the startup sweep of stale run-*
+  // directories (task A6) hangs off it. Constructing it touches nothing.
+  const runner = createRunner({ sandboxRoot: cfg.runner.sandbox_root, user: cfg.runner.user, killGraceMs: cfg.runner.kill_grace_s * 1000, log: log.child({ mod: "runner" }) });
+  const providers = overrides.providers ?? buildProviders(cfg, runner, log);
   const usage = new UsageStore(cfg.usage.db_path);
   const budgets = Object.fromEntries(Object.entries(cfg.providers).map(([id, p]) => [id, { window5h: p.budget.window_5h_tokens, window7d: p.budget.window_7d_tokens }]));
   const imageQuotas = Object.fromEntries(Object.entries(cfg.providers).flatMap(([id, p]) => (p.image.quota_per_window === undefined ? [] : [[id, p.image.quota_per_window] as const])));
@@ -37,25 +66,35 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     : undefined;
   if (!access) log.warn("Cloudflare Access verification is disabled (server.access.team_domain is empty)");
 
-  const app = createApp(core, { log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })) });
+  // The port is bound first and the requests are gated, never the other way
+  // round: a real health check spawns the CLI with a deadline of a minute, and
+  // one sick CLI (a keyring still locked after a reboot, a CLI mid-update) must
+  // not keep 127.0.0.1 refusing connections for that long — the tunnel would
+  // answer connection-refused for all three providers instead of serving the
+  // two healthy ones. Until the first round of checks lands every model still
+  // reports available, so the app answers 503 + Retry-After to everything but
+  // /health (see createApp).
+  let ready = false;
+  const app = createApp(core, { log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })), ready: () => ready });
   const port = overrides.port ?? cfg.server.port;
 
-  // Before the port exists, not after: while the first check is in flight every
-  // model reports available, and a request arriving in that window would be
-  // routed to a CLI nobody has verified (502 instead of 404/503).
-  await core.checkHealth();
-
-  // Without an error path an EADDRINUSE leaves this promise pending forever and
-  // surfaces as an uncaught exception with no mention of the port. Both paths
-  // are covered because express hands a listen error to the callback as well
-  // (it registers it on "error" too); whichever settles the promise first wins.
-  const server = await new Promise<Server>((resolve, reject) => {
-    const fail = (e: Error) => reject(new Error(`cannot listen on 127.0.0.1:${port}: ${e.message}`, { cause: e }));
-    const s = app.listen(port, "127.0.0.1", (e?: Error) => (e ? fail(e) : resolve(s)));
-    s.once("error", fail);
-  }).catch((e: unknown) => { usage.close(); throw e; });
+  // One owner for the sqlite handle: whatever fails between here and the end of
+  // the first health check, the store is closed and nothing is left listening.
+  let server: Server;
+  try {
+    server = await listen(app, port, log);
+  } catch (e) { usage.close(); throw e; }
   const actualPort = (server.address() as { port: number }).port;
   log.info({ port: actualPort, providers: providers.map((p) => p.id) }, "listening");
+  try {
+    await core.checkHealth();
+    ready = true;
+  } catch (e) {
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+    usage.close();
+    throw e;
+  }
 
   const stopHealth = core.startHealthLoop(60 * 60 * 1000);
 
@@ -73,6 +112,11 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     forced.unref();
     await new Promise<void>((r) => server.close(() => r()));
     clearTimeout(forced);
+    // A check started before stopHealth() writes its row when it lands, and
+    // node:sqlite throws on a closed database. Bounded by the same grace: a
+    // probe can hang for as long as the CLI deadline and a shutdown has to stay
+    // predictable for systemd (the losing case is one lost health row).
+    await Promise.race([core.idle(), delay(graceMs, undefined, { ref: false })]);
     usage.close();
   })());
   return { close, port: actualPort };

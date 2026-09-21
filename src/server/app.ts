@@ -21,7 +21,7 @@ function sendError(res: Response, e: unknown, log: Logger) {
   res.status(status).json({ error: { message: err.message, type: status >= 500 ? "server_error" : "invalid_request_error", code: err.kind } });
 }
 
-export function createApp(core: Core, opts: { access?: RequestHandler; log: Logger; mcp?: RequestHandler }): express.Express {
+export function createApp(core: Core, opts: { access?: RequestHandler; log: Logger; mcp?: RequestHandler; ready?: () => boolean }): express.Express {
   const app = express();
   app.disable("x-powered-by");
   // Access runs first, app-wide, so an unauthenticated caller gets a 401 before
@@ -30,6 +30,22 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // 127.0.0.1 and never reaches the CLIs (spec 4).
   const access = opts.access;
   if (access) app.use((req, res, next) => (req.path === "/health" ? next() : access(req, res, next)));
+
+  // Startup gate, after Access (authentication stays the first word on every
+  // route) and before the body is parsed. Until the first health check lands
+  // every provider still reports `health: null`, i.e. available, so a request
+  // arriving in that window would be routed to a CLI nobody has verified and
+  // come back 502. The port itself is bound immediately — a probe that spawns
+  // a CLI must never keep the socket refusing connections — so the window is
+  // closed here instead, with the 503 + Retry-After a client knows how to
+  // retry. /health is exempt, so the local monitor can watch the startup.
+  const ready = opts.ready;
+  if (ready) app.use((req, res, next) => {
+    if (ready() || req.path === "/health") return next();
+    res.status(503).setHeader("Retry-After", "5");
+    res.json({ error: { message: "starting: the first health check is still in flight", type: "server_error", code: "model_unavailable" } });
+  });
+
   app.use(express.json({ limit: "20mb" }));
 
   // A provider error event becomes the client's error. For a rate limit the
