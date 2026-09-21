@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { antigravityAdapter } from "../src/providers/antigravity.js";
+import { antigravityAdapter, IMAGE_PROMPT } from "../src/providers/antigravity.js";
+import { detectQuotaExhausted } from "../src/providers/errors.js";
 import { loadConfig } from "../src/config.js";
 import { modelSpecs } from "../src/providers/adapter.js";
 import type { AdapterEvent } from "../src/core/types.js";
@@ -38,8 +39,13 @@ describe("antigravity adapter", () => {
     expect(c.args).not.toContain("gemini-3.8-flash-low-low"); // image models never get the effort suffix
     const msg = JSON.parse(c.stdin.trim());
     expect(msg.event).toBe("user");
-    expect(msg.message.content).toContain('Use the generate_image tool exactly once, with ImageName "image", to create this image: a red bicycle');
-    expect(msg.message.content).toContain("reply only with the single word: done");
+    // The prompt is the first line of defence against other tool calls: its
+    // whole text is pinned, so dropping the forbidding sentence fails here.
+    expect(msg.message.content).toBe(IMAGE_PROMPT("a red bicycle"));
+    expect(IMAGE_PROMPT("a red bicycle")).toBe(
+      'Use the generate_image tool exactly once, with ImageName "image", to create this image: a red bicycle\n' +
+      "Do not create, read, copy or modify any file, do not run commands, do not open a browser. When the tool has finished, reply only with the single word: done",
+    );
     expect(c.stdin.endsWith("\n")).toBe(true);
   });
   it("parses stream-json into text deltas and done with usage", async () => {
@@ -63,10 +69,14 @@ describe("antigravity adapter", () => {
     expect(ev.map((e) => e.type)).toEqual(["meta", "tool", "tool", "text", "done"]);
     expect(ev[1]).toMatchObject({ type: "tool", phase: "call", name: "generate_image" });
     expect(ev[2]).toMatchObject({ type: "tool", phase: "error", name: "generate_image" });
+    // raw is the whole step_update as JSON, and it is what the provider hands
+    // to detectQuotaExhausted: both halves of that contract are pinned here.
     const raw = (ev[2] as any).raw as string;
+    expect(JSON.parse(raw).tool_info.error.type).toBe("TOOL_ERROR");
     expect(raw).toContain("429 Too Many Requests");
-    expect(raw).toContain("RESOURCE_EXHAUSTED");
-    expect(raw).toContain("quotaResetTimeStamp");
+    expect(detectQuotaExhausted(raw, Date.parse("2026-09-21T12:00:00Z"))).toMatchObject({
+      model: "gemini-3.1-flash-image", resetAt: Date.parse("2026-09-26T18:40:40Z"), retryAfterS: 442209,
+    });
     expect(ev[3]).toEqual({ type: "text", delta: "done\n" });
     expect(ev.at(-1)!.type).toBe("done"); // status SUCCESS: no error event from the result
     expect(ev.some((e) => e.type === "error")).toBe(false);
@@ -88,6 +98,45 @@ describe("antigravity adapter", () => {
     expect(ev[1]).toEqual({ type: "meta", conversationId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" });
     const withInit = await events(linesOf("test/fixtures/antigravity/image-run.jsonl"));
     expect(withInit.filter((e) => e.type === "meta")).toHaveLength(1);
+  });
+  it("reports a tool step as a call on its first sighting, whatever its state", async () => {
+    // The CLI does not always send ACTIVE before DONE (user_input and
+    // agent_response steps in the fixtures appear once, already DONE): a
+    // forbidden tool reported only in its terminal state must still reach the
+    // provider's guard as a call.
+    const step = (step_index: number, state: string | undefined, tool_name: string) =>
+      JSON.stringify({ event: "step_update", step_update: { step_index, ...(state ? { state } : {}), step_type: "tool", tool_name, tool_info: { name: tool_name } } });
+    const ev = await events((async function* () {
+      yield step(2, "DONE", "run_command");
+      yield step(3, "ERROR", "write_to_file");
+      yield step(4, "CANCELLED", "generate_image");
+      yield step(4, "CANCELLED", "generate_image");
+      yield step(5, undefined, "generate_image");
+      yield JSON.stringify({ event: "result", result: { status: "SUCCESS", usage: { input_tokens: 1, output_tokens: 1 } } });
+    })());
+    expect(ev.map((e) => e.type === "tool" ? `${e.phase}:${e.name}` : e.type)).toEqual([
+      "call:run_command", "done:run_command",
+      "call:write_to_file", "error:write_to_file",
+      "call:generate_image", "call:generate_image", // unknown states stay calls: fail closed
+      "call:generate_image",
+      "done",
+    ]);
+  });
+  it("falls back to tool_info.name and treats a step without an index as a new call every time", async () => {
+    const line = JSON.stringify({ event: "step_update", step_update: { state: "ACTIVE", step_type: "tool", tool_info: { name: "generate_image" } } });
+    const ev = await events((async function* () { yield line; yield line; })());
+    expect(ev).toEqual([
+      { type: "tool", phase: "call", name: "generate_image", raw: JSON.stringify(JSON.parse(line).step_update) },
+      { type: "tool", phase: "call", name: "generate_image", raw: JSON.stringify(JSON.parse(line).step_update) },
+    ]);
+  });
+  it("ignores a conversation id that is not a UUID, wherever it is announced", async () => {
+    // The id becomes an argument of the collect command: only the UUID shape leaves the adapter.
+    const ev = await events((async function* () {
+      yield JSON.stringify({ event: "init", conversation_id: "../../../etc/passwd", init: { conversation_id: "../../../etc/passwd" } });
+      yield JSON.stringify({ event: "result", result: { conversation_id: "40fc0b5c-042f-453a-9eaf-6162913de55e; rm -rf /", status: "SUCCESS", usage: { input_tokens: 1, output_tokens: 1 } } });
+    })());
+    expect(ev.map((e) => e.type)).toEqual(["done"]);
   });
   it("maps an ERROR result to a typed error", async () => {
     const ev = await events(linesOf("test/fixtures/antigravity/stream-input-error.jsonl"));

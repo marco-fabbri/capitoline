@@ -32,27 +32,42 @@ export const antigravityAdapter: Adapter = {
   async *parse(lines): AsyncIterable<AdapterEvent> {
     // The conversation id names the CLI-side directory the image is collected
     // from. It is announced by `init`; the `result` repeats it, which covers a
-    // stream whose init line was missed. Yielded once.
+    // stream whose init line was missed. Yielded once, and only when it has
+    // the UUID shape: the value comes from the CLI's stdout, which the user's
+    // prompt steers, and it ends up as an argument of the collect command.
     let conversationId: string | undefined;
+    // Tool steps already reported, by step_index. The CLI does not always emit
+    // an ACTIVE update before the terminal one (the fixtures show steps that
+    // appear once, already DONE), so "call" is tied to the first sighting of a
+    // step, not to its state: every tool invocation reaches the guard.
+    const seen = new Set<number>();
     for await (const o of jsonLines(lines)) {
       const event = o.event;
       if (event === "init") {
         const init = (o.init ?? {}) as { conversation_id?: unknown };
         const id = o.conversation_id ?? init.conversation_id;
-        if (typeof id === "string" && id && !conversationId) { conversationId = id; yield { type: "meta", conversationId }; }
+        if (isConversationId(id) && !conversationId) { conversationId = id; yield { type: "meta", conversationId }; }
       } else if (event === "step_update") {
-        const su = o.step_update as { step_type?: string; text_delta?: string; state?: string; tool_name?: string } | undefined;
+        const su = o.step_update as { step_type?: string; text_delta?: string; state?: string; step_index?: unknown; tool_name?: unknown; tool_info?: { name?: unknown } } | undefined;
         if (su?.step_type === "agent_response" && typeof su.text_delta === "string" && su.text_delta.length) yield { type: "text", delta: su.text_delta };
         else if (su?.step_type === "tool") {
-          // A tool step is reported ACTIVE, then DONE or ERROR. The tool's
-          // result text is not in the stream; on ERROR the step carries
-          // tool_info.error (the 429 body lives there), so raw is the whole step.
-          const phase = su.state === "DONE" ? "done" : su.state === "ERROR" ? "error" : "call";
-          yield { type: "tool", phase, name: String(su.tool_name ?? ""), raw: JSON.stringify(su) };
+          // The tool's result text is not in the stream; on ERROR the step
+          // carries tool_info.error (the 429 body lives there), so raw is the
+          // whole step. A step without an index cannot be correlated and is
+          // reported as a new call every time (fail closed).
+          const name = String(su.tool_name ?? su.tool_info?.name ?? "");
+          const raw = JSON.stringify(su);
+          const first = typeof su.step_index !== "number" || !seen.has(su.step_index);
+          if (typeof su.step_index === "number") seen.add(su.step_index);
+          const terminal = su.state === "DONE" ? "done" : su.state === "ERROR" ? "error" : undefined;
+          // Every other state (ACTIVE, CANCELLED, absent) is a call, so an
+          // unknown shape never bypasses the guard.
+          if (first || !terminal) yield { type: "tool", phase: "call", name, raw };
+          if (terminal) yield { type: "tool", phase: terminal, name, raw };
         }
       } else if (event === "result") {
         const r = (o.result ?? {}) as { status?: string; error?: string; usage?: Record<string, number>; conversation_id?: unknown };
-        if (typeof r.conversation_id === "string" && r.conversation_id && !conversationId) { conversationId = r.conversation_id; yield { type: "meta", conversationId }; }
+        if (isConversationId(r.conversation_id) && !conversationId) { conversationId = r.conversation_id; yield { type: "meta", conversationId }; }
         if (r.status !== "SUCCESS") {
           const detail = String(r.error ?? r.status ?? "antigravity error");
           yield { type: "error", kind: classifyError(detail), detail };
@@ -64,3 +79,6 @@ export const antigravityAdapter: Adapter = {
     }
   },
 };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isConversationId(v: unknown): v is string { return typeof v === "string" && UUID.test(v); }
