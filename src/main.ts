@@ -99,6 +99,12 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     const longestTimeoutS = Math.max(...Object.values(cfg.providers).flatMap((p) => [p.timeout_s, ...Object.values(p.models).map((m) => m.timeout_s ?? p.timeout_s)]));
     await runner.sweep((longestTimeoutS + 2 * cfg.runner.kill_grace_s) * 1000);
 
+    // Before the first check, so a model a previous process saw refused is not
+    // probed and offered again while its pause still stands. Inside this try,
+    // like the sweep: a store that fails to answer must leave nothing listening
+    // and no open database behind.
+    core.restorePauses();
+
     await core.checkHealth();
     ready = true;
   } catch (e) {

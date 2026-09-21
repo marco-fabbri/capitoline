@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { start, SHUTDOWN_GRACE_MS } from "../src/main.js";
+import { UsageStore } from "../src/usage/store.js";
 import { FakeProvider } from "./fake-provider.js";
 import type { ProviderEvent } from "../src/core/types.js";
 
@@ -143,6 +144,22 @@ describe("start()", () => {
       // rather than being offered and answering 502.
       const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
       expect(((await r.json()) as { data: unknown[] }).data).toEqual([]);
+    } finally { await app.close(); }
+  });
+
+  it("brings a stored pause back before the first health check", async () => {
+    const { path, db } = configWithDbFile();
+    const seed = new UsageStore(db);
+    // A quota refusal that reopens in days, of the shape the host saw: without
+    // the restore the model would be offered again and the first request would
+    // spend a call to rediscover it.
+    seed.setPause("claude", "claude-fable", Date.now() + 5 * 24 * 3600_000, 1);
+    seed.close();
+    const p = new FakeProvider("claude", ["claude-opus", "claude-fable"], OK);
+    const app = await start(path, { port: 0, providers: [p] });
+    try {
+      const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
+      expect(((await r.json()) as { data: { id: string }[] }).data.map((m) => m.id)).toEqual(["claude-opus"]);
     } finally { await app.close(); }
   });
 

@@ -7,10 +7,12 @@ import type { ProviderEvent } from "../src/core/types.js";
 
 const OK: ProviderEvent[] = [{ type: "text", delta: "hi" }, { type: "done", usage: { input: 3, output: 1 } }];
 const req = (model: string) => ({ model, stream: false, messages: [{ role: "user" as const, text: "q" }] });
-function make(opts: { now?: () => number; budgets?: Record<string, { window5h: number; window7d: number }> } = {}) {
+function make(opts: { now?: () => number; budgets?: Record<string, { window5h: number; window7d: number }>; usage?: UsageStore } = {}) {
   const a = new FakeProvider("a", ["a-1", "a-2"], OK, 1);
   const b = new FakeProvider("b", ["b-1"], OK, 2);
-  const usage = new UsageStore(":memory:");
+  // A store passed in is how a restart is played: a second Core over the very
+  // same database, as the service gets after a bounce.
+  const usage = opts.usage ?? new UsageStore(":memory:");
   const core = new Core([a, b], usage, { maxWaitMs: 200, budgets: opts.budgets ?? {}, log: createLogger("t"), now: opts.now });
   return { a, b, usage, core };
 }
@@ -183,6 +185,79 @@ describe("Core", () => {
     expect(core.providerStates().find((p) => p.id === "b")).toMatchObject({ pausedUntil: t + 60_000, strikes: 0 });
     await expect(drain(core.execute(req("b-1"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited" });
   });
+  it("restores a provider pause and its strikes over a restart on the same store", async () => {
+    let t = 1_000_000;
+    const usage = new UsageStore(":memory:");
+    const first = make({ now: () => t, usage });
+    first.a.script = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 3600 }];
+    await drain(first.core.execute(req("a-1"), { source: "http" }));
+    expect(first.core.providerStates().find((p) => p.id === "a")).toMatchObject({ pausedUntil: t + 3_660_000, strikes: 1 });
+
+    const second = make({ now: () => t, usage });          // the process restarts
+    expect(second.core.providerStates().find((p) => p.id === "a")).toMatchObject({ pausedUntil: null, strikes: 0 });
+    second.core.restorePauses();
+    expect(second.core.providerStates().find((p) => p.id === "a")).toMatchObject({ pausedUntil: t + 3_660_000, strikes: 1 });
+    await expect(drain(second.core.execute(req("a-1"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited", retryAfterS: 3660 });
+    expect(second.a.calls.length).toBe(0);                 // no call spent rediscovering a refusal already known
+
+    // The strikes came back with the pause: the next refusal doubles the
+    // backoff instead of starting over at one minute.
+    t += 3_661_000;
+    second.a.script = [{ type: "error", kind: "rate_limited", detail: "429" }];
+    await drain(second.core.execute(req("a-1"), { source: "http" }));
+    expect(second.core.providerStates().find((p) => p.id === "a")).toMatchObject({ pausedUntil: t + 120_000, strikes: 2 });
+    usage.close();
+  });
+
+  it("ignores a pause that has already expired and deletes its row", () => {
+    const t = 1_000_000;
+    const usage = new UsageStore(":memory:");
+    usage.setPause("a", null, t - 1, 4, t - 60_000);
+    usage.setPause("a", "a-1", t - 1, 2, t - 60_000);
+    const { core } = make({ now: () => t, usage });
+    core.restorePauses();
+    expect(core.providerStates().find((p) => p.id === "a")).toMatchObject({ pausedUntil: null, strikes: 0 });
+    expect(core.listModels().find((m) => m.name === "a-1")).toMatchObject({ available: true, reason: undefined });
+    expect(usage.pauses(t - 120_000)).toEqual([]);         // dropped from the table, not merely filtered
+    usage.close();
+  });
+
+  it("clears the stored pause when the model answers again", async () => {
+    let t = 1_000_000;
+    const usage = new UsageStore(":memory:");
+    const { core, a } = make({ now: () => t, usage });
+    a.script = [{ type: "error", kind: "rate_limited", detail: "reached your a-1 limit", scope: "model" }];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(usage.pauses(t)).toEqual([{ provider: "a", model: "a-1", until: t + 60_000, strikes: 1 }]);
+    t += 61_000;
+    a.script = OK;
+    expect(await drain(core.execute(req("a-1"), { source: "http" }))).toEqual(OK);
+    expect(core.pauseRemainingS("a", "a-1")).toBeUndefined();
+    expect(usage.pauses(t)).toEqual([]);                   // the row goes with the memory
+    usage.close();
+  });
+
+  it("restores a provider pause and a model pause of the same provider together", async () => {
+    let t = 1_000_000;
+    const usage = new UsageStore(":memory:");
+    const first = make({ now: () => t, usage });
+    first.a.script = (r) => (r.model === "a-1"
+      ? [{ type: "error", kind: "rate_limited", detail: "reached your a-1 limit", scope: "model", retryAfterS: 3600 }]
+      : [{ type: "error", kind: "rate_limited", detail: "429" }]);
+    await drain(first.core.execute(req("a-1"), { source: "http" }));   // the model alone
+    await drain(first.core.execute(req("a-2"), { source: "http" }));   // then the whole provider
+
+    const second = make({ now: () => t, usage });
+    second.core.restorePauses();
+    expect(second.core.pauseRemainingS("a")).toBe(60);
+    expect(second.core.pauseRemainingS("a", "a-1")).toBe(3660);        // the longer of the two holds the model
+    expect(second.core.pauseRemainingS("a", "a-2")).toBe(60);
+    t += 61_000;                                                       // the provider is free again, the model is not
+    expect(await drain(second.core.execute(req("a-2"), { source: "http" }))).toEqual(OK);
+    await expect(drain(second.core.execute(req("a-1"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited", retryAfterS: 3599 });
+    usage.close();
+  });
+
   it("exposes the health classification but never its detail", async () => {
     const { core, a } = make();
     a.healthResult = { ok: false, kind: "cli_crashed", detail: "/Users/someone/.config secret stderr", checkedAt: 0 };

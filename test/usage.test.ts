@@ -216,6 +216,66 @@ describe("UsageStore", () => {
     }
   });
 
+  // A pause was the one piece of provider state living only in memory: a quota
+  // refusal that reopens in days was rediscovered by a real call after every
+  // restart (backlog, observed on the host 2026-09-22).
+  it("stores a pause per provider and per model and returns the ones still standing", () => {
+    const s = new UsageStore(":memory:");
+    const now = 1_000_000_000_000;
+    s.setPause("antigravity", null, now + 60_000, 1, now);
+    s.setPause("antigravity", "agy-image", now + 5 * 24 * 3600_000, 2, now);
+    s.setPause("claude", "claude-fable", now + 3600_000, 3, now);
+    // A provider-wide pause and one of that provider's models coexist, as they
+    // do in memory: sqlite orders the null model first.
+    expect(s.pauses(now)).toEqual([
+      { provider: "antigravity", model: null, until: now + 60_000, strikes: 1 },
+      { provider: "antigravity", model: "agy-image", until: now + 5 * 24 * 3600_000, strikes: 2 },
+      { provider: "claude", model: "claude-fable", until: now + 3600_000, strikes: 3 },
+    ]);
+    s.close();
+  });
+
+  // sqlite allows NULLs inside a PRIMARY KEY and holds two of them distinct, so
+  // the provider-wide pause is the case where an upsert silently piles rows up
+  // instead of replacing one — and the stale one would come back on a restart.
+  it("replaces a pause of the same scope instead of piling rows up", () => {
+    const s = new UsageStore(":memory:");
+    const now = 1_000_000_000_000;
+    s.setPause("a", null, now + 60_000, 1, now);
+    s.setPause("a", null, now + 3_660_000, 2, now);
+    s.setPause("a", "a-1", now + 60_000, 1, now);
+    s.setPause("a", "a-1", now + 120_000, 2, now);
+    expect(s.pauses(now)).toEqual([
+      { provider: "a", model: null, until: now + 3_660_000, strikes: 2 },
+      { provider: "a", model: "a-1", until: now + 120_000, strikes: 2 },
+    ]);
+    s.close();
+  });
+
+  it("forgets an expired pause instead of returning it", () => {
+    const s = new UsageStore(":memory:");
+    const now = 1_000_000_000_000;
+    s.setPause("a", null, now - 1, 4, now - 60_000);
+    s.setPause("a", "a-1", now + 1000, 1, now);
+    expect(s.pauses(now)).toEqual([{ provider: "a", model: "a-1", until: now + 1000, strikes: 1 }]);
+    // Dropped from the table, not merely filtered out of the answer: a reading
+    // taken from before it expired no longer sees it either.
+    expect(s.pauses(now - 120_000)).toEqual([{ provider: "a", model: "a-1", until: now + 1000, strikes: 1 }]);
+    s.close();
+  });
+
+  it("clears one scope of a pause and leaves the other standing", () => {
+    const s = new UsageStore(":memory:");
+    const now = 1_000_000_000_000;
+    s.setPause("a", null, now + 60_000, 1, now);
+    s.setPause("a", "a-1", now + 120_000, 2, now);
+    s.clearPause("a", null);
+    expect(s.pauses(now)).toEqual([{ provider: "a", model: "a-1", until: now + 120_000, strikes: 2 }]);
+    s.clearPause("a", "a-1");
+    expect(s.pauses(now)).toEqual([]);
+    s.close();
+  });
+
   // SIGTERM followed by SIGINT closes the store twice; node:sqlite throws on
   // the second close, which would turn a clean shutdown into a crash.
   it("closes idempotently", () => {
@@ -238,6 +298,9 @@ describe("UsageStore", () => {
       s.setWindow("claude", "five_hour", { utilization: 0.1, resetsAt: 1 }, now);
       s.windows("claude");
       s.callers(H5, now + 1);
+      s.setPause("claude", null, now + 60_000, 1, now);
+      s.pauses(now);
+      s.clearPause("claude", null);
       expect(spy).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();

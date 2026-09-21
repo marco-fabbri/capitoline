@@ -18,6 +18,8 @@ export interface CallerUsage { caller: string | null; calls: number; inputTokens
 export type WindowName = "five_hour" | "seven_day";
 /** Image generations counted in a rolling window: `windowStartedAt` is null while the window is empty. */
 export interface ImageWindow { used: number; windowStartedAt: number | null }
+/** A pause held across restarts. `model` is null for a pause that covers the whole provider. */
+export interface PauseRow { provider: string; model: string | null; until: number; strikes: number }
 
 /** The five-hour window: the provider's short image quota and the budget windows share it. */
 export const H5 = 5 * 3600_000;
@@ -30,7 +32,7 @@ export class UsageStore {
   // a column the table does not have yet fails to compile.
   private readonly stmts: {
     record: StatementSync; imageWindow: StatementSync; totals: StatementSync; setWindow: StatementSync; windows: StatementSync;
-    callers: StatementSync;
+    callers: StatementSync; setPause: StatementSync; clearPause: StatementSync; prunePauses: StatementSync; pauses: StatementSync;
   };
   private closed = false;
   constructor(path: string) {
@@ -55,6 +57,13 @@ export class UsageStore {
       CREATE TABLE IF NOT EXISTS rate_windows (
         provider TEXT NOT NULL, window TEXT NOT NULL, utilization REAL NOT NULL, resets_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL, PRIMARY KEY (provider, window));
+      -- The pauses a rate limit installs, so a refusal that reopens in days is
+      -- known again after a restart instead of being rediscovered by a real
+      -- call. The model column is null for a pause covering the whole
+      -- provider; IF NOT EXISTS is also what upgrades the deployed database.
+      CREATE TABLE IF NOT EXISTS pauses (
+        provider TEXT NOT NULL, model TEXT, until INTEGER NOT NULL, strikes INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL, PRIMARY KEY (provider, model));
     `);
     // A database written before image models existed has no `kind` column, and
     // CREATE TABLE IF NOT EXISTS leaves it alone: add it here, with the same
@@ -80,6 +89,17 @@ export class UsageStore {
       // host), so they would bury the breakdown under one huge null row.
       callers: this.db.prepare(`SELECT caller, COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o
         FROM calls WHERE ts > ? AND source <> 'health' GROUP BY caller ORDER BY calls DESC, caller`),
+      // Delete-then-insert rather than an upsert, and `model IS ?` rather than
+      // `model = ?`: sqlite admits NULLs inside a PRIMARY KEY of a rowid table
+      // and holds two of them distinct, so ON CONFLICT(provider, model) never
+      // fires for a provider-wide pause — every refusal would add a row, and
+      // the oldest would be the one restored at the next start. `IS` is the
+      // one comparison that matches a NULL, so the same pair of statements
+      // serves both scopes.
+      setPause: this.db.prepare(`INSERT INTO pauses (provider, model, until, strikes, updated_at) VALUES (?, ?, ?, ?, ?)`),
+      clearPause: this.db.prepare(`DELETE FROM pauses WHERE provider = ? AND model IS ?`),
+      prunePauses: this.db.prepare(`DELETE FROM pauses WHERE until <= ?`),
+      pauses: this.db.prepare(`SELECT provider, model, until, strikes FROM pauses WHERE until > ? ORDER BY provider, model`),
     };
   }
   record(c: CallRecord): void {
@@ -121,6 +141,25 @@ export class UsageStore {
     for (const r of rows) out[r.window] = { utilization: r.utilization, resetsAt: r.resets_at, updatedAt: r.updated_at };
     return out;
   }
+  // The pause a rate limit installed, provider-wide (model null) or for one
+  // model. It replaces whatever stood for that scope: the caller has already
+  // decided the pause only grows, so what arrives here is the state to keep.
+  setPause(provider: string, model: string | null, until: number, strikes: number, now = Date.now()): void {
+    this.stmts.clearPause.run(provider, model);
+    this.stmts.setPause.run(provider, model, until, strikes, now);
+  }
+  clearPause(provider: string, model: string | null): void {
+    this.stmts.clearPause.run(provider, model);
+  }
+  // The pauses still standing. The expired ones are deleted on the way out
+  // rather than returned and ignored: they are read once per start, and a row
+  // nothing will ever consult again is the only garbage this table collects.
+  pauses(now = Date.now()): PauseRow[] {
+    this.stmts.prunePauses.run(now);
+    const rows = this.stmts.pauses.all(now) as { provider: string; model: string | null; until: number; strikes: number }[];
+    return rows.map((r) => ({ provider: r.provider, model: r.model, until: Number(r.until), strikes: Number(r.strikes) }));
+  }
+
   // SIGTERM followed by SIGINT closes the store twice, and node:sqlite throws
   // on the second close: the flag keeps a clean shutdown clean.
   close(): void {

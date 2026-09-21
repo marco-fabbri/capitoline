@@ -211,7 +211,7 @@ export class Core {
     let phase: "running" | "ended" | "threw" = "running";
     try {
       for await (const ev of produce()) {
-        if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; s.strikes = 0; this.modelPauses.delete(modelName); }
+        if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; this.onSuccess(id, s, modelName); }
         else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, modelName, ev, kind); }
         else if (ev.type === "rate_limit") this.onRateLimit(id, ev);
         yield ev;
@@ -228,6 +228,20 @@ export class Core {
       this.usage.record({ provider: id, model: modelName, kind, inputTokens: usage.input, outputTokens: usage.output,
         durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, caller: ctx.caller ?? null, ts: this.now() });
     }
+  }
+
+  // A model that answered: its strikes go back to zero and its pause goes with
+  // them, in memory and in the store alike, so nothing stale is restored at the
+  // next start. The provider's pause itself is not lifted — with concurrency
+  // above one a request that started before the pause lands still completes,
+  // and it must not open a window a rate limit closed — so while one stands the
+  // row is rewritten with the zeroed strikes instead of being dropped.
+  private onSuccess(id: string, s: State, modelName: string) {
+    s.strikes = 0;
+    if (this.isPaused(s)) this.usage.setPause(id, null, s.pausedUntil!, 0, this.now());
+    else this.usage.clearPause(id, null);
+    this.modelPauses.delete(modelName);
+    this.usage.clearPause(id, modelName);
   }
 
   // An explicit retry-after (the quota reset the CLI reported) replaces the
@@ -261,6 +275,7 @@ export class Core {
       const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** s.strikes) * 60_000;
       s.strikes++;
       s.pausedUntil = Math.max(s.pausedUntil ?? 0, this.now() + waitMs);
+      this.usage.setPause(id, null, s.pausedUntil, s.strikes, this.now());
       this.opts.log.warn({ provider: id, seconds: Math.round((s.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: s.strikes }, "provider paused after rate limit");
     } else if (kind === "auth_expired") {
       s.health = { ok: false, kind, detail: "auth_expired reported by a request", checkedAt: this.now() };
@@ -279,12 +294,39 @@ export class Core {
     p.strikes++;
     p.pausedUntil = Math.max(p.pausedUntil, this.now() + waitMs);
     this.modelPauses.set(model, p);
+    this.usage.setPause(providerId, model, p.pausedUntil, p.strikes, this.now());
     this.opts.log.warn({ provider: providerId, model, seconds: Math.round((p.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: p.strikes }, "model paused after a rate limit");
   }
 
   private onRateLimit(id: string, ev: Extract<ProviderEvent, { type: "rate_limit" }>) {
     if (ev.fiveHour) this.usage.setWindow(id, "five_hour", ev.fiveHour, this.now());
     if (ev.sevenDay) this.usage.setWindow(id, "seven_day", ev.sevenDay, this.now());
+  }
+
+  /**
+   * Reads back the pauses a previous process installed. Called by start() right
+   * after the core is built and before the first health check, so a restart
+   * does not spend a real call to rediscover a refusal that reopens in days
+   * (the five-day image pause lost on a deploy, host 2026-09-22).
+   *
+   * Strikes come back with the pause, so the backoff carries on doubling
+   * instead of restarting at one minute after a bounce. A row naming a provider
+   * or a model the configuration no longer declares is left alone rather than
+   * restored: nothing can ask for it, and the store drops it once it expires.
+   */
+  restorePauses(): void {
+    for (const row of this.usage.pauses(this.now())) {
+      if (row.model === null) {
+        const s = this.states.get(row.provider);
+        if (!s) continue;
+        s.pausedUntil = row.until;
+        s.strikes = row.strikes;
+      } else {
+        if (this.modelIndex.get(row.model)?.provider.id !== row.provider) continue;
+        this.modelPauses.set(row.model, { pausedUntil: row.until, strikes: row.strikes });
+      }
+      this.opts.log.info({ provider: row.provider, model: row.model, seconds: Math.round((row.until - this.now()) / 1000), strikes: row.strikes }, "pause restored");
+    }
   }
 
   // Wrapper, so a shutdown can wait for a check already in flight: a probe runs
