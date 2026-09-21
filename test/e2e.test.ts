@@ -9,7 +9,7 @@ describe("end to end with fake CLIs", () => {
   it("serves all configured models as available after the startup health check", async () => {
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
     const ids = ((await r.json()) as { data: { id: string }[] }).data.map((m) => m.id).sort();
-    expect(ids).toEqual(["agy-claude-opus", "agy-claude-sonnet", "agy-gemini-flash", "agy-gemini-pro", "claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "codex-gpt-5.5", "codex-gpt-5.6-sol", "codex-gpt-6-astra"]);
+    expect(ids).toEqual(["agy-claude-opus", "agy-claude-sonnet", "agy-gemini-3.6-flash", "agy-gemini-3.7-flash", "agy-gemini-flash", "agy-gemini-pro", "agy-image", "claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "codex-gpt-5.5", "codex-gpt-5.6-sol", "codex-gpt-6-astra"]);
   });
   it.each([["claude-opus", "ok"], ["codex-gpt-5.5", "OK"], ["agy-gemini-flash", "ok ok\n"]])("answers through %s", async (model, expected) => {
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {

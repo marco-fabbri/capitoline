@@ -87,10 +87,14 @@ providers:
     health_model: agy-gemini-flash
     models:
       # effort is part of the model id: <base>-<effort>
-      agy-gemini-flash:  { cli_model: gemini-3.8-flash, effort_suffix: true }
-      agy-gemini-pro:    { cli_model: gemini-3.1-pro,   effort_suffix: true, efforts: [low, high] }
-      agy-claude-sonnet: { cli_model: claude-sonnet-4-6 }
-      agy-claude-opus:   { cli_model: claude-opus-4-6-thinking }
+      agy-gemini-flash:     { cli_model: gemini-3.8-flash, effort_suffix: true }
+      agy-gemini-3.7-flash: { cli_model: gemini-3.7-flash, effort_suffix: true }
+      agy-gemini-3.6-flash: { cli_model: gemini-3.6-flash, effort_suffix: true }
+      agy-gemini-pro:       { cli_model: gemini-3.1-pro,   effort_suffix: true, efforts: [low, high] }
+      agy-claude-sonnet:    { cli_model: claude-sonnet-4-6 }
+      agy-claude-opus:      { cli_model: claude-opus-4-6-thinking }
+      # kind: image → served by /v1/images/generations and the generate_image MCP tool
+      agy-image:            { cli_model: gemini-3.8-flash-low, kind: image, timeout_s: 240 }
     effort: { low: low, medium: medium, high: high }
     args:
       - --output-format
@@ -102,3 +106,11 @@ providers:
       - -p=
     system_prompt_flag: null                         # none: prepended to the prompt with a role marker
     prompt_via: stdin                                # {"event":"user","message":{"role":"user","content":...}}
+    image:
+      # Image models: the CLI writes the file into its own home, never into the
+      # sandbox. `collect` receives the conversation id as its last argument and
+      # prints the image to stdout. On the host it is run through sudo as `runner`
+      # (see docs/deploy.md); on a developer machine scripts/capitoline-collect-image
+      # works directly against $HOME.
+      collect: [/usr/local/bin/capitoline-collect-image]
+      min_bytes: 200000       # anything smaller is a placeholder, not a picture

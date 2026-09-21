@@ -5,11 +5,29 @@ import { z } from "zod";
 export const EffortSchema = z.enum(["low", "medium", "high"]);
 export type Effort = z.infer<typeof EffortSchema>;
 
+export const ModelKindSchema = z.enum(["text", "image"]);
+export type ModelKind = z.infer<typeof ModelKindSchema>;
+
 const ModelSchema = z.object({
   cli_model: z.string().min(1),
   effort_suffix: z.boolean().default(false),
   efforts: z.array(EffortSchema).min(1).optional(),
+  kind: ModelKindSchema.default("text"),
+  // Overrides the provider's timeout_s for this model (image runs are long but bounded).
+  timeout_s: z.number().int().min(1).optional(),
 });
+
+// How a provider produces images. The CLI writes the file outside the sandbox,
+// so the bytes are collected only through `collect` (command + args; the
+// conversation id is appended), never by reading the CLI's home directly.
+const ImageSchema = z
+  .object({
+    args: z.array(z.string()).default([]),
+    allowed_tools: z.array(z.string()).default(["generate_image"]),
+    collect: z.array(z.string()).min(1).optional(),
+    min_bytes: z.number().int().min(0).default(200_000),
+  })
+  .default({});
 
 const ProviderSchema = z.object({
   binary: z.string().min(1),
@@ -22,6 +40,7 @@ const ProviderSchema = z.object({
   args: z.array(z.string()),
   system_prompt_flag: z.string().nullable(),
   prompt_via: z.literal("stdin"),
+  image: ImageSchema,
 });
 
 export const ConfigSchema = z
@@ -53,6 +72,12 @@ export const ConfigSchema = z
     for (const [id, p] of Object.entries(cfg.providers)) {
       if (!(p.health_model in p.models)) {
         ctx.addIssue({ code: "custom", path: ["providers", id, "health_model"], message: `health_model "${p.health_model}" is not one of provider ${id}'s models` });
+      } else if (p.models[p.health_model].kind !== "text") {
+        // The health check is a chat request; an image model would burn image quota and fail.
+        ctx.addIssue({ code: "custom", path: ["providers", id, "health_model"], message: `health_model "${p.health_model}" must be a text model` });
+      }
+      if (Object.values(p.models).some((m) => m.kind === "image") && !p.image.collect) {
+        ctx.addIssue({ code: "custom", path: ["providers", id, "image", "collect"], message: `provider ${id} has image models but no image.collect command` });
       }
       for (const name of Object.keys(p.models)) {
         if (name === "capitoline" || name.startsWith("capitoline-")) {
