@@ -8,12 +8,6 @@ had two review findings and both are already fixed in the current code
 (attachment name validation, eager line buffering); the Runner section below is
 not one of them but a later observation from the host, still to be confirmed.
 
-## Core
-
-- `src/core/prompt.ts`: `nearestEffort` has no guard on its inputs — an empty `allowed` array returns `undefined` despite the `Effort` return type, and an unknown `wanted` value silently resolves to the lowest allowed level — throw on both cases instead of returning a bad value.
-- `src/core/prompt.ts`: `flatten()` uses an `as "user" | "assistant"` cast to route around `Message.role` including `"system"`, so a system message that reaches it renders as the literal text `"undefined: ..."` instead of failing — replace the cast with an explicit check that throws when a system message is found.
-- `src/core/types.ts`: `RateLimitWindow.resetsAt` lost the unit annotation from the plan (`// resetsAt: unix seconds`), which matters because `UsageStore` stores it next to an `updatedAt` that is milliseconds — restore the comment.
-
 ## Providers
 
 - `src/providers/antigravity.ts`: verify on the host, on a capture where `cache_read_tokens` and `thinking_tokens` are not zero, whether the CLI's own `total_tokens` already includes them. B2 added both to the usage formula (input gains the cached tokens, output the thinking ones) because every fixture in hand has them at zero, so no capture can say which side they sit on; if the CLI counts them already, the formula counts them twice and the budget windows go from understating this provider to overstating it. Reduce it to `input_tokens`/`output_tokens` in that case. Host-only check: nothing in the repository can settle it.

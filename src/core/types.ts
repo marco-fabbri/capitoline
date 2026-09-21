@@ -17,6 +17,10 @@ export interface InternalRequest {
 export interface ImageRequest { model: string; prompt: string }
 
 export type ErrorKind = "auth_expired" | "rate_limited" | "timeout" | "cli_crashed" | "bad_output";
+// resetsAt: unix **seconds**, as the CLIs report them, next to the
+// milliseconds of `updatedAt` in the usage store's rate_windows row and of
+// every Date.now() around it. The two units sit in the same table, so the
+// annotation is part of the type.
 export interface RateLimitWindow { utilization: number; resetsAt: number }
 export interface Usage { input: number; output: number }
 export type ImageMime = "image/jpeg" | "image/png";

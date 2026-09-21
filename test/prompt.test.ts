@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { splitSystem, flatten, nearestEffort } from "../src/core/prompt.js";
+import type { Effort, Message } from "../src/core/types.js";
 
 describe("splitSystem", () => {
   it("joins all system messages and removes them from the rest", () => {
@@ -32,5 +33,21 @@ describe("nearestEffort", () => {
   it("clamps to the closest available", () => {
     expect(nearestEffort("high", ["low"])).toBe("low");
     expect(nearestEffort("low", ["medium", "high"])).toBe("medium");
+  });
+});
+
+describe("prompt guards", () => {
+  it("flatten throws on a system message instead of rendering it as 'undefined:'", () => {
+    const messages: Message[] = [{ role: "user", text: "q" }, { role: "system", text: "leaked" }];
+    expect(() => flatten(messages)).toThrow(/system message/i);
+  });
+  it("flatten throws on a lone system message too", () => {
+    expect(() => flatten([{ role: "system", text: "leaked" }])).toThrow(/system message/i);
+  });
+  it("nearestEffort throws on an empty allowed list instead of returning undefined", () => {
+    expect(() => nearestEffort("medium", [])).toThrow(/allowed/i);
+  });
+  it("nearestEffort throws on an unknown wanted level instead of clamping it to the lowest", () => {
+    expect(() => nearestEffort("extreme" as Effort, ["low", "medium", "high"])).toThrow(/extreme/);
   });
 });
