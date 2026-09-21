@@ -186,3 +186,63 @@ describe("config", () => {
     expect(() => parseConfig(text("capitol"))).not.toThrow();
   });
 });
+
+// test/e2e.config.yaml is a hand-copied duplicate of config/capitoline.yaml,
+// and nothing kept the copy honest: a key added to the repository file and
+// forgotten in the test one leaves the end-to-end suite exercising a different
+// gateway than the deployed host runs, which is the one thing that file exists
+// to prevent. This compares the two as the schema parses them (so comments and
+// key order do not count) and allows exactly the differences the copy is for.
+describe("the end-to-end configuration tracks the repository one", () => {
+  // Everything that must differ, and nothing else. Adding a line here is a
+  // decision: it says this key is deliberately not the same on a developer
+  // machine as on the host.
+  const INTENDED = [
+    "providers.antigravity.binary",              // the fake CLIs replay fixtures
+    "providers.antigravity.image.collect",       //   and so does the collect helper
+    "providers.antigravity.timeout_s",           // seconds, not minutes, so a hung fake fails fast
+    "providers.claude.binary",
+    "providers.claude.timeout_s",
+    "providers.codex.binary",
+    "providers.codex.timeout_s",
+    "runner.sandbox_root",                       // under the repository, git-ignored
+    "runner.user",                               // null: no sudo on a developer machine
+    "server.port",                               // 0: the OS picks a free one
+    "usage.db_path",                             // in memory: the suite leaves no database behind
+  ];
+
+  const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+  /** The dotted paths at which the two differ, arrays compared as whole values. */
+  function differences(a: unknown, b: unknown, path = ""): string[] {
+    if (isPlain(a) && isPlain(b)) {
+      const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
+      return keys.flatMap((k) => differences(a[k], b[k], path ? `${path}.${k}` : k));
+    }
+    return JSON.stringify(a ?? null) === JSON.stringify(b ?? null) ? [] : [path];
+  }
+
+  const repo = loadConfig("config/capitoline.yaml");
+  const e2e = loadConfig("test/e2e.config.yaml");
+
+  it("differs from it in the intended keys and in no others", () => {
+    expect(differences(repo, e2e).sort()).toEqual(INTENDED);
+  });
+
+  it("differs in them for the intended reasons", () => {
+    // Otherwise the test above would pass just as well with the two files
+    // aligned on the wrong side: a real binary in the e2e copy, a fake one in
+    // the deployed config.
+    expect(e2e.server.port).toBe(0);
+    expect(e2e.runner.user).toBeNull();
+    expect(repo.runner.user).toBe("runner");
+    expect(e2e.runner.sandbox_root).toBe("tmp/capitoline-e2e");
+    expect(e2e.usage.db_path).toBe(":memory:");
+    for (const [id, p] of Object.entries(e2e.providers)) {
+      expect(p.binary, id).toMatch(/^test\/fake-cli\//);
+      expect(p.timeout_s, id).toBeLessThanOrEqual(30);
+      expect(repo.providers[id].timeout_s, id).toBeGreaterThanOrEqual(600);
+    }
+    expect(e2e.providers.antigravity.image.collect).toEqual(["test/fake-cli/fake-collect-image.sh"]);
+    expect(repo.providers.antigravity.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
+  });
+});

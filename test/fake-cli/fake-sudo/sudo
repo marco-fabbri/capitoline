@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+// Fake `sudo` for test/runner.test.ts. It runs nothing: it reports how the
+// runner invoked it and exits, so the production
+// `sudo -n -H -u <user> -- <binary> <args>` branch of src/runner/runner.ts can
+// be asserted (argv shape, reduced environment, working directory) on a
+// machine that has no sudoers rule and must never be asked for a password.
+// It is reachable only while that test puts this directory first on PATH.
+console.log(JSON.stringify({ sudo: "fake", argv: process.argv.slice(2), env: process.env, cwd: process.cwd() }));

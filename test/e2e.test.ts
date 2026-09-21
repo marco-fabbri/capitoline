@@ -10,7 +10,11 @@ import { IMAGE_PROMPT } from "../src/providers/antigravity.js";
 const SAMPLE = readFileSync(fileURLToPath(new URL("fixtures/images/sample.jpg", import.meta.url)));
 
 let app: Awaited<ReturnType<typeof start>>;
-beforeAll(async () => { app = await start("test/e2e.config.yaml", { port: 0 }); });
+// 30 s, not vitest's default 10 s hook timeout: this hook starts the whole
+// gateway, sweeps the sandbox root and runs the first health check, which
+// spawns three fake CLIs. Under load that can pass 10 s, and the failure would
+// then read "hook timed out" with nothing saying which step was slow.
+beforeAll(async () => { app = await start("test/e2e.config.yaml", { port: 0 }); }, 30_000);
 afterAll(async () => { await app.close(); });
 
 describe("end to end with fake CLIs", () => {
@@ -34,8 +38,31 @@ describe("end to end with fake CLIs", () => {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: "claude-opus", stream: true, messages: [{ role: "user", content: "hi" }] }),
     });
-    const text = await r.text();
-    expect(text.trim().endsWith("data: [DONE]")).toBe(true);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toContain("text/event-stream");
+    // The stream is parsed, not sniffed for its last line: an empty answer, a
+    // wrong id per chunk or a missing usage block all ended with "data: [DONE]"
+    // just the same, so the trailer alone asserted almost nothing.
+    const frames = (await r.text()).split("\n\n").map((f) => f.trim()).filter((f) => f.length > 0);
+    expect(frames.every((f) => f.startsWith("data: "))).toBe(true);
+    const payloads = frames.map((f) => f.slice("data: ".length));
+    expect(payloads.at(-1)).toBe("[DONE]");
+    type Chunk = { id: string; object: string; model: string; choices: { delta: { role?: string; content?: string }; finish_reason: string | null }[]; usage?: Record<string, number> };
+    const chunks = payloads.slice(0, -1).map((p) => JSON.parse(p) as Chunk);
+    expect(chunks.length).toBeGreaterThanOrEqual(3);            // opener, at least one delta, terminator
+    expect(chunks.every((c) => c.object === "chat.completion.chunk" && c.model === "claude-opus")).toBe(true);
+    expect(new Set(chunks.map((c) => c.id)).size).toBe(1);      // one completion, one id
+    // The opener carries the role and no content; only the last chunk finishes.
+    expect(chunks[0].choices[0]).toEqual({ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null });
+    expect(chunks.slice(0, -1).every((c) => c.choices[0].finish_reason === null)).toBe(true);
+    // The recorded fixture's own answer, reassembled from the deltas.
+    expect(chunks.slice(1, -1).map((c) => c.choices[0].delta.content).join("")).toBe("ok");
+    const last = chunks.at(-1)!;
+    expect(last.choices[0]).toEqual({ index: 0, delta: {}, finish_reason: "stop" });
+    // Usage rides on the terminating chunk and nowhere else, with the cache
+    // tokens of the fixture counted as input (2 + 518 + 2113).
+    expect(last.usage).toEqual({ prompt_tokens: 2633, completion_tokens: 4, total_tokens: 2637 });
+    expect(chunks.slice(0, -1).every((c) => c.usage === undefined)).toBe(true);
   });
   it("reports the kind of every model, image included", async () => {
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);

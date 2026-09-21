@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunner } from "../src/runner/runner.js";
@@ -215,5 +215,73 @@ describe("runner.sweep", () => {
     const { dir, runner: r } = sweptRunner();
     rmSync(dir, { recursive: true });
     await expect(r.sweep(5 * 60 * 1000)).resolves.toEqual([]);
+  });
+});
+
+describe("runner under sudo", () => {
+  // The production branch: `sudo -n -H -u <user> -- <binary> <args>` with an
+  // environment cut down to PATH. It is what enforces the privilege
+  // separation the whole design rests on, and every other case in this file
+  // runs with `user: null`, so nothing exercised it.
+  //
+  // The sudo it runs is a fake first on PATH (test/fake-cli/fake-sudo/sudo),
+  // which executes nothing: it prints how it was called and exits. The real
+  // sudo is never reached, and `-n` would make it fail rather than ask for a
+  // password even if it were.
+  const SUDO_DIR = join(process.cwd(), "test/fake-cli/fake-sudo");
+  const sudoRunner = (dir: string) => createRunner({ sandboxRoot: dir, user: "runner", killGraceMs: 300, log });
+  type Said = { sudo: string; argv: string[]; env: Record<string, string>; cwd: string };
+
+  let savedPath: string | undefined;
+  beforeEach(() => {
+    savedPath = process.env.PATH;
+    process.env.PATH = `${SUDO_DIR}:${savedPath ?? ""}`;
+    process.env.CAPITOLINE_TEST_SECRET = "must never reach a CLI";
+  });
+  afterEach(() => {
+    if (savedPath === undefined) delete process.env.PATH; else process.env.PATH = savedPath;
+    delete process.env.CAPITOLINE_TEST_SECRET;
+  });
+
+  /** What the child says it received, and the environment it did not receive. */
+  function assertSudoCall(said: Said, expectedArgs: string[]) {
+    expect(said.sudo).toBe("fake");                    // the fake, never the real sudo
+    // -n: no sudoers rule must turn into a password prompt that hangs the run.
+    // -H: the CLI must read the runner's own home, where its credentials are.
+    // --: a model id or prompt flag starting with a dash is never read by sudo.
+    expect(said.argv).toEqual(["-n", "-H", "-u", "runner", "--", FAKE, ...expectedArgs]);
+    expect(said.env.PATH).toBe(process.env.PATH);
+    // The reduced environment is the point: the gateway's own HOME would send
+    // the CLI to the wrong credentials, and anything else it carries is the
+    // gateway's business, not the CLI's.
+    expect(said.env.HOME).toBeUndefined();
+    expect(said.env.CAPITOLINE_TEST_SECRET).toBeUndefined();
+    // Nothing but PATH is passed. What is left is injected by the platform
+    // after the exec (macOS adds __CF_USER_TEXT_ENCODING), never carried over.
+    expect(Object.keys(said.env).filter((k) => !k.startsWith("__"))).toEqual(["PATH"]);
+  }
+
+  it("runs the CLI through sudo, in the sandbox, with only PATH in the environment", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-sudo-"));
+    const h = await sudoRunner(dir).run({ binary: FAKE, args: ["--mode", "cwd"], stdin: null, timeoutMs: 5000 });
+    const [line] = await collect(h.lines);
+    const r = await h.result;
+    expect(r.exitCode).toBe(0);
+    const said = JSON.parse(line) as Said;
+    assertSudoCall(said, ["--mode", "cwd"]);
+    expect(said.cwd).toBe(h.sandboxDir);               // sudo does not move the run out of its sandbox
+    expect(existsSync(h.sandboxDir)).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("wraps a capture the same way, in the sandbox root", async () => {
+    // The collect helper of the image path takes this branch too, and it is
+    // the one command that deliberately runs outside a sandbox.
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "capitoline-sudo-")));
+    const r = await sudoRunner(dir).capture({ binary: FAKE, args: ["--collect", "x"], timeoutMs: 5000, maxBytes: 64 * 1024 });
+    expect(r.exitCode).toBe(0);
+    assertSudoCall(JSON.parse(r.stdout.toString("utf8")) as Said, ["--collect", "x"]);
+    expect((JSON.parse(r.stdout.toString("utf8")) as Said).cwd).toBe(dir);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -88,4 +88,36 @@ describe("codex adapter", () => {
     expect(arg).not.toContain("\\ud800");
     expect(JSON.parse(arg.slice("developer_instructions=".length))).toBe("lone � pair \u{1F680} end");
   });
+  it("adds no developer instructions when the request carries no system message", () => {
+    // The `if (system)` branch is skipped: the -c pairs the configuration
+    // itself declares stay, and nothing else is appended before the "-".
+    const c = codexAdapter.buildCommand(cfg, astra, { model: "codex-gpt-6-astra", stream: false, messages: [{ role: "user", text: "q" }] });
+    expect(c.args.some((a) => a.startsWith("developer_instructions="))).toBe(false);
+    expect(c.args.slice(cfg.args.length)).toEqual(["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="medium"', "-"]);
+    expect(c.stdin).toBe("q");
+  });
+  it("prefixes the prompt on stdin when the provider declares no system prompt flag", () => {
+    // A `system_prompt_flag: null` in the host's file must still deliver the
+    // system prompt, and never as an unnamed -c override.
+    const noFlag = { ...cfg, system_prompt_flag: null };
+    const c = codexAdapter.buildCommand(noFlag, astra, { model: "codex-gpt-6-astra", stream: false, messages: [{ role: "system", text: "S" }, { role: "user", text: "q" }] });
+    expect(c.args.some((a) => a.startsWith("developer_instructions="))).toBe(false);
+    expect(c.args.slice(cfg.args.length)).toEqual(["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="medium"', "-"]);
+    expect(c.stdin).toBe("System instructions:\nS\n\nq");
+  });
+  it("maps a bare `error` event like turn.failed", async () => {
+    // A failure before the turn starts (a refused login, a rejected flag)
+    // arrives as `type: "error"` with the message at the top level and no
+    // `error` field at all: errorDetail falls back to the event itself.
+    async function* l() { yield JSON.stringify({ type: "error", message: "401 Unauthorized" }); }
+    expect(await events(l())).toEqual([{ type: "error", kind: "auth_expired", detail: "401 Unauthorized" }]);
+    async function* bare() { yield JSON.stringify({ type: "error" }); }
+    expect(await events(bare())).toEqual([{ type: "error", kind: "cli_crashed", detail: "codex error" }]);
+    // The first error ends the stream: nothing after it is parsed.
+    async function* then() {
+      yield JSON.stringify({ type: "error", message: "boom" });
+      yield JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "late" } });
+    }
+    expect(await events(then())).toHaveLength(1);
+  });
 });

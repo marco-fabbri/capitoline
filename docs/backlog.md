@@ -17,22 +17,6 @@ not one of them but a later observation from the host, still to be confirmed.
 
 - Observation to confirm on the host: watch `/var/lib/capitoline/sandboxes` while the service is up. The one empty `run-…` directory seen on the Mac now has an explanation and a fix (a grandchild inheriting stdout kept `close` from firing, so the run never settled: `src/runner/runner.ts` bounds that wait since A6), and the startup sweep removes whatever an earlier process left behind — which is exactly why the remaining symptom is a `run-…` directory appearing there *between* two restarts. That means a run that hung rather than one that was killed, and it is the only thing left that would show a second leak path. Nothing else in the repository looks at that directory while the gateway is running.
 
-## Tests
-
-- `test/adapter.test.ts`: does not exist, so `effortValue`, `modelSpecs` and `jsonLines` in `src/providers/adapter.ts` have zero direct test coverage — add it with the null-effort-table, effort-fallback and malformed-JSON-line cases.
-- `test/claude.test.ts`: the `system_prompt_flag: null` branch of `buildCommand` (used by the Antigravity adapter too) is never exercised — add a case with `system_prompt_flag: null` asserting the `"System instructions:\n..."` stdin fallback.
-- `test/claude.test.ts`: `buildCommand` is only tested with a single user message, so the real multi-turn case (`"User: ... / Assistant: ..."` markers) is never exercised through the adapter — add a 3-message case.
-- `test/codex.test.ts`: three behaviors are uncovered — no `developer_instructions` flag when there's no system message, the `type: "error"` fallback branch, and the `system_prompt_flag: null` stdin path — add the three cases.
-- `test/antigravity.test.ts`: no test asserts that `cfg.args` is the prefix of the built command, so dropping `--input-format stream-json`/`--sandbox`/`-p=` from the adapter would leave every existing test green — assert `c.args.slice(0, cfg.args.length)` and the total arg count.
-- `test/antigravity.test.ts`: the error-mapping test never asserts the resulting `kind`, unlike the Claude/Codex equivalents, so `rate_limited`/`auth_expired` classification for Antigravity is unverified — assert `kind` on the existing fixture and add synthetic rate-limit/auth cases.
-- `test/e2e.test.ts`: "streams through the fake claude" only checks the text ends with `data: [DONE]`, so an empty stream would pass identically — parse the SSE lines and assert the concatenated delta, first/last chunk shape and non-zero usage.
-- `test/e2e.config.yaml`: is a hand-copied duplicate of `config/capitoline.yaml` with nothing checking they stay aligned beyond the intended diffs (port, runner user, sandbox root, db path, binaries, timeouts) — add a test that loads both and asserts they differ only in those keys.
-- `test/runner.test.ts`: every case uses `user: null`, so the production `sudo -n -H -u <user> --` branch of `src/runner/runner.ts` (argv shape, reduced env) is never exercised by any test — add a case with a fake `sudo` script on `PATH` asserting argv and env.
-- `test/e2e.test.ts`: `beforeAll` has no explicit timeout, so it can exceed vitest's default 10s hook timeout under load and fail with an opaque "hook timed out" instead of a readable error — pass an explicit timeout (e.g. 30s).
-- `test/mcp.test.ts`: no test exercises the `ask_model` progress notifications, so the "must increase" bug above would go unnoticed — add a 45-event script and assert strictly increasing `progress` values.
-- `test/mcp.test.ts`: the last test mutates the shared `provider.script` and never restores it, so a test appended afterward would silently run against the rate-limited script — capture and restore the original script (or reset it within the same test).
-- `test/mcp.test.ts`: nothing asserts that CLI `detail` (potential stderr) stays out of the MCP tool-error response — script a detail that looks like stderr and assert it's absent from the returned text.
-
 ## Phase 2 and beyond
 
 - **Cloudflare MCP Server Portals (beta)**: register `/mcp` in a portal (Zero Trust → Access controls → MCP Portals) to get OAuth login, per-tool policies and invocation logs instead of the raw service token in Claude Code's config. To verify: whether the portal forwards progress notifications (the council needs them) and how it coexists with the Access service-token policy already on the hostname (a second hostname for the portal may be needed).

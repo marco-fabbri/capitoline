@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { loadConfig, type ProviderConfig } from "../src/config.js";
-import { effortValue, type ModelSpec } from "../src/providers/adapter.js";
+import { effortValue, jsonLines, modelSpecs, type ModelSpec } from "../src/providers/adapter.js";
 
 const base = loadConfig("config/capitoline.yaml").providers.claude;
 // The cast is the point of these cases: a table missing a level is what the
@@ -36,5 +36,58 @@ describe("effortValue", () => {
     expect(effortValue(base, model(["low", "high"]), "medium")).toEqual({ effort: "high", value: "high" });
     const cfg = withEffort({ low: "L", high: "H" });
     expect(effortValue(cfg, model(), "medium")).toEqual({ effort: "high", value: "H" });
+  });
+});
+
+describe("modelSpecs", () => {
+  it("turns a provider's model table into specs, keeping every per-model key", () => {
+    const agy = loadConfig("config/capitoline.yaml").providers.antigravity;
+    const specs = modelSpecs("antigravity", agy);
+    expect(specs.map((s) => s.name)).toEqual(Object.keys(agy.models));
+    expect(specs.find((s) => s.name === "agy-gemini-flash")).toEqual({
+      name: "agy-gemini-flash", provider: "antigravity", cliModel: "gemini-3.8-flash",
+      effortSuffix: true, efforts: undefined, kind: "text", timeoutS: undefined,
+    });
+    // The two per-model overrides with consequences: `kind` decides which
+    // endpoint may route to the model at all, and `timeout_s` is the only
+    // thing keeping an image run from inheriting the provider's 600 s.
+    expect(specs.find((s) => s.name === "agy-image")).toEqual({
+      name: "agy-image", provider: "antigravity", cliModel: "gemini-3.8-flash-low",
+      effortSuffix: false, efforts: undefined, kind: "image", timeoutS: 240,
+    });
+    expect(specs.find((s) => s.name === "agy-gemini-pro")!.efforts).toEqual(["low", "high"]);
+  });
+  it("stamps the provider id it was given, not one read from the file", () => {
+    // The id is the registry key, and it is what Core pauses and what the
+    // usage rows are attributed to: it comes from the caller on purpose.
+    expect(modelSpecs("elsewhere", base).every((s) => s.provider === "elsewhere")).toBe(true);
+  });
+  it("returns nothing for a provider declaring no models", () => {
+    expect(modelSpecs("p", { ...base, models: {} })).toEqual([]);
+  });
+});
+
+describe("jsonLines", () => {
+  const collect = async (...lines: string[]) => {
+    const out: Record<string, unknown>[] = [];
+    for await (const o of jsonLines((async function* () { for (const l of lines) yield l; })())) out.push(o);
+    return out;
+  };
+  it("yields the objects of the well-formed lines, in order", async () => {
+    expect(await collect('{"a":1}', '{"b":2}')).toEqual([{ a: 1 }, { b: 2 }]);
+  });
+  it("tolerates the blank lines and the padding a line-buffered CLI leaves", async () => {
+    expect(await collect('  {"a":1}\t', "", "   ")).toEqual([{ a: 1 }]);
+  });
+  it("skips a malformed line and keeps reading the rest", async () => {
+    // A truncated line is what a CLI killed mid-write leaves behind: the run
+    // must still be parsed from the lines that did arrive whole, instead of
+    // dying on a SyntaxError the client would see as an internal error.
+    expect(await collect('{"a":1}', '{"b":', '{"c":3}')).toEqual([{ a: 1 }, { c: 3 }]);
+  });
+  it("ignores stdout that is not a JSON object at all", async () => {
+    // A CLI banner, a JSON array, a bare scalar: none of them is an event, and
+    // none of them may end the stream.
+    expect(await collect("Welcome to the CLI", "[1,2]", '"a string"', "null", '{"a":1}')).toEqual([{ a: 1 }]);
   });
 });

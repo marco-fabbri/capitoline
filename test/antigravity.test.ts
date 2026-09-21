@@ -179,7 +179,40 @@ describe("antigravity adapter", () => {
   });
   it("maps an ERROR result to a typed error", async () => {
     const ev = await events(linesOf("test/fixtures/antigravity/stream-input-error.jsonl"));
-    expect(ev.at(-1)!.type).toBe("error");
+    // The kind as well as the type: without it the Claude and Codex tests
+    // pinned their classification and this one did not, so a refusal from
+    // this CLI could be answered 502 with nothing failing here.
+    expect(ev.at(-1)).toMatchObject({ type: "error", kind: "cli_crashed" });
     expect((ev.at(-1) as any).detail).toContain("missing the \"event\" field");
+  });
+  it("classifies the error text of an ERROR result", async () => {
+    // Synthetic on purpose: no real rate-limit or expired-window capture from
+    // the text path of this CLI exists yet (the backlog tracks it). The
+    // wordings are the ones classifyError is written against, and the point is
+    // that this adapter routes its own error text through it at all.
+    const result = async (error?: string) =>
+      (await events((async function* () { yield JSON.stringify({ event: "result", result: { status: "ERROR", ...(error === undefined ? {} : { error }) } }); })()))[0];
+    expect(await result("429 Too Many Requests")).toEqual({ type: "error", kind: "rate_limited", detail: "429 Too Many Requests" });
+    expect(await result("RESOURCE_EXHAUSTED: you have reached your usage limit")).toMatchObject({ kind: "rate_limited" });
+    expect(await result("401 Unauthorized")).toEqual({ type: "error", kind: "auth_expired", detail: "401 Unauthorized" });
+    expect(await result("not logged in: run agy login")).toMatchObject({ kind: "auth_expired" });
+    expect(await result("segmentation fault")).toMatchObject({ kind: "cli_crashed" });
+    // No error text at all: the status is the detail, so the log still says
+    // which terminal state the run reached.
+    expect(await result()).toEqual({ type: "error", kind: "cli_crashed", detail: "ERROR" });
+  });
+  it("keeps the configuration's own args as the command prefix, and adds nothing else", () => {
+    // Nothing else pinned cfg.args as a prefix: dropping --input-format
+    // stream-json or --sandbox from the adapter would have left every other
+    // test here green while the real CLI stopped reading the NDJSON prompt and
+    // lost its sandbox. The count is asserted too, so a stray argument fails.
+    const c = antigravityAdapter.buildCommand(cfg, flash, { model: "agy-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
+    expect(c.args.slice(0, cfg.args.length)).toEqual(cfg.args);
+    expect(c.args).toHaveLength(cfg.args.length + 2);   // <model_flag> <id>; this provider declares no effort flag
+    const image = models.find((m) => m.name === "agy-image")!;
+    const withArgs = { ...cfg, image: { ...cfg.image, args: ["--image-flag"] } };
+    const ci = antigravityAdapter.buildImageCommand!(withArgs, image, { model: "agy-image", prompt: "a red bicycle" });
+    expect(ci.args.slice(0, cfg.args.length)).toEqual(cfg.args);
+    expect(ci.args).toHaveLength(cfg.args.length + 1 + 2);   // then image.args, then <model_flag> <id>
   });
 });

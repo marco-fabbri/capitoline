@@ -122,4 +122,33 @@ describe("claude adapter", () => {
     expect(await collect({ unifiedWindows: { five_hour: { utilization: 0.5, resetsAt: 7 }, seven_day: {} } }))
       .toEqual([{ type: "rate_limit", fiveHour: { utilization: 0.5, resetsAt: 7 }, sevenDay: undefined }]);
   });
+  it("prefixes the prompt on stdin when the provider declares no system prompt flag", () => {
+    // buildCommand's else branch: the Antigravity adapter renders its system
+    // prompt exactly this way, and for this CLI it is what a
+    // `system_prompt_flag: null` in the host's hand-edited file would do.
+    // Nothing exercised it, so the prompt could have been dropped instead.
+    const noFlag = { ...cfg, system_prompt_flag: null };
+    const c = claudeAdapter.buildCommand(noFlag, opus, {
+      model: "claude-opus", stream: false,
+      messages: [{ role: "system", text: "Be terse." }, { role: "user", text: "hi" }],
+    });
+    expect(c.args).not.toContain("--system-prompt");
+    expect(c.args).not.toContain("Be terse.");       // nowhere on the command line
+    expect(c.stdin).toBe("System instructions:\nBe terse.\n\nhi");
+  });
+  it("renders a multi-turn conversation with role markers, system prompt aside", () => {
+    // Every other case here sends one user message, which takes flatten()'s
+    // shortcut and never builds a marker. With a real conversation the markers
+    // are the only thing telling the CLI who said what.
+    const c = claudeAdapter.buildCommand(cfg, opus, {
+      model: "claude-opus", stream: false,
+      messages: [
+        { role: "system", text: "Be terse." },
+        { role: "user", text: "a" }, { role: "assistant", text: "b" }, { role: "user", text: "c" },
+      ],
+    });
+    expect(c.stdin).toBe("User: a\n\nAssistant: b\n\nUser: c");
+    expect(c.args[c.args.indexOf("--system-prompt") + 1]).toBe("Be terse.");
+    expect(c.stdin).not.toContain("Be terse.");      // the system prompt travels by flag, once
+  });
 });
