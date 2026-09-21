@@ -20,7 +20,7 @@ in the agreement but in hearing the dissent before deciding.
 
 ## Run it
 
-Requirements: Node 24+, and the CLIs `claude`, `codex`, `agy` installed and logged in for the user that runs them.
+Requirements: Node 24.x (pinned in `.nvmrc`; `engines` is `>=24 <25`), and the CLIs `claude`, `codex`, `agy` installed and logged in for the user that runs them.
 
     npm ci && npm run build
     node dist/main.js                      # reads config/capitoline.yaml, listens on 127.0.0.1:8080

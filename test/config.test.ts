@@ -133,6 +133,10 @@ runner: { sandbox_root: /tmp/x }
     // runs the CLIs as the gateway's own user with no privilege separation.
     expect(() => parseConfig(base.replace("runner: { sandbox_root: /tmp/x }", "runner: { sandbox_root: /tmp/x, usr: runner }")))
       .toThrow(/runner: Unrecognized key\(s\) in object: 'usr'/);
+    // A wrong value, not a wrong key: `.strict()` cannot see it, and an empty
+    // user takes the same no-sudo branch as null, silently.
+    expect(() => parseConfig(base.replace("runner: { sandbox_root: /tmp/x }", 'runner: { sandbox_root: /tmp/x, user: "" }')))
+      .toThrow(/runner\.user/);
     expect(() => parseConfig(base.replace("{cli_model: a}", "{cli_model: a, effort_sufix: true}")))
       .toThrow(/providers\.x\.models\.a: Unrecognized key\(s\) in object: 'effort_sufix'/);
     expect(() => parseConfig(base.replace("binary: x,", "binary: x, timeouts_s: 1,")))
@@ -172,6 +176,25 @@ runner: { sandbox_root: /tmp/x }
 `;
     expect(() => parseConfig(text)).toThrow(/providers\.x\.models\.a\.efforts: .*"high".*effort table/);
     expect(() => parseConfig(text.replace("effort: { low: low }", "effort: { low: low, high: high }"))).not.toThrow();
+    // An empty value is the same silent drop one level down: `--effort ""`.
+    expect(() => parseConfig(text.replace("effort: { low: low }", 'effort: { low: "", high: high }')))
+      .toThrow(/providers\.x\.effort\.low/);
+  });
+  it("rejects a model that needs an effort value against an empty effort table", () => {
+    const text = (model: string) => `
+providers:
+  x: { binary: x, concurrency: 1, timeout_s: 1, budget: {window_5h_tokens: 0, window_7d_tokens: 0},
+       health_model: a, models: { a: ${model} }, effort: {},
+       args: [], system_prompt_flag: null, prompt_via: stdin }
+runner: { sandbox_root: /tmp/x }
+`;
+    // effort_suffix with nothing to append leaves the CLI with a base model id
+    // that, for Antigravity, is not a model id at all.
+    expect(() => parseConfig(text("{cli_model: a, effort_suffix: true}")))
+      .toThrow(/providers\.x\.effort: .*"a" needs an effort value.*effort table is empty/);
+    expect(() => parseConfig(text("{cli_model: a, efforts: [low]}")))
+      .toThrow(/effort table is empty/);
+    expect(() => parseConfig(text("{cli_model: a}"))).not.toThrow();
   });
   it("rejects every reserved capitoline* model name", () => {
     const text = (name: string) => `

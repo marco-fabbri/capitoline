@@ -45,8 +45,13 @@ describe("scaffold", () => {
 });
 
 describe("repository", () => {
-  it("pins the deployment Node major in .nvmrc and package.json engines", () => {
-    expect(readFileSync(".nvmrc", "utf8").trim()).toBe("24");
-    expect(JSON.parse(readFileSync("package.json", "utf8")).engines.node).toBe(">=24 <25");
+  // The invariant, not two literals: `.nvmrc` is the single place a Node bump
+  // is written, and `engines` has to be the major it names, nothing else. The
+  // URLs are resolved against this file, not against process.cwd().
+  it("pins the deployment Node major in .nvmrc and derives package.json engines from it", () => {
+    const major = readFileSync(new URL("../.nvmrc", import.meta.url), "utf8").trim();
+    expect(major).toMatch(/^\d+$/);
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { engines: { node: string } };
+    expect(pkg.engines.node).toBe(`>=${major} <${Number(major) + 1}`);
   });
 });

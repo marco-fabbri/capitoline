@@ -41,7 +41,9 @@ const ProviderSchema = z.object({
   budget: z.object({ window_5h_tokens: z.number().int().min(0), window_7d_tokens: z.number().int().min(0) }).strict(),
   health_model: z.string().min(1),
   models: z.record(z.string().min(1), ModelSchema),
-  effort: z.record(EffortSchema, z.string()),
+  // min(1) on the value: an empty string parses, and the flag then reaches
+  // the CLI as `--effort ""` or as a model id ending in "-".
+  effort: z.record(EffortSchema, z.string().min(1)),
   args: z.array(z.string()),
   system_prompt_flag: z.string().nullable(),
   prompt_via: z.literal("stdin"),
@@ -59,7 +61,10 @@ export const ConfigSchema = z
       .strict()
       .default({}),
     runner: z.object({
-      user: z.string().nullable().default(null),
+      // null disables sudo on purpose (a developer machine); "" would do the
+      // same silently, running the CLIs as the gateway user with its own
+      // environment, so it is a value the schema has to reject.
+      user: z.string().min(1).nullable().default(null),
       sandbox_root: z.string().min(1),
       kill_grace_s: z.number().int().min(1).default(5),
     }).strict(),
@@ -99,6 +104,13 @@ export const ConfigSchema = z
           if (!Object.hasOwn(p.effort, e)) {
             ctx.addIssue({ code: "custom", path: ["providers", id, "models", name, "efforts"], message: `model "${name}" declares effort "${e}", which provider ${id}'s effort table does not define` });
           }
+        }
+        // The other direction: a model that needs an effort value at all, with
+        // nothing in the table to take it from. effortValue() returns null and
+        // the flag, or the "-<effort>" suffix that completes the model id, is
+        // dropped at runtime instead of failing here.
+        if (Object.keys(p.effort).length === 0 && (m.effort_suffix || m.efforts)) {
+          ctx.addIssue({ code: "custom", path: ["providers", id, "effort"], message: `model "${name}" needs an effort value but provider ${id}'s effort table is empty` });
         }
         if (name.startsWith("capitoline")) {
           ctx.addIssue({ code: "custom", path: ["providers", id, "models", name], message: `model name "${name}" is reserved for the council` });

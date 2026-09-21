@@ -38,6 +38,10 @@ curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt install -y node
 node --version    # v24.x
 ```
 
+The major must be the one in the repository's `.nvmrc` (`24`), which is also
+what `engines` in `package.json` allows (`>=24 <25`). A development machine on
+a newer major is then a visible difference rather than one discovered here.
+
 ## 3. Users
 
 `capitoline` owns the code, the configuration, the database and the
@@ -324,6 +328,19 @@ Everything else (flags, model aliases, effort mapping) stays as in the
 repository copy; it is the verified set for the CLI versions in
 `docs/update-clis.md`.
 
+Validate the file after every edit, and before restarting the service:
+
+```sh
+cd /var/lib/capitoline/app && sudo -Hu capitoline \
+  env CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml npm run check-config   # prints "configuration OK"
+```
+
+A mistyped key or an empty value is rejected at startup instead of being
+dropped silently, which under `Restart=always` (§8) is a restart loop whose
+only trace is the journal. This command loads the same file through the same
+schema, out of the service's way; it reads `dist/config.js`, so it needs the
+`npm run build` above.
+
 ### 7.1 Image collection helper
 
 The helper ships in the repository, so it is installed from the clone made
@@ -411,6 +428,13 @@ never turns a restart into a connection refused. Until that first round lands
 every request but `/health` is answered `503` with `Retry-After: 5`, so a
 `curl` issued right after `systemctl start` can legitimately get one; the state
 itself is visible throughout with `curl -s http://127.0.0.1:8080/health | jq`.
+
+`invalid configuration:` in the journal, followed by a restart every three
+seconds, means the file named by `CAPITOLINE_CONFIG` was rejected: the lines
+below it name the key and the reason (`runner: Unrecognized key(s) in object:
+'usr'`, `runner.user: String must contain at least 1 character(s)`). Fix the
+key and restart; `npm run check-config` of §7 prints the same message without
+touching the service.
 
 ## 9. Cloudflare Tunnel and Access
 
@@ -509,6 +533,15 @@ chmod 0755 /etc/cron.daily/capitoline-backup
 
 Copy `/var/backups/capitoline-*.tgz` off the host with the owner's usual
 mechanism (rsync to the Mac, or a bucket).
+
+Restoring replaces `/etc/capitoline/capitoline.yaml`, so validate it before
+restarting rather than after, and let the archive's copy answer for itself:
+
+```sh
+cd /var/lib/capitoline/app && sudo -Hu capitoline \
+  env CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml npm run check-config
+systemctl restart capitoline
+```
 
 ## 12. Smoke test
 

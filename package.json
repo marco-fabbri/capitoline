@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "start": "node dist/main.js",
+    "check-config": "node -e \"import('./dist/config.js').then(m => { m.loadConfig(process.env.CAPITOLINE_CONFIG ?? 'config/capitoline.yaml'); console.log('configuration OK'); }).catch(e => { console.error(e.message); process.exit(1); })\"",
     "dev": "tsx src/main.ts",
     "test": "vitest run",
     "test:watch": "vitest"
