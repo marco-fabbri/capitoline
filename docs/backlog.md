@@ -7,16 +7,6 @@ duplicated across tasks are merged into one line. Runner (`src/runner/runner.ts`
 had two review findings and both are already fixed in the current code
 (attachment name validation, eager line buffering), so it has no section below.
 
-## Config
-
-- `package.json` / `.nvmrc`: `engines: { "node": ">=24" }` is open-ended while dev runs Node 26 and production (Debian 13 LXC) targets Node 24, so a class of version drift is invisible until deploy — add `.nvmrc` pinned to the deployment major and tighten `engines` to `>=24 <25`.
-- `src/log.ts`: `process.env.LOG_LEVEL` is passed to pino unvalidated, so a typo in the systemd environment file crashes the process at startup instead of degrading — validate against the known pino levels and fall back to `"info"`.
-- `src/config.ts`: the `health_model` check uses the `in` operator, so an inherited `Object.prototype` key (e.g. `toString`) passes validation instead of being rejected — use `Object.hasOwn(p.models, p.health_model)`.
-- `src/config.ts`: none of the zod object schemas are `.strict()`, so a typo in a YAML key (e.g. `runner.usr` instead of `runner.user`) is silently dropped instead of rejected, which can silently disable the sudo privilege separation — add `.strict()` to `ModelSchema`, `ProviderSchema` and the other nested objects.
-- `src/config.ts`: `providers` accepts an empty map, so the gateway can start with zero providers and serve 404 to everything with no error pointing at the cause — add a `superRefine` issue when `Object.keys(cfg.providers).length === 0`.
-- `src/config.ts`: nothing cross-checks that a model's `efforts` are all keys of its provider's `effort` table, so a mismatched entry silently drops the `--effort`/suffix at runtime instead of failing at config load — add that cross-check to the `superRefine`.
-- `src/config.ts`: the reserved-name check only blocks `"capitoline"` or `"capitoline-*"`, narrower than the intended `capitoline*` reservation, so e.g. `capitolineX` is accepted and could collide with the phase 2 council namespace — change the condition to `name.startsWith("capitoline")`.
-
 ## Core
 
 - `src/core/prompt.ts`: `nearestEffort` has no guard on its inputs — an empty `allowed` array returns `undefined` despite the `Effort` return type, and an unknown `wanted` value silently resolves to the lowest allowed level — throw on both cases instead of returning a bad value.
@@ -50,7 +40,6 @@ had two review findings and both are already fixed in the current code
 
 ## Tests
 
-- `test/scaffold.test.ts`: the only assertion (`level).toBeDefined()`) would still pass if `createLogger` dropped the name binding or the `LOG_LEVEL` override entirely — assert `bindings().name`, the default level and the `LOG_LEVEL`-overridden level explicitly.
 - `test/adapter.test.ts`: does not exist, so `effortValue`, `modelSpecs` and `jsonLines` in `src/providers/adapter.ts` have zero direct test coverage — add it with the null-effort-table, effort-fallback and malformed-JSON-line cases.
 - `test/claude.test.ts`: the `system_prompt_flag: null` branch of `buildCommand` (used by the Antigravity adapter too) is never exercised — add a case with `system_prompt_flag: null` asserting the `"System instructions:\n..."` stdin fallback.
 - `test/claude.test.ts`: `buildCommand` is only tested with a single user message, so the real multi-turn case (`"User: ... / Assistant: ..."` markers) is never exercised through the adapter — add a 3-message case.

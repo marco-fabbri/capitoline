@@ -5,7 +5,7 @@
   "description": "Personal AI gateway over the Claude Code, Codex and Antigravity CLIs",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": { "node": ">=24 <25" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",

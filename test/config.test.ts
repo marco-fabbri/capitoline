@@ -121,4 +121,67 @@ runner: { sandbox_root: /tmp/x }
     expect(parseConfig(`server: { access: { team_domain: t.cloudflareaccess.com, audience: abc } }\n${provider}`).server.access.audience).toBe("abc");
     expect(parseConfig(provider).server.access).toEqual({ team_domain: "", audience: "" });
   });
+
+  it("rejects an unknown key in any of the objects", () => {
+    const base = `
+providers:
+  x: { binary: x, concurrency: 1, timeout_s: 1, budget: {window_5h_tokens: 0, window_7d_tokens: 0},
+       health_model: a, models: { a: {cli_model: a} }, effort: {}, args: [], system_prompt_flag: null, prompt_via: stdin }
+runner: { sandbox_root: /tmp/x }
+`;
+    // The one with teeth: `usr` for `user` used to be dropped silently, which
+    // runs the CLIs as the gateway's own user with no privilege separation.
+    expect(() => parseConfig(base.replace("runner: { sandbox_root: /tmp/x }", "runner: { sandbox_root: /tmp/x, usr: runner }")))
+      .toThrow(/runner: Unrecognized key\(s\) in object: 'usr'/);
+    expect(() => parseConfig(base.replace("{cli_model: a}", "{cli_model: a, effort_sufix: true}")))
+      .toThrow(/providers\.x\.models\.a: Unrecognized key\(s\) in object: 'effort_sufix'/);
+    expect(() => parseConfig(base.replace("binary: x,", "binary: x, timeouts_s: 1,")))
+      .toThrow(/providers\.x: Unrecognized key\(s\) in object: 'timeouts_s'/);
+    expect(() => parseConfig(base.replace("window_7d_tokens: 0}", "window_7d_tokens: 0, window_30d_tokens: 0}")))
+      .toThrow(/providers\.x\.budget: Unrecognized key\(s\) in object: 'window_30d_tokens'/);
+    expect(() => parseConfig(base.replace("prompt_via: stdin }", "prompt_via: stdin, image: { collect: [c], min_byte: 1 } }")))
+      .toThrow(/providers\.x\.image: Unrecognized key\(s\) in object: 'min_byte'/);
+    expect(() => parseConfig(`server: { prt: 9 }\n${base}`)).toThrow(/server: Unrecognized key\(s\) in object: 'prt'/);
+    expect(() => parseConfig(`server: { access: { team_domain: t, audience: a, extra: 1 } }\n${base}`))
+      .toThrow(/server\.access: Unrecognized key\(s\) in object: 'extra'/);
+    expect(() => parseConfig(`server: { queue: { max_wait_s: 1, min_wait_s: 1 } }\n${base}`))
+      .toThrow(/server\.queue: Unrecognized key\(s\) in object: 'min_wait_s'/);
+    expect(() => parseConfig(`usage: { db_path: x, dbpath: y }\n${base}`))
+      .toThrow(/usage: Unrecognized key\(s\) in object: 'dbpath'/);
+    expect(() => parseConfig(`usag: {}\n${base}`)).toThrow(/: Unrecognized key\(s\) in object: 'usag'/);
+  });
+  it("rejects a health_model that is only an Object.prototype key", () => {
+    const text = `
+providers:
+  x: { binary: x, concurrency: 1, timeout_s: 1, budget: {window_5h_tokens: 0, window_7d_tokens: 0},
+       health_model: toString, models: { a: {cli_model: a} }, effort: {}, args: [], system_prompt_flag: null, prompt_via: stdin }
+runner: { sandbox_root: /tmp/x }
+`;
+    expect(() => parseConfig(text)).toThrow(/health_model "toString" is not one of provider x's models/);
+  });
+  it("rejects an empty providers map", () => {
+    expect(() => parseConfig(`providers: {}\nrunner: { sandbox_root: /tmp/x }\n`)).toThrow(/providers: .*at least one provider/);
+  });
+  it("rejects a model effort the provider's effort table does not define", () => {
+    const text = `
+providers:
+  x: { binary: x, concurrency: 1, timeout_s: 1, budget: {window_5h_tokens: 0, window_7d_tokens: 0},
+       health_model: a, models: { a: {cli_model: a, efforts: [low, high]} }, effort: { low: low },
+       args: [], system_prompt_flag: null, prompt_via: stdin }
+runner: { sandbox_root: /tmp/x }
+`;
+    expect(() => parseConfig(text)).toThrow(/providers\.x\.models\.a\.efforts: .*"high".*effort table/);
+    expect(() => parseConfig(text.replace("effort: { low: low }", "effort: { low: low, high: high }"))).not.toThrow();
+  });
+  it("rejects every reserved capitoline* model name", () => {
+    const text = (name: string) => `
+providers:
+  x: { binary: x, concurrency: 1, timeout_s: 1, budget: {window_5h_tokens: 0, window_7d_tokens: 0},
+       health_model: ${name}, models: { ${name}: {cli_model: a} }, effort: {}, args: [], system_prompt_flag: null, prompt_via: stdin }
+runner: { sandbox_root: /tmp/x }
+`;
+    expect(() => parseConfig(text("capitolineX"))).toThrow(/reserved/);
+    expect(() => parseConfig(text("capitoline-council"))).toThrow(/reserved/);
+    expect(() => parseConfig(text("capitol"))).not.toThrow();
+  });
 });

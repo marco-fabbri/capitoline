@@ -15,7 +15,7 @@ const ModelSchema = z.object({
   kind: ModelKindSchema.default("text"),
   // Overrides the provider's timeout_s for this model (image runs are long but bounded).
   timeout_s: z.number().int().min(1).optional(),
-});
+}).strict();
 
 // How a provider produces images. The CLI writes the file outside the sandbox,
 // so the bytes are collected only through `collect` (command + args; the
@@ -31,13 +31,14 @@ const ImageSchema = z
     // cannot be counted at all (it is reported through its reset instant).
     quota_per_window: z.number().int().min(1).optional(),
   })
+  .strict()
   .default({});
 
 const ProviderSchema = z.object({
   binary: z.string().min(1),
   concurrency: z.number().int().min(1),
   timeout_s: z.number().int().min(1),
-  budget: z.object({ window_5h_tokens: z.number().int().min(0), window_7d_tokens: z.number().int().min(0) }),
+  budget: z.object({ window_5h_tokens: z.number().int().min(0), window_7d_tokens: z.number().int().min(0) }).strict(),
   health_model: z.string().min(1),
   models: z.record(z.string().min(1), ModelSchema),
   effort: z.record(EffortSchema, z.string()),
@@ -45,25 +46,27 @@ const ProviderSchema = z.object({
   system_prompt_flag: z.string().nullable(),
   prompt_via: z.literal("stdin"),
   image: ImageSchema,
-});
+}).strict();
 
 export const ConfigSchema = z
   .object({
     server: z
       .object({
         port: z.number().int().default(8080),
-        access: z.object({ team_domain: z.string().default(""), audience: z.string().default("") }).default({}),
-        queue: z.object({ max_wait_s: z.number().int().min(1).default(120) }).default({}),
+        access: z.object({ team_domain: z.string().default(""), audience: z.string().default("") }).strict().default({}),
+        queue: z.object({ max_wait_s: z.number().int().min(1).default(120) }).strict().default({}),
       })
+      .strict()
       .default({}),
     runner: z.object({
       user: z.string().nullable().default(null),
       sandbox_root: z.string().min(1),
       kill_grace_s: z.number().int().min(1).default(5),
-    }),
-    usage: z.object({ db_path: z.string().default("capitoline.sqlite") }).default({}),
+    }).strict(),
+    usage: z.object({ db_path: z.string().default("capitoline.sqlite") }).strict().default({}),
     providers: z.record(z.string().min(1), ProviderSchema),
   })
+  .strict()
   .superRefine((cfg, ctx) => {
     // Access is on or off as a pair: with only team_domain the gateway would
     // verify against an empty audience and reject every token with a 401
@@ -72,9 +75,15 @@ export const ConfigSchema = z
     if (!!team_domain !== !!audience) {
       ctx.addIssue({ code: "custom", path: ["server", "access", team_domain ? "audience" : "team_domain"], message: "server.access.team_domain and server.access.audience must be set together (both empty disables Access verification)" });
     }
+    // A gateway with no provider starts happily and answers 404 to every
+    // request, with nothing pointing at the configuration as the cause.
+    if (Object.keys(cfg.providers).length === 0) {
+      ctx.addIssue({ code: "custom", path: ["providers"], message: "providers must declare at least one provider" });
+    }
     const seen = new Map<string, string>();
     for (const [id, p] of Object.entries(cfg.providers)) {
-      if (!(p.health_model in p.models)) {
+      // `in` would accept an inherited key such as "toString".
+      if (!Object.hasOwn(p.models, p.health_model)) {
         ctx.addIssue({ code: "custom", path: ["providers", id, "health_model"], message: `health_model "${p.health_model}" is not one of provider ${id}'s models` });
       } else if (p.models[p.health_model].kind !== "text") {
         // The health check is a chat request; an image model would burn image quota and fail.
@@ -83,8 +92,15 @@ export const ConfigSchema = z
       if (Object.values(p.models).some((m) => m.kind === "image") && !p.image.collect) {
         ctx.addIssue({ code: "custom", path: ["providers", id, "image", "collect"], message: `provider ${id} has image models but no image.collect command` });
       }
-      for (const name of Object.keys(p.models)) {
-        if (name === "capitoline" || name.startsWith("capitoline-")) {
+      for (const [name, m] of Object.entries(p.models)) {
+        // Every effort a model offers must have a value in the provider's
+        // effort table, otherwise the flag is silently dropped at runtime.
+        for (const e of m.efforts ?? []) {
+          if (!Object.hasOwn(p.effort, e)) {
+            ctx.addIssue({ code: "custom", path: ["providers", id, "models", name, "efforts"], message: `model "${name}" declares effort "${e}", which provider ${id}'s effort table does not define` });
+          }
+        }
+        if (name.startsWith("capitoline")) {
           ctx.addIssue({ code: "custom", path: ["providers", id, "models", name], message: `model name "${name}" is reserved for the council` });
         }
         const other = seen.get(name);
