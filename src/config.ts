@@ -26,6 +26,10 @@ const ImageSchema = z
     allowed_tools: z.array(z.string()).default(["generate_image"]),
     collect: z.array(z.string()).min(1).optional(),
     min_bytes: z.number().int().min(0).default(200_000),
+    // How many images the short quota window allows, for reporting only: the
+    // gateway never blocks on it, and the provider's second, much longer quota
+    // cannot be counted at all (it is reported through its reset instant).
+    quota_per_window: z.number().int().min(1).optional(),
   })
   .default({});
 

@@ -4,16 +4,34 @@ import type { UsageStore } from "../usage/store.js";
 import { Semaphore } from "./semaphore.js";
 import { CapitolineError, type ErrorKind, type ImageRequest, type InternalRequest, type ProviderEvent } from "./types.js";
 
-export interface ModelInfo { name: string; provider: string; kind: ModelKind; available: boolean; reason?: string; overBudget: boolean }
+// What is left of a provider's image quota. `limit` is the configured cap of
+// the short window (null when none is configured); `resetAt` is when the
+// provider said the exhausted quota frees up (null when it never said so, or
+// when that instant has passed). The provider has two quotas, one of hours and
+// one of days, and only the short one is countable here: the long one shows up
+// solely as a `resetAt` far in the future (spike, 2026-09-21).
+export interface ImageQuota { used: number; limit: number | null; windowStartedAt: number | null; resetAt: number | null }
+export interface ModelInfo { name: string; provider: string; kind: ModelKind; available: boolean; reason?: string; overBudget: boolean; quota?: ImageQuota }
 export interface ProviderState {
   id: string; health: HealthStatus | null; pausedUntil: number | null; strikes: number; overBudget: boolean;
-  windows: ReturnType<UsageStore["windows"]>; active: number; waiting: number;
+  windows: ReturnType<UsageStore["windows"]>; active: number; waiting: number; imageQuota: ImageQuota | null;
 }
-export interface CoreOptions { maxWaitMs: number; budgets: Record<string, { window5h: number; window7d: number }>; log: Logger; now?: () => number }
+export interface CoreOptions {
+  maxWaitMs: number; budgets: Record<string, { window5h: number; window7d: number }>; log: Logger; now?: () => number;
+  /** Per provider: how many images the short quota window allows (config image.quota_per_window). */
+  imageQuotas?: Record<string, number>;
+}
 
 const H5 = 5 * 3600_000, D7 = 7 * 24 * 3600_000;
 
-interface State { provider: Provider; sem: Semaphore; health: HealthStatus | null; pausedUntil: number | null; strikes: number }
+interface State {
+  provider: Provider; sem: Semaphore; health: HealthStatus | null; pausedUntil: number | null; strikes: number;
+  /** Set only for a provider that has image models; null otherwise. */
+  imageLimit: number | null;
+  /** The instant the exhausted image quota frees up, as the provider reported it. */
+  imageResetAt: number | null;
+  hasImageModels: boolean;
+}
 interface Entry { provider: Provider; model: ModelSpec }
 interface Context { signal?: AbortSignal; source: "http" | "mcp" }
 
@@ -25,8 +43,12 @@ export class Core {
   constructor(providers: Provider[], private readonly usage: UsageStore, private readonly opts: CoreOptions) {
     this.now = opts.now ?? Date.now;
     for (const p of providers) {
-      this.states.set(p.id, { provider: p, sem: new Semaphore(p.concurrencyLimit), health: null, pausedUntil: null, strikes: 0 });
-      for (const m of p.models()) this.modelIndex.set(m.name, { provider: p, model: m });
+      const models = p.models();
+      this.states.set(p.id, {
+        provider: p, sem: new Semaphore(p.concurrencyLimit), health: null, pausedUntil: null, strikes: 0,
+        imageLimit: opts.imageQuotas?.[p.id] ?? null, imageResetAt: null, hasImageModels: models.some((m) => m.kind === "image"),
+      });
+      for (const m of models) this.modelIndex.set(m.name, { provider: p, model: m });
     }
   }
 
@@ -72,9 +94,25 @@ export class Core {
     for (const [id, s] of this.states) {
       const reason = this.unavailableReason(s);
       const overBudget = this.overBudget(id);
-      for (const m of s.provider.models()) out.push({ name: m.name, provider: id, kind: m.kind, available: reason === undefined, reason, overBudget });
+      // One query per provider, not per model: every image model of a provider
+      // draws on the same quota.
+      const quota = this.imageQuota(id, s);
+      for (const m of s.provider.models()) {
+        out.push({ name: m.name, provider: id, kind: m.kind, available: reason === undefined, reason, overBudget, ...(m.kind === "image" && quota ? { quota } : {}) });
+      }
     }
     return out;
+  }
+
+  // The quota of a provider that has image models, null for the others. `used`
+  // and `windowStartedAt` are counted from the recorded generations, so they
+  // survive a restart; `resetAt` only lives in memory (a reported reset is not
+  // a fact about our own calls) and is dropped once it has passed.
+  private imageQuota(id: string, s: State): ImageQuota | null {
+    if (!s.hasImageModels) return null;
+    const now = this.now();
+    const w = this.usage.imageWindow(id, H5, now);
+    return { used: w.used, limit: s.imageLimit, windowStartedAt: w.windowStartedAt, resetAt: s.imageResetAt !== null && s.imageResetAt > now ? s.imageResetAt : null };
   }
 
   // The health `detail` carries raw CLI stderr and must never reach a client
@@ -83,7 +121,7 @@ export class Core {
     return [...this.states].map(([id, s]) => ({
       id, health: s.health ? { ok: s.health.ok, kind: s.health.kind, checkedAt: s.health.checkedAt } : null,
       pausedUntil: s.pausedUntil, strikes: s.strikes, overBudget: this.overBudget(id),
-      windows: this.usage.windows(id), active: s.sem.active, waiting: s.sem.waiting,
+      windows: this.usage.windows(id), active: s.sem.active, waiting: s.sem.waiting, imageQuota: this.imageQuota(id, s),
     }));
   }
 
@@ -112,6 +150,7 @@ export class Core {
   // Everything both request kinds share: pause and health gates, the
   // provider's concurrency slot, strike/pause bookkeeping and the usage record.
   private async *guarded(entry: Entry, modelName: string, ctx: Context, produce: () => AsyncIterable<ProviderEvent>): AsyncIterable<ProviderEvent> {
+    const kind = entry.model.kind;
     const id = entry.provider.id;
     const s = this.states.get(id)!;
     if (this.isPaused(s)) throw this.pausedError(id, s);
@@ -131,7 +170,7 @@ export class Core {
     try {
       for await (const ev of produce()) {
         if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; s.strikes = 0; }
-        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, ev.kind, ev.retryAfterS); }
+        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, ev.kind, ev.retryAfterS, kind); }
         else if (ev.type === "rate_limit") this.onRateLimit(id, ev);
         yield ev;
       }
@@ -144,7 +183,7 @@ export class Core {
       // No terminal event and no provider failure: the caller gave up, either
       // through its signal or by stopping the iteration (client disconnected).
       const aborted = !sawTerminal && phase !== "threw" && (phase === "running" || ctx.signal?.aborted === true);
-      this.usage.record({ provider: id, model: modelName, inputTokens: usage.input, outputTokens: usage.output,
+      this.usage.record({ provider: id, model: modelName, kind, inputTokens: usage.input, outputTokens: usage.output,
         durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, ts: this.now() });
     }
   }
@@ -159,11 +198,19 @@ export class Core {
   // a bare 429) must not cut a multi-day quota pause down to a minute. A
   // negative retry-after (a reset already in the past, or a provider clock
   // ahead of ours) is treated as zero so the minute of slack still applies.
-  private onError(id: string, s: State, kind: ErrorKind, retryAfterS?: number) {
+  private onError(id: string, s: State, kind: ErrorKind, retryAfterS?: number, modelKind: ModelKind = "text") {
     if (kind === "rate_limited") {
       const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** s.strikes) * 60_000;
       s.strikes++;
       s.pausedUntil = Math.max(s.pausedUntil ?? 0, this.now() + waitMs);
+      // Only an image run says anything about the image quota, and only the
+      // reset it reported: the exhausted window is the one the client asks
+      // about, so the bare instant is kept without the pause's slack. Like the
+      // pause, it only ever grows while it stands, so a short-window 429 from a
+      // request already in flight cannot hide a multi-day exhaustion.
+      if (modelKind === "image" && retryAfterS !== undefined) {
+        s.imageResetAt = Math.max(s.imageResetAt ?? 0, this.now() + Math.max(0, retryAfterS) * 1000);
+      }
       this.opts.log.warn({ provider: id, seconds: Math.round((s.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: s.strikes }, "provider paused after rate limit");
     } else if (kind === "auth_expired") {
       s.health = { ok: false, kind, detail: "auth_expired reported by a request", checkedAt: this.now() };

@@ -109,3 +109,4 @@ providers:
     image:
       collect: [test/fake-cli/fake-collect-image.sh]   # relative to the repo; the runner resolves it
       min_bytes: 200000
+      quota_per_window: 12    # images per 5-hour window, reported in /health and /v1/models

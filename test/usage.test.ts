@@ -25,4 +25,30 @@ describe("UsageStore", () => {
     expect(s.windows("codex")).toEqual({});
     s.close();
   });
+  it("counts successful image calls in the window and reports when it opened", () => {
+    const s = new UsageStore(":memory:");
+    const now = 1_000_000_000_000;
+    const H5 = 5 * 3600_000;
+    const img = (ts: number, outcome: "ok" | "rate_limited") =>
+      s.record({ provider: "antigravity", model: "agy-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 20_000, outcome, source: "http", ts });
+    img(now - 6 * 3600_000, "ok");                 // before the window
+    img(now - 4 * 3600_000, "ok");                 // the window opens here
+    img(now - 1000, "ok");
+    img(now - 500, "rate_limited");                // a failed generation costs no quota
+    s.record({ provider: "antigravity", model: "agy-gemini-flash", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now - 100 });
+    s.record({ provider: "other", model: "other-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 5, outcome: "ok", source: "http", ts: now - 100 });
+    expect(s.imageWindow("antigravity", H5, now)).toEqual({ used: 2, windowStartedAt: now - 4 * 3600_000 });
+    expect(s.imageWindow("antigravity", 2 * 3600_000, now)).toEqual({ used: 1, windowStartedAt: now - 1000 });
+    expect(s.imageWindow("claude", H5, now)).toEqual({ used: 0, windowStartedAt: null });
+    s.close();
+  });
+  it("defaults the image window to five hours and the recorded kind to text", () => {
+    const s = new UsageStore(":memory:");
+    const now = Date.now();
+    s.record({ provider: "antigravity", model: "agy-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 5, outcome: "ok", source: "mcp", ts: now - 1000 });
+    s.record({ provider: "antigravity", model: "agy-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 5, outcome: "ok", source: "mcp", ts: now - 6 * 3600_000 });
+    s.record({ provider: "antigravity", model: "agy-gemini-flash", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now - 1000 });
+    expect(s.imageWindow("antigravity")).toEqual({ used: 1, windowStartedAt: now - 1000 });
+    s.close();
+  });
 });

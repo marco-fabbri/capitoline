@@ -18,6 +18,7 @@ describe("config", () => {
     expect(agy.models["agy-gemini-3.6-flash"].cli_model).toBe("gemini-3.6-flash");
     expect(agy.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
     expect(agy.image.min_bytes).toBe(200000);
+    expect(agy.image.quota_per_window).toBe(12);
     expect(agy.image.allowed_tools).toEqual(["generate_image"]);
     expect(agy.image.args).toEqual([]);
     expect(cfg.providers.claude.image).toEqual({ args: [], allowed_tools: ["generate_image"], collect: undefined, min_bytes: 200000 });

@@ -35,6 +35,17 @@ describe("GET /v1/models", () => {
     const r = await request(app).get("/v1/models");
     expect(r.body.data.map((m: { id: string; capitoline: { kind: string } }) => [m.id, m.capitoline.kind])).toEqual([["agy-text", "text"], ["agy-image", "image"]]);
   });
+  it("exposes the image quota of an image model, and only of an image model", async () => {
+    const { app } = makeImages();
+    const before = await request(app).get("/v1/models");
+    const quotaOf = (r: { body: { data: { id: string; capitoline: Record<string, unknown> }[] } }, id: string) =>
+      r.body.data.find((m) => m.id === id)!.capitoline.quota;
+    expect(quotaOf(before, "agy-image")).toEqual({ used: 0, limit: 12, window_started_at: null, reset_at: null });
+    expect(quotaOf(before, "agy-text")).toBeUndefined();
+    await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" });
+    const after = await request(app).get("/v1/models");
+    expect(quotaOf(after, "agy-image")).toMatchObject({ used: 1, limit: 12, window_started_at: expect.any(Number), reset_at: null });
+  });
 });
 
 describe("POST /v1/chat/completions", () => {
@@ -199,7 +210,7 @@ const IMG: ProviderEvent = { type: "image", mime: "image/jpeg", bytes: JPEG, wid
 function makeImages(script: ProviderEvent[] = [IMG, { type: "done" }]) {
   const p = new FakeProvider("antigravity", ["agy-text", { name: "agy-image", kind: "image" }], OK, 1);
   p.imageScript = script;
-  const core = new Core([p], new UsageStore(":memory:"), { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+  const core = new Core([p], new UsageStore(":memory:"), { maxWaitMs: 100, budgets: {}, log: createLogger("t"), imageQuotas: { antigravity: 12 } });
   return { p, core, app: createApp(core, { log: createLogger("t") }) };
 }
 
@@ -371,6 +382,26 @@ describe("GET /health", () => {
     const r = await request(app).get("/health");
     expect(r.status).toBe(200);
     expect(r.body.providers[0].id).toBe("claude");
+  });
+  it("reports the image quota of a provider, and null for one without image models", async () => {
+    const { app } = makeImages();
+    const before = await request(app).get("/health");
+    expect(before.body.providers[0].imageQuota).toEqual({ used: 0, limit: 12, windowStartedAt: null, resetAt: null });
+    await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" });
+    const after = await request(app).get("/health");
+    expect(after.body.providers[0].imageQuota).toMatchObject({ used: 1, limit: 12, windowStartedAt: expect.any(Number), resetAt: null });
+    expect(after.body.models.find((m: { name: string }) => m.name === "agy-image").quota.used).toBe(1);
+    const textOnly = await request(make().app).get("/health");
+    expect(textOnly.body.providers[0].imageQuota).toBeNull();
+  });
+  it("reports the quota reset after an image rate limit", async () => {
+    const { app } = makeImages([{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }]);
+    const sent = Date.now();
+    const gen = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" });
+    expect(gen.status).toBe(429);
+    const r = await request(app).get("/health");
+    expect(r.body.providers[0].imageQuota.resetAt).toBeGreaterThanOrEqual(sent + 442_209 * 1000);
+    expect(r.body.providers[0].imageQuota.used).toBe(0);
   });
 });
 

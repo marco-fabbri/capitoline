@@ -161,11 +161,11 @@ describe("Core", () => {
 const IMG: ProviderEvent = { type: "image", mime: "image/jpeg", bytes: Buffer.from("ffd8ffe0", "hex"), width: 1376, height: 768 };
 const IMG_OK: ProviderEvent[] = [IMG, { type: "done" }];
 const imgReq = (model: string) => ({ model, prompt: "a lighthouse" });
-function makeImages(opts: { now?: () => number } = {}) {
+function makeImages(opts: { now?: () => number; imageQuotas?: Record<string, number> } = {}) {
   const c = new FakeProvider("c", ["c-text", { name: "c-image", kind: "image" }], OK, 1);
   c.imageScript = IMG_OK;
   const usage = new UsageStore(":memory:");
-  const core = new Core([c], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: opts.now });
+  const core = new Core([c], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: opts.now, imageQuotas: opts.imageQuotas });
   return { c, usage, core };
 }
 
@@ -295,5 +295,61 @@ describe("Core images", () => {
     const rows = (usage as unknown as { db: { prepare(q: string): { all(): { outcome: string }[] } } }).db
       .prepare("SELECT outcome FROM calls WHERE provider = 'c'").all().map((r) => r.outcome);
     expect(rows).toEqual(["aborted"]);
+  });
+  it("counts a generated image against the provider's image quota window", async () => {
+    let t = 1_000_000;
+    const { core } = makeImages({ now: () => t, imageQuotas: { c: 12 } });
+    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 0, limit: 12, windowStartedAt: null, resetAt: null });
+    expect(core.listModels().find((m) => m.name === "c-text")!.quota).toBeUndefined();
+    await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    const opened = t;
+    t += 3600_000;
+    await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 2, limit: 12, windowStartedAt: opened, resetAt: null });
+    expect(core.providerStates().find((p) => p.id === "c")!.imageQuota).toEqual({ used: 2, limit: 12, windowStartedAt: opened, resetAt: null });
+    // Five hours after the first generation the window has rolled over it.
+    t = opened + 5 * 3600_000 + 1;
+    expect(core.providerStates().find((p) => p.id === "c")!.imageQuota).toMatchObject({ used: 1, windowStartedAt: opened + 3600_000 });
+  });
+  it("reports no limit when no image quota is configured, and no quota at all for a provider without image models", () => {
+    const { core } = makeImages();
+    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 0, limit: null, windowStartedAt: null, resetAt: null });
+    const { core: textOnly } = make();
+    expect(textOnly.providerStates().map((p) => p.imageQuota)).toEqual([null, null]);
+    expect(textOnly.listModels().every((m) => m.quota === undefined)).toBe(true);
+  });
+  it("sets the quota reset from the reported retry-after and drops it once the reset has passed", async () => {
+    let t = 1_000_000;
+    const { core, c } = makeImages({ now: () => t, imageQuotas: { c: 12 } });
+    // The multi-day quota: the reset instant is what a client must be shown.
+    c.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }];
+    await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    const resetAt = t + 442_209 * 1000;
+    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 0, limit: 12, windowStartedAt: null, resetAt });
+    expect(core.providerStates().find((p) => p.id === "c")!.imageQuota!.resetAt).toBe(resetAt);
+    t = resetAt + 1;
+    expect(core.providerStates().find((p) => p.id === "c")!.imageQuota!.resetAt).toBeNull();
+  });
+  it("never shortens the image quota reset when a second, shorter 429 lands from a request already in flight", async () => {
+    const t = 1_000_000;
+    // Concurrency 2: both image runs pass the pause gate before either fails.
+    const c = new FakeProvider("c", ["c-text", { name: "c-image", kind: "image" }], OK, 2);
+    c.delayMs = 20;
+    const core = new Core([c], new UsageStore(":memory:"), { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t, imageQuotas: { c: 12 } });
+    c.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }];
+    const long = drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    await new Promise((r) => setTimeout(r, 5));
+    c.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 600 }];   // the short window, reported second
+    const short = drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    await long;
+    await short;
+    expect(core.providerStates().find((p) => p.id === "c")!.imageQuota!.resetAt).toBe(t + 442_209 * 1000);
+  });
+  it("leaves the image quota reset alone when only the chat path is rate limited", async () => {
+    const t = 1_000_000;
+    const { core, c } = makeImages({ now: () => t, imageQuotas: { c: 12 } });
+    c.script = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 300 }];
+    await drain(core.execute(req("c-text"), { source: "http" }));
+    expect(core.providerStates().find((p) => p.id === "c")!.imageQuota!.resetAt).toBeNull();
   });
 });

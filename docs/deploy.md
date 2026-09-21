@@ -316,6 +316,7 @@ Edit `/etc/capitoline/capitoline.yaml`:
 | `providers.antigravity.binary` | `/home/runner/.local/bin/agy` |
 | `providers.antigravity.image.collect` | `[/usr/local/bin/capitoline-collect-image]` — already the value in the repository copy; it must match the sudoers path of §5 (a developer machine sets `runner.user: null` and points `image.collect` at `scripts/capitoline-collect-image`; the runner then spawns it directly, as the developer, so it reads that machine's own `$HOME`) |
 | `providers.antigravity.image.min_bytes` | `200000` — keep it: below this the collected file is a placeholder, not a picture, and the request fails with `bad_output` rather than returning a grey rectangle (placeholders were observed at 2-65 KB against 1.8-2.4 MB for a real image, hence the threshold) |
+| `providers.antigravity.image.quota_per_window` | `12` — the short image quota (12 generations per 5 hours), reported only: `/health` and `/v1/models` show `used` against it and the gateway never blocks on it. Leave it out and the count is still reported, with `limit: null`. The second, much longer quota of the same model (days) cannot be counted and shows up only as the `resetAt` of a quota hit |
 | `providers.antigravity.image.allowed_tools` | `[generate_image]` — do not extend: any other tool call aborts the run, which is what keeps an image request from turning into an agent session |
 | `server.access.team_domain`, `server.access.audience` | filled in §9; both empty until then |
 

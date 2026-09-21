@@ -46,9 +46,16 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     res.json({ ok: true, providers: core.providerStates(), models: core.listModels() });
   });
 
+  // The quota block is only there for image models, and its keys follow this
+  // endpoint's snake_case (over_budget) rather than the internal names; /health
+  // serves the internal shape instead.
   app.get("/v1/models", (_req, res) => {
     const data = core.listModels().filter((m) => m.available).map((m) => ({
-      id: m.name, object: "model", created: 0, owned_by: m.provider, capitoline: { kind: m.kind, over_budget: m.overBudget },
+      id: m.name, object: "model", created: 0, owned_by: m.provider,
+      capitoline: {
+        kind: m.kind, over_budget: m.overBudget,
+        ...(m.quota ? { quota: { used: m.quota.used, limit: m.quota.limit, window_started_at: m.quota.windowStartedAt, reset_at: m.quota.resetAt } } : {}),
+      },
     }));
     res.json({ object: "list", data });
   });
