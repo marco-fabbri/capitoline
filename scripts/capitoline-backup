@@ -1,7 +1,9 @@
 #!/bin/bash
 # capitoline-backup <dest-dir>
 #
-# Daily backup of the usage database and the configuration. Run as root.
+# Daily backup of the usage database and the configuration. Run by the systemd
+# timer of deploy.md §11 as the `capitoline` user, which owns the database and
+# reads the configuration through its group; root works too.
 #
 # The database is copied with `sqlite3 ... "VACUUM INTO"`, never with `tar` or
 # `cp`: the service keeps it open in WAL mode, so committed rows live in the
@@ -15,6 +17,10 @@
 # Overridable for testing and for a non-standard install:
 #   CAPITOLINE_DB, CAPITOLINE_CONFIG, CAPITOLINE_BACKUP_KEEP.
 set -euo pipefail
+# Everything this script writes — the staging copies, the archive — holds the
+# usage database or the configuration, so nothing is created group- or
+# world-readable, not even for the instant between `tar` and `chmod`.
+umask 077
 
 dest="${1:-}"
 db="${CAPITOLINE_DB:-/var/lib/capitoline/usage.sqlite}"
@@ -28,16 +34,32 @@ keep="${CAPITOLINE_BACKUP_KEEP:-14}"
 command -v sqlite3 >/dev/null 2>&1 || { echo "sqlite3 is not installed" >&2; exit 4; }
 
 stage=$(mktemp -d "${TMPDIR:-/tmp}/capitoline-backup.XXXXXX")
-trap 'rm -rf "$stage"' EXIT
+part=""
+cleanup() {
+  rm -rf "$stage"
+  if [ -n "$part" ]; then rm -f "$part"; fi
+}
+trap cleanup EXIT
 
 sqlite3 "$db" "VACUUM INTO '$stage/usage.sqlite'"
 cp "$config" "$stage/capitoline.yaml"
 
 # Flat archive, two entries: a restore is an extraction plus two copies, and
 # tar has no absolute path to strip.
+#
+# Written under a temporary name and moved into place only once `tar` has
+# succeeded: a failure part-way through (a full /var is the realistic one)
+# would otherwise leave a truncated file carrying the day's date, which reads
+# as that day's backup and is counted by the retention glob below — so the
+# next successful run would delete a good older archive to keep the count at
+# 14. The `.part` suffix is outside the `capitoline-*.tgz` glob, and the EXIT
+# trap removes it.
 archive="$dest/capitoline-$(date +%F).tgz"
-tar czf "$archive" -C "$stage" usage.sqlite capitoline.yaml
-chmod 0600 "$archive"
+part="$archive.part"
+tar czf "$part" -C "$stage" usage.sqlite capitoline.yaml
+chmod 0600 "$part"
+mv -f "$part" "$archive"
+part=""
 
 # Retention. The names are ISO dates, so the glob's own ascending order is
 # chronological; the array form keeps it correct for a destination path

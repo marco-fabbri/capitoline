@@ -516,10 +516,10 @@ capitoline generate_image: a red fox in the snow".
 
 ## 11. Backup
 
-Daily, as root, of the usage database and the configuration. Credentials are
-deliberately not backed up: if one is lost, log in again (§6). A copy of a
-token is one more secret to protect, and it buys nothing — the CLIs bind a
-credential to the machine that obtained it.
+Daily, as the `capitoline` user, of the usage database and the configuration.
+Credentials are deliberately not backed up: if one is lost, log in again
+(§6). A copy of a token is one more secret to protect, and it buys nothing —
+the CLIs bind a credential to the machine that obtained it.
 
 `scripts/capitoline-backup` ships in the repository and is installed from the
 clone of §7, like the image helper of §7.1:
@@ -529,12 +529,15 @@ apt-get install -y sqlite3
 install -o root -g root -m 0755 \
   /var/lib/capitoline/app/scripts/capitoline-backup \
   /usr/local/bin/capitoline-backup
-mkdir -p /var/backups
+install -d -o capitoline -g capitoline -m 0700 /var/backups/capitoline
 ```
 
 Owned by `root` and not writable by `capitoline`, for the same reason as
 §7.1, and a snapshot of the clone rather than a link: re-install it after a
-`git pull` that changes it.
+`git pull` that changes it. The destination is a directory of its own under
+`/var/backups` (which is `0755`), owned by `capitoline` and `0700`: the unit
+below runs as `capitoline`, and nothing on this host — `runner` included —
+has any business reading the archives.
 
 `capitoline-backup <dest-dir>` writes `<dest-dir>/capitoline-<date>.tgz`,
 mode `0600`, holding two flat entries: `usage.sqlite` and `capitoline.yaml`.
@@ -544,9 +547,14 @@ the most recent committed rows sit in the `-wal` sidecar until a checkpoint,
 and an archive of the main file alone restores a database that has silently
 lost them. `VACUUM INTO` takes a read lock — the service does not have to be
 stopped — and writes one self-contained file, with no sidecar to keep
-together. The script keeps the 14 most recent archives and exits non-zero,
-with the reason on stderr, when the destination directory, the database, the
-configuration or `sqlite3` itself is missing. The two paths default to the
+together. The archive is written as `capitoline-<date>.tgz.part` and renamed
+only once `tar` has returned, so a run that dies half-way — a full `/var` is
+the realistic case — leaves nothing behind rather than a truncated file
+carrying the day's date, which would read as that day's backup and, counted
+by the retention rule, would cost a good older archive. The script keeps the
+14 most recent archives and exits non-zero, with the reason on stderr, when
+the destination directory, the database, the configuration or `sqlite3`
+itself is missing. The two paths default to the
 production ones and can be overridden with `CAPITOLINE_DB` and
 `CAPITOLINE_CONFIG`, the retention with `CAPITOLINE_BACKUP_KEEP`.
 
@@ -561,7 +569,9 @@ cat > /etc/systemd/system/capitoline-backup.service <<'UNIT'
 Description=Capitoline backup
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/capitoline-backup /var/backups
+User=capitoline
+Group=capitoline
+ExecStart=/usr/local/bin/capitoline-backup /var/backups/capitoline
 UNIT
 cat > /etc/systemd/system/capitoline-backup.timer <<'UNIT'
 [Unit]
@@ -580,30 +590,45 @@ systemctl enable --now capitoline-backup.timer
 `Persistent=true` runs a backup missed while the host was off at the next
 boot instead of skipping the day.
 
+`User=capitoline` rather than root, and not only on principle: `sqlite3`
+opening the WAL database creates `usage.sqlite-shm` (and recovers `-wal`)
+owned by the user that runs it. If the timer fires while the service is
+stopped — a deploy, a restart loop — root is then the only connection, and a
+run interrupted before sqlite removes them leaves both sidecars owned by
+`root:root` in `/var/lib/capitoline`; the service, which runs as
+`capitoline`, can no longer open its own database read-write, and under
+`Restart=always` that is a silent restart loop. As `capitoline` the job needs
+nothing it does not already have: it owns the database, reads
+`/etc/capitoline/capitoline.yaml` through the group of §7, and owns the
+destination directory.
+
 Verify one run by hand, with the service running — that is the case the
 archive has to survive:
 
 ```sh
 systemctl start capitoline-backup
 systemctl status capitoline-backup     # "Deactivated successfully", no "status=1"
-ls -l /var/backups/
+ls -l /var/backups/capitoline/
 systemctl list-timers capitoline-backup.timer
 ```
 
-Then copy `/var/backups/capitoline-*.tgz` off the host with the owner's usual
-mechanism (rsync to the Mac, or a bucket). An archive that never leaves the
-host is not a backup.
+Then copy `/var/backups/capitoline/capitoline-*.tgz` off the host with the
+owner's usual mechanism (rsync to the Mac, or a bucket). An archive that
+never leaves the host is not a backup.
 
 ### 11.1 Restore
 
-Into a scratch directory first, always, and verify it there: an archive is
-worth nothing until it has been read once.
+As root, into a scratch directory first, always, and verify it there: an
+archive is worth nothing until it has been read once.
 
 ```sh
-mkdir -p /var/tmp/restore && tar xzf /var/backups/capitoline-<date>.tgz -C /var/tmp/restore
+install -d -o capitoline -g capitoline -m 0700 /var/tmp/restore
+tar xzf /var/backups/capitoline/capitoline-<date>.tgz -C /var/tmp/restore
 sqlite3 /var/tmp/restore/usage.sqlite 'PRAGMA integrity_check; SELECT COUNT(*), MAX(ts) FROM calls;'
+install -o capitoline -g capitoline -m 0600 \
+  /var/tmp/restore/capitoline.yaml /var/tmp/restore/capitoline.checked.yaml
 cd /var/lib/capitoline/app && sudo -Hu capitoline \
-  env CAPITOLINE_CONFIG=/var/tmp/restore/capitoline.yaml npm run check-config   # prints "configuration OK"
+  env CAPITOLINE_CONFIG=/var/tmp/restore/capitoline.checked.yaml npm run check-config   # prints "configuration OK"
 ```
 
 `integrity_check` prints `ok`, the count is non-zero and `MAX(ts)` is a
@@ -615,6 +640,19 @@ after, because restoring replaces the file the service reads at startup and a
 rejected one under `Restart=always` is a restart loop whose only trace is the
 journal (§8).
 
+The two `install` lines are not decoration. `tar` run by root restores the
+owner and the mode recorded in the archive, and the archived configuration
+carries those of the installed file — `0640`, or `0600` from a run of the
+timer as `capitoline` — so the extracted copy is not readable by whoever
+`check-config` runs as; the check would fail with `EACCES` before it ever
+reached the schema, in the middle of a restore, which is the one procedure
+that has to work on the first try. Hence a copy of the configuration owned by
+`capitoline`, validated in place of the original, which stays untouched for
+the step below. And hence a scratch directory owned by `capitoline` and
+`0700` rather than `mkdir -p`: the extracted database is a full copy of the
+usage data, and `/var/tmp` is world-readable on a host that also runs
+`runner`.
+
 Putting it back:
 
 ```sh
@@ -624,6 +662,7 @@ install -o capitoline -g capitoline -m 0640 /var/tmp/restore/usage.sqlite /var/l
 rm -f /var/lib/capitoline/usage.sqlite-wal /var/lib/capitoline/usage.sqlite-shm
 systemctl start capitoline
 curl -s http://127.0.0.1:8080/health | jq
+rm -rf /var/tmp/restore
 ```
 
 Stop the service first: replacing the file under a running process leaves it
@@ -631,7 +670,9 @@ writing into the database it still holds open, and the restored one is
 overwritten the moment it checkpoints. The old `-wal`/`-shm` must go with it —
 they describe the file being replaced, and sqlite would try to apply them to
 the new one. The ownership is the one of §7: the configuration is read by
-`capitoline`, the database is written by it.
+`capitoline`, the database is written by it. The scratch directory goes last,
+once the service answers: it holds a second copy of everything §11 exists to
+keep private.
 
 What a restore does not bring back: the CLI credentials (§6, log in again) and
 the Cloudflare service token (§9). The gateway comes up degraded until the

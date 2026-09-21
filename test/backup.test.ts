@@ -119,6 +119,23 @@ describe("scripts/capitoline-backup", () => {
       expect(r.stderr).not.toBe("");
       expect(readdirSync(dest)).toEqual([]);
     }
+
+    // The pre-flight guards pass and the run dies afterwards. Nothing may be
+    // left in the destination: a half-written `capitoline-<date>.tgz` would
+    // read as the day's backup and, counted by the retention rule, would cost
+    // a good older archive on the next successful run.
+    const noSqlite = await run([dest], { CAPITOLINE_DB: db, CAPITOLINE_CONFIG: config, PATH: "/nonexistent" });
+    expect(noSqlite.code).toBe(4);
+    expect(noSqlite.stderr).toContain("sqlite3");
+    expect(readdirSync(dest)).toEqual([]);
+
+    store?.close();
+    store = null;
+    writeFileSync(db, "not a database");   // the snapshot cannot be taken
+    const broken = await run([dest], { CAPITOLINE_DB: db, CAPITOLINE_CONFIG: config });
+    expect(broken.code).toBeGreaterThan(0);
+    expect(broken.stderr).not.toBe("");
+    expect(readdirSync(dest)).toEqual([]);
   });
 
   it("leaves no staging directory behind", async () => {
