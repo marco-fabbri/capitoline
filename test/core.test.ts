@@ -218,6 +218,47 @@ describe("Core images", () => {
     expect(await drain(core.generateImage(imgReq("c-image"), { source: "http" }))).toEqual(IMG_OK);
     expect(core.providerStates().find((p) => p.id === "c")!.strikes).toBe(0);
   });
+  it("never shortens an installed pause when a second rate limit lands from a request already in flight", async () => {
+    let t = 1_000_000;
+    // Concurrency 2: both requests pass the pause gate before either fails.
+    const c = new FakeProvider("c", ["c-text", { name: "c-image", kind: "image" }], [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 30 }], 2);
+    c.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }];
+    c.delayMs = 20;
+    const core = new Core([c], new UsageStore(":memory:"), { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
+    const long = drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    await new Promise((r) => setTimeout(r, 5));
+    const short = drain(core.execute(req("c-text"), { source: "http" }));
+    expect(core.providerStates().find((p) => p.id === "c")).toMatchObject({ active: 2, waiting: 0 });
+    await long;                                            // installs the multi-day pause first
+    await short;                                           // the short reset arrives second and must not win
+    expect(core.providerStates().find((p) => p.id === "c")).toMatchObject({ pausedUntil: t + (442_209 + 60) * 1000, strikes: 2 });
+    t += 91_000;                                           // past the short reset: still paused
+    await expect(drain(core.generateImage(imgReq("c-image"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited" });
+  });
+  it("still pauses for the minute of slack when the reported reset is already in the past", async () => {
+    let t = 1_000_000;
+    const { core, c } = makeImages({ now: () => t });
+    c.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: -3540 }];
+    await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    expect(core.providerStates().find((p) => p.id === "c")).toMatchObject({ pausedUntil: t + 60_000, strikes: 1 });
+    await expect(drain(core.generateImage(imgReq("c-image"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited", retryAfterS: 60 });
+  });
+  it("refuses image requests and marks the image model unavailable after a failed health check", async () => {
+    const { core, c } = makeImages();
+    c.healthResult = { ok: false, kind: "auth_expired", detail: "expired", checkedAt: 0 };
+    await core.checkHealth("c");
+    expect(core.listModels().find((m) => m.name === "c-image")).toMatchObject({ available: false, reason: "auth_expired" });
+    await expect(drain(core.generateImage(imgReq("c-image"), { source: "http" }))).rejects.toMatchObject({ kind: "model_unavailable" });
+    expect(c.imageCalls.length).toBe(0);
+  });
+  it("stores rate-limit windows reported on the image path", async () => {
+    const { core, c, usage } = makeImages();
+    c.imageScript = [{ type: "rate_limit", fiveHour: { utilization: 0.4, resetsAt: 5 }, sevenDay: { utilization: 1, resetsAt: 9 } }, ...IMG_OK];
+    await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    expect(usage.windows("c").five_hour!.utilization).toBe(0.4);
+    expect(usage.windows("c").seven_day!.utilization).toBe(1);
+    expect(core.listModels().find((m) => m.name === "c-image")).toMatchObject({ overBudget: true, available: true });
+  });
   it("honours an explicit retry-after on the chat path as well", async () => {
     let t = 1_000_000;
     const { core, a } = make({ now: () => t });

@@ -143,13 +143,17 @@ export class Core {
   // the reset is days away would probe uselessly. One minute of slack covers
   // clock skew between the gateway and the provider. Strikes still grow so a
   // provider that lies about its reset keeps backing off once the wait ends.
+  // A pause only ever grows until it expires: with concurrency above one, a
+  // second 429 from a request already past the gate (a short-window reset, or
+  // a bare 429) must not cut a multi-day quota pause down to a minute. A
+  // negative retry-after (a reset already in the past, or a provider clock
+  // ahead of ours) is treated as zero so the minute of slack still applies.
   private onError(id: string, s: State, kind: ErrorKind, retryAfterS?: number) {
     if (kind === "rate_limited") {
-      const backoffMinutes = Math.min(30, 2 ** s.strikes);
+      const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** s.strikes) * 60_000;
       s.strikes++;
-      const waitMs = retryAfterS !== undefined ? (retryAfterS + 60) * 1000 : backoffMinutes * 60_000;
-      s.pausedUntil = this.now() + waitMs;
-      this.opts.log.warn({ provider: id, seconds: Math.round(waitMs / 1000), explicit: retryAfterS !== undefined, strikes: s.strikes }, "provider paused after rate limit");
+      s.pausedUntil = Math.max(s.pausedUntil ?? 0, this.now() + waitMs);
+      this.opts.log.warn({ provider: id, seconds: Math.round((s.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: s.strikes }, "provider paused after rate limit");
     } else if (kind === "auth_expired") {
       s.health = { ok: false, kind, detail: "auth_expired reported by a request", checkedAt: this.now() };
       this.opts.log.error({ provider: id }, "provider authentication expired");
