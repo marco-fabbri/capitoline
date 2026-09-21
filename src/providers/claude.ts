@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { ErrorKind, InternalRequest, ProviderEvent, RateLimitWindow } from "../core/types.js";
-import { effortArgs, effortValue, jsonLines, type Adapter, type Command, type ModelSpec } from "./adapter.js";
+import { effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ModelSpec } from "./adapter.js";
 import { classifyError, isModelScoped } from "./errors.js";
 
 // The HTTP status the CLI puts in the result when the API refused the call.
@@ -33,7 +33,12 @@ export const claudeAdapter: Adapter = {
     args.push(...effortArgs(cfg, effortValue(cfg, model, req.effort)));
     let prompt = flatten(rest);
     if (system) {
-      if (cfg.system_prompt_flag) args.push(cfg.system_prompt_flag, system);
+      // Both keys through the shared helper: `--system-prompt <text>` today,
+      // because this provider declares no prefix, and the override form the
+      // day the file declares one. Reading only the flag here made the prefix
+      // a key the file could set and the process ignore.
+      const sys = systemPromptArgs(cfg, system);
+      if (sys.length) args.push(...sys);
       else prompt = `System instructions:\n${system}\n\n${prompt}`;
     }
     return { args, stdin: prompt };

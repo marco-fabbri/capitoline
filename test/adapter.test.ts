@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { loadConfig, type ProviderConfig } from "../src/config.js";
-import { effortValue, jsonLines, modelSpecs, type ModelSpec } from "../src/providers/adapter.js";
+import { effortValue, jsonLines, modelSpecs, systemPromptArgs, type ModelSpec } from "../src/providers/adapter.js";
 
 const base = loadConfig("config/capitoline.yaml").providers.claude;
 // The cast is the point of these cases: a table missing a level is what the
@@ -36,6 +36,40 @@ describe("effortValue", () => {
     expect(effortValue(base, model(["low", "high"]), "medium")).toEqual({ effort: "high", value: "high" });
     const cfg = withEffort({ low: "L", high: "H" });
     expect(effortValue(cfg, model(), "medium")).toEqual({ effort: "high", value: "H" });
+  });
+});
+
+describe("systemPromptArgs", () => {
+  // One implementation for all three adapters: before it, only codex.ts read
+  // the prefix, so a `-c` on the host's `providers.claude` block validated and
+  // changed nothing on the command line.
+  const withFlags = (flag: string | null, prefix: string | null): ProviderConfig =>
+    ({ ...base, system_prompt_flag: flag, system_prompt_flag_prefix: prefix });
+
+  it("passes the text after the flag when the provider declares no prefix", () => {
+    expect(systemPromptArgs(withFlags("--system-prompt", null), 'Be "terse"')).toEqual(["--system-prompt", 'Be "terse"']);
+  });
+  it("builds a quoted configuration override when the provider declares a prefix", () => {
+    expect(systemPromptArgs(withFlags("developer_instructions", "-c"), 'Say "hi"\nthen stop'))
+      .toEqual(["-c", 'developer_instructions="Say \\"hi\\"\\nthen stop"']);
+    expect(systemPromptArgs(withFlags("developer_instructions", "--config"), "S"))
+      .toEqual(["--config", 'developer_instructions="S"']);
+  });
+  it("replaces what TOML cannot carry, and only in the override form", () => {
+    const text = "lone \uD800 and \u007F";
+    expect(systemPromptArgs(withFlags("developer_instructions", "-c"), text))
+      .toEqual(["-c", 'developer_instructions="lone � and �"']);
+    // A bare flag hands the text to the CLI as its own argument: no TOML
+    // parser ever reads it, so nothing is replaced and the prompt arrives
+    // exactly as the client wrote it.
+    expect(systemPromptArgs(withFlags("--system-prompt", null), text)).toEqual(["--system-prompt", text]);
+  });
+  it("returns nothing when the provider names no key for the system prompt", () => {
+    // The caller then prepends the text to the prompt, which is all that is
+    // left to do with it. The second pair is refused by the configuration (a
+    // prefix with no flag to introduce); the helper still has to answer.
+    expect(systemPromptArgs(withFlags(null, null), "S")).toEqual([]);
+    expect(systemPromptArgs(withFlags(null, "-c"), "S")).toEqual([]);
   });
 });
 

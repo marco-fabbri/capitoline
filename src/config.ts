@@ -60,7 +60,12 @@ const ProviderSchema = z.object({
   // bare value: Codex takes it as a configuration override, -c
   // model_reasoning_effort="high", not as a flag of its own.
   effort_key: z.string().min(1).nullable(),
-  system_prompt_flag: z.string().nullable(),
+  // The key the system prompt travels under, or null when the CLI takes no
+  // system prompt at all and it is prepended to the user prompt. min(1) for
+  // the same reason as the flags above: an empty string parses, and the
+  // adapter then builds `-c ="<text>"` — unparsable TOML, which kills every
+  // run carrying a system prompt — or a bare empty argument.
+  system_prompt_flag: z.string().min(1).nullable(),
   // The flag that introduces the system prompt override, or null when
   // `system_prompt_flag` is passed as a bare flag followed by the text
   // (Claude: `--system-prompt <text>`). Set, the argument becomes
@@ -118,6 +123,14 @@ export const ConfigSchema = z
       } else if (p.models[p.health_model].kind !== "text") {
         // The health check is a chat request; an image model would burn image quota and fail.
         ctx.addIssue({ code: "custom", path: ["providers", id, "health_model"], message: `health_model "${p.health_model}" must be a text model` });
+      }
+      // The two system-prompt keys are one setting: the prefix exists only to
+      // introduce `<system_prompt_flag>="<text>"`, so with no flag to name
+      // there is nothing for it to carry. It would be dropped in silence and
+      // the system prompt would go back to being prepended to the user
+      // prompt, while the file says it travels as a configuration override.
+      if (p.system_prompt_flag_prefix !== null && p.system_prompt_flag === null) {
+        ctx.addIssue({ code: "custom", path: ["providers", id, "system_prompt_flag_prefix"], message: `provider ${id} sets system_prompt_flag_prefix but no system_prompt_flag for it to introduce` });
       }
       if (Object.values(p.models).some((m) => m.kind === "image") && !p.image.collect) {
         ctx.addIssue({ code: "custom", path: ["providers", id, "image", "collect"], message: `provider ${id} has image models but no image.collect command` });

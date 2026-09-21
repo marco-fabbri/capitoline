@@ -136,6 +136,25 @@ describe("claude adapter", () => {
     expect(c.args).not.toContain("Be terse.");       // nowhere on the command line
     expect(c.stdin).toBe("System instructions:\nBe terse.\n\nhi");
   });
+  it("reads the system prompt prefix from the configuration instead of ignoring it", () => {
+    // Today's value is null, which is why the cases above see
+    // `--system-prompt <text>`. The key is required in every provider block,
+    // and while only codex.ts read it, a `system_prompt_flag_prefix: -c` on
+    // the host's `providers.claude` block passed `npm run check-config` and
+    // changed nothing at all: the file said the prompt travelled as an
+    // override, the process still passed it bare, and the validation was
+    // silent. Not a command line the Claude CLI accepts — the point is that a
+    // key the file declares reaches the command line the adapter builds.
+    expect(cfg.system_prompt_flag_prefix).toBeNull();
+    const withPrefix = { ...cfg, system_prompt_flag_prefix: "-c" };
+    const c = claudeAdapter.buildCommand(withPrefix, opus, {
+      model: "claude-opus", stream: false,
+      messages: [{ role: "system", text: "Be terse." }, { role: "user", text: "hi" }],
+    });
+    expect(c.args.slice(-2)).toEqual(["-c", '--system-prompt="Be terse."']);
+    expect(c.args.indexOf("Be terse.")).toBe(-1);   // never as a bare argument
+    expect(c.stdin).toBe("hi");
+  });
   it("renders a multi-turn conversation with role markers, system prompt aside", () => {
     // Every other case here sends one user message, which takes flatten()'s
     // shortcut and never builds a marker. With a real conversation the markers

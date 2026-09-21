@@ -1,21 +1,8 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { InternalRequest, ProviderEvent } from "../core/types.js";
-import { effortArgs, effortValue, jsonLines, type Adapter, type Command, type ModelSpec } from "./adapter.js";
+import { effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
-
-// What a TOML basic string cannot carry and JSON.stringify does not fix for
-// us: a surrogate with no partner on the other side (in either direction),
-// which stringify escapes verbatim as \uD800 — no Unicode scalar, so TOML
-// rejects it — and U+007F (DEL), which stringify passes through raw although
-// TOML forbids it exactly like the control characters below U+0020 that
-// stringify does escape. Everything else a client can send is already safe.
-const TOML_UNSAFE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|\u007F/g;
-
-/** A TOML basic string for `-c key=<value>`, safe for any client text. */
-function tomlString(s: string): string {
-  return JSON.stringify(s.replace(TOML_UNSAFE, "�"));
-}
 
 // What the CLI said, from an event whose `error` is an object with a message,
 // a bare string (a 429 has been reported that way) or nothing at all. The
@@ -39,18 +26,13 @@ export const codexAdapter: Adapter = {
     args.push(...effortArgs(cfg, effortValue(cfg, model, req.effort)));
     let prompt = flatten(rest);
     if (system) {
-      // JSON string escapes are a subset of TOML basic-string escapes, with
-      // two exceptions, both of which a client can send (the system prompt is
-      // its text) and either of which would kill the whole run on an
-      // unparsable override instead of answering: an unpaired surrogate and a
-      // raw DEL. tomlString replaces both before quoting — but only for the
-      // override form, since a bare flag carries the text as it is and no TOML
-      // parser ever sees it.
-      if (cfg.system_prompt_flag && cfg.system_prompt_flag_prefix) {
-        args.push(cfg.system_prompt_flag_prefix, `${cfg.system_prompt_flag}=${tomlString(system)}`);
-      } else if (cfg.system_prompt_flag) {
-        args.push(cfg.system_prompt_flag, system);
-      } else prompt = `System instructions:\n${system}\n\n${prompt}`;
+      // `-c developer_instructions="<text>"` today, both parts named by the
+      // configuration. The TOML quoting of the client's own text lives in the
+      // helper, next to the bare form the CLIs that take the system prompt as
+      // a flag of their own use, so one implementation reads both keys.
+      const sys = systemPromptArgs(cfg, system);
+      if (sys.length) args.push(...sys);
+      else prompt = `System instructions:\n${system}\n\n${prompt}`;
     }
     args.push("-");
     return { args, stdin: prompt };

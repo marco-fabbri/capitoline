@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.js";
-import { effortArgs, effortValue, jsonLines, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
+import { effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
 // The CLI is an agent: the prompt names the one tool it may use and forbids
@@ -24,7 +24,16 @@ export const antigravityAdapter: Adapter = {
     // written into the file later reaches those models without a code change.
     if (!model.effortSuffix) args.push(...effortArgs(cfg, eff));
     let prompt = flatten(rest);
-    if (system) prompt = `System instructions:\n${system}\n\n${prompt}`;
+    // The same shared helper the other two adapters use. This provider
+    // declares neither key, so the system prompt is prepended to the prompt —
+    // but a flag written into the file later reaches the CLI without a code
+    // change, and a prefix set on this block can no longer pass check-config
+    // and then be ignored here.
+    if (system) {
+      const sys = systemPromptArgs(cfg, system);
+      if (sys.length) args.push(...sys);
+      else prompt = `System instructions:\n${system}\n\n${prompt}`;
+    }
     const stdin = JSON.stringify({ event: "user", message: { role: "user", content: prompt } }) + "\n";
     return { args, stdin };
   },

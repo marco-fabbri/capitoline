@@ -97,14 +97,56 @@ export function effortValue(cfg: ProviderConfig, model: ModelSpec, wanted: Effor
  * and `<flag> <key>="<value>"` when `effort_key` is set, because the CLI takes
  * the effort as a configuration override rather than as a flag of its own.
  * The quoted form goes through JSON.stringify, as the system prompt does in
- * codex.ts: JSON string escapes are a subset of TOML's, so a value holding a
- * quote or a backslash still produces a valid override instead of a run that
- * fails on unparsable TOML. Values reach here from the configuration's effort
+ * systemPromptArgs below: JSON string escapes are a subset of TOML's, so a
+ * value holding a quote or a backslash still produces a valid override instead
+ * of a run that fails on unparsable TOML. Values reach here from the configuration's effort
  * table, never from a request, which only picks the level.
  */
 export function effortArgs(cfg: ProviderConfig, eff: { value: string } | null): string[] {
   if (!eff || !cfg.effort_flag) return [];
   return [cfg.effort_flag, cfg.effort_key === null ? eff.value : `${cfg.effort_key}=${JSON.stringify(eff.value)}`];
+}
+
+// What a TOML basic string cannot carry and JSON.stringify does not fix for
+// us: a surrogate with no partner on the other side (in either direction),
+// which stringify escapes verbatim as \uD800 — no Unicode scalar, so TOML
+// rejects it — and U+007F (DEL), which stringify passes through raw although
+// TOML forbids it exactly like the control characters below U+0020 that
+// stringify does escape. Everything else a client can send is already safe.
+const TOML_UNSAFE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|\u007F/g;
+
+/** A TOML basic string for `<prefix> key=<value>`, safe for any client text. */
+function tomlString(s: string): string {
+  return JSON.stringify(s.replace(TOML_UNSAFE, "\uFFFD"));
+}
+
+/**
+ * The arguments that carry the system prompt to the CLI, both flags named by
+ * the configuration: none when the provider declares no `system_prompt_flag`
+ * — the caller then prepends the text to the prompt itself, which is the only
+ * thing left to do with it — `<flag> <text>` when `system_prompt_flag_prefix`
+ * is null, and `<prefix> <flag>="<text>"` when it is set, because the CLI
+ * takes the system prompt as a configuration override rather than as a flag
+ * of its own (Codex: `-c developer_instructions="..."`).
+ *
+ * Shared by every adapter on purpose, like effortArgs above. The key is
+ * required in every provider block, so while only codex.ts read it a `-c` on
+ * the `providers.claude` block of the host's file passed `check-config` and
+ * changed nothing on the command line: the file said one thing and the process
+ * did another, with the validation silent — the drift the key exists to stop,
+ * turned around. One implementation reads it for all three.
+ *
+ * Only the override form goes through `tomlString`: JSON string escapes are a
+ * subset of TOML basic-string escapes, with two exceptions a client can send
+ * inside its system prompt (an unpaired surrogate and a raw DEL), either of
+ * which would kill the whole run on an unparsable override instead of
+ * answering. A bare flag carries the text as it is and no TOML parser ever
+ * sees it.
+ */
+export function systemPromptArgs(cfg: ProviderConfig, system: string): string[] {
+  if (!cfg.system_prompt_flag) return [];
+  if (cfg.system_prompt_flag_prefix === null) return [cfg.system_prompt_flag, system];
+  return [cfg.system_prompt_flag_prefix, `${cfg.system_prompt_flag}=${tomlString(system)}`];
 }
 
 export function modelSpecs(providerId: string, cfg: ProviderConfig): ModelSpec[] {

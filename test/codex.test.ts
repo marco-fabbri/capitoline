@@ -39,19 +39,15 @@ describe("codex adapter", () => {
     const req = { model: "codex-gpt-6-astra", stream: false, effort: "low" as const, messages: [{ role: "system" as const, text: "S" }, { role: "user" as const, text: "q" }] };
     expect(codexAdapter.buildCommand(cfg, astra, req).args.slice(cfg.args.length))
       .toEqual(["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="low"', "-c", 'developer_instructions="S"', "-"]);
+    // Only the override form is asserted here: ADAPTERS maps this adapter to
+    // the `codex` provider alone, so the CLI it serves is the real one, which
+    // takes the system prompt as `-c developer_instructions="..."` and not as
+    // a bare `developer_instructions "<text>"` beside the `-`. The bare form
+    // is exercised where it is real, on claude.ts, and on the shared helper.
     const renamed = { ...cfg, system_prompt_flag_prefix: "--config" };
     const c = codexAdapter.buildCommand(renamed, astra, req);
     expect(c.args.slice(cfg.args.length))
       .toEqual(["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="low"', "--config", 'developer_instructions="S"', "-"]);
-    expect(c.stdin).toBe("q");
-  });
-  it("passes the system prompt as a bare flag when the provider declares no prefix", () => {
-    // A null prefix is how a CLI that takes the system prompt as a flag of its
-    // own is declared: flag and text, no key="value" and no TOML quoting.
-    const bare = { ...cfg, system_prompt_flag: "--system-prompt", system_prompt_flag_prefix: null };
-    const c = codexAdapter.buildCommand(bare, astra, { model: "codex-gpt-6-astra", stream: false, messages: [{ role: "system", text: 'S "x"' }, { role: "user", text: "q" }] });
-    expect(c.args.slice(cfg.args.length))
-      .toEqual(["-m", "gpt-6-astra", "-c", 'model_reasoning_effort="medium"', "--system-prompt", 'S "x"', "-"]);
     expect(c.stdin).toBe("q");
   });
   it("passes a bare effort value when the provider declares no effort key", () => {

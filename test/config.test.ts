@@ -81,8 +81,39 @@ describe("config", () => {
     // a bare argument, which is the drift the other three keys exist to stop.
     expect(() => parseConfig(config({ system_prompt_flag_prefix: null }))).toThrow(/providers\.x\.system_prompt_flag_prefix/);
     expect(() => parseConfig(config({ system_prompt_flag_prefix: '""' }))).toThrow(/providers\.x\.system_prompt_flag_prefix/);
+    // And for the key it introduces: with `system_prompt_flag: ""` the adapter
+    // builds `-c ="<text>"`, TOML the CLI cannot parse, so every run carrying
+    // a system prompt dies on the client's own text.
+    expect(() => parseConfig(config({ system_prompt_flag: '""' }))).toThrow(/providers\.x\.system_prompt_flag/);
     const p = parseConfig(config({ effort_flag: "-c", effort_key: "model_reasoning_effort", system_prompt_flag: "developer_instructions", system_prompt_flag_prefix: "-c" })).providers.x;
     expect([p.model_flag, p.effort_flag, p.effort_key, p.system_prompt_flag_prefix]).toEqual(["--model", "-c", "model_reasoning_effort", "-c"]);
+  });
+  it("refuses a system prompt prefix with no flag for it to introduce", () => {
+    // The two keys are one setting: the prefix only ever introduces
+    // `<system_prompt_flag>="<text>"`. With the flag null it names nothing, so
+    // it would be dropped in silence and the system prompt would go back to
+    // being prepended to the user prompt, while the file says it travels to
+    // the CLI as a configuration override.
+    expect(() => parseConfig(config({ system_prompt_flag: "null", system_prompt_flag_prefix: "-c" })))
+      .toThrow(/providers\.x\.system_prompt_flag_prefix/);
+    // The pair the other way round is how Claude is declared: a flag that
+    // carries the text itself needs no prefix.
+    const p = parseConfig(config({ system_prompt_flag: "--system-prompt", system_prompt_flag_prefix: "null" })).providers.x;
+    expect([p.system_prompt_flag, p.system_prompt_flag_prefix]).toEqual(["--system-prompt", null]);
+  });
+  it("names Codex's override flag with one value everywhere it appears", () => {
+    // `-c` is written three times in the codex block: inside `args` (the fixed
+    // overrides), as `effort_flag` and as `system_prompt_flag_prefix`. They
+    // are one flag of one CLI, so a rename reaching only some of them would
+    // validate and build a mixed command line on the host, half `-c` and half
+    // the new name. Pinned here so a partial rename fails in CI instead.
+    for (const file of ["config/capitoline.yaml", "test/e2e.config.yaml"]) {
+      const codex = loadConfig(file).providers.codex;
+      // The `args` entries that introduce a key="value" override, by shape.
+      const carriers = codex.args.filter((_, i) => /^[A-Za-z_][\w.]*=/.test(codex.args[i + 1] ?? ""));
+      expect(carriers.length).toBeGreaterThan(0);
+      expect([...new Set([...carriers, codex.effort_flag, codex.system_prompt_flag_prefix])]).toEqual(["-c"]);
+    }
   });
   it("defaults a model's kind to text with no per-model timeout", () => {
     const m = parseConfig(config()).providers.x.models.a;

@@ -325,20 +325,34 @@ Edit `/etc/capitoline/capitoline.yaml`:
 | `server.access.team_domain`, `server.access.audience` | filled in §9; both empty until then |
 
 Everything else (flags, model aliases, effort mapping) stays as in the
-repository copy; it is the verified set for the CLI versions in
-`docs/update-clis.md`.
+repository copy, including the keys an update adds to it: they are not
+optional and must be copied across (next paragraph). It is the verified set
+for the CLI versions in `docs/update-clis.md`.
 
 **Keys added by an update must be copied across.** This file is a hand-made
 copy, edited in place; a `git pull` changes the repository copy and never this
-one. `providers.<id>.model_flag`, `effort_flag` and `effort_key` are new (task
-B1): they name the flags that used to be literals in the adapters, so the
-values to copy are `--model` / `--effort` / `null` for `claude`, `-m` / `-c` /
-`model_reasoning_effort` for `codex`, `--model` / `null` / `null` for
-`antigravity` — the command lines the host already runs. The schema gives them
-no default on purpose: a file without them is rejected by `check-config` with
-`providers.codex.model_flag: Required`, instead of validating and quietly
-invoking `codex --model <id>` with no reasoning-effort override. After every
-`git pull`, before the restart:
+one. Four keys are new, in every one of the three provider blocks:
+`providers.<id>.model_flag`, `effort_flag` and `effort_key` (task B1), and
+`system_prompt_flag_prefix` with them. They name the flags that used to be
+literals in the adapters, so the values to copy are the command lines the host
+already runs:
+
+| Provider | `model_flag` | `effort_flag` | `effort_key` | `system_prompt_flag_prefix` |
+|---|---|---|---|---|
+| `claude` | `--model` | `--effort` | `null` | `null` |
+| `codex` | `-m` | `-c` | `model_reasoning_effort` | `-c` |
+| `antigravity` | `--model` | `null` | `null` | `null` |
+
+`null` is a value here, not a missing key: it says the CLI has no such flag,
+and the key must still be present. The schema gives the four no default on
+purpose: a file without them is rejected by `check-config` naming each one
+missing (`providers.claude.system_prompt_flag_prefix: Required`), instead of
+validating and quietly invoking `codex --model <id>` with no reasoning-effort
+override, or passing Codex's system prompt as a bare argument with the `-c`
+that carries it dropped. The price of that choice is this paragraph: restart
+the service before copying the keys across and it exits on the same message,
+which under `Restart=always` (§8) is a restart loop whose only trace is the
+journal. After every `git pull`, before the restart:
 
 ```sh
 diff /var/lib/capitoline/app/config/capitoline.yaml /etc/capitoline/capitoline.yaml
