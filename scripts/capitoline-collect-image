@@ -1,0 +1,13 @@
+#!/bin/bash
+# capitoline-collect-image <conversation-uuid>
+# Prints the newest image_* file of that Antigravity conversation to stdout, then removes the
+# conversation directory. Run as `runner` through sudo; the only argument must be a UUID.
+set -euo pipefail
+cid="${1:-}"
+[[ "$cid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "bad conversation id" >&2; exit 2; }
+dir="$HOME/.gemini/antigravity-cli/brain/$cid"
+[ -d "$dir" ] || { echo "no such conversation" >&2; exit 3; }
+img=$(ls -t "$dir"/image_* 2>/dev/null | head -1 || true)
+[ -n "$img" ] || { rm -rf "$dir"; echo "no image produced" >&2; exit 4; }
+cat "$img"
+rm -rf "$dir"
