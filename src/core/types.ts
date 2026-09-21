@@ -27,8 +27,13 @@ export type ProviderEvent =
   // retryAfterS: an explicit wait the CLI reported (quota reset); absent when unknown.
   | { type: "error"; kind: ErrorKind; detail: string; retryAfterS?: number }
   | { type: "rate_limit"; fiveHour?: RateLimitWindow; sevenDay?: RateLimitWindow }
-  | { type: "image"; mime: ImageMime; bytes: Buffer; width: number; height: number }
-  // Adapter-internal events: consumed by the provider, never forwarded to Core.
+  | { type: "image"; mime: ImageMime; bytes: Buffer; width: number; height: number };
+
+// What an adapter's parse() may yield: the provider events plus adapter-internal
+// ones (conversation id, tool steps). A Provider only ever yields ProviderEvent,
+// so the compiler forces every provider to consume meta/tool before forwarding.
+export type AdapterEvent =
+  | ProviderEvent
   | { type: "meta"; conversationId: string }
   | { type: "tool"; phase: "call" | "done" | "error"; name: string; raw: string };
 

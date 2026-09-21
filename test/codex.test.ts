@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { codexAdapter } from "../src/providers/codex.js";
 import { loadConfig } from "../src/config.js";
 import { modelSpecs } from "../src/providers/adapter.js";
-import type { ProviderEvent } from "../src/core/types.js";
+import type { AdapterEvent } from "../src/core/types.js";
 
 const cfg = loadConfig("config/capitoline.yaml").providers.codex;
 const astra = modelSpecs("codex", cfg).find((m) => m.name === "codex-gpt-6-astra")!;
 async function* linesOf(path: string) { for (const l of readFileSync(path, "utf8").split("\n")) yield l; }
-async function events(src: AsyncIterable<string>) { const out: ProviderEvent[] = []; for await (const e of codexAdapter.parse(src)) out.push(e); return out; }
+async function events(src: AsyncIterable<string>) { const out: AdapterEvent[] = []; for await (const e of codexAdapter.parse(src)) out.push(e); return out; }
 
 describe("codex adapter", () => {
   it("builds the command with model, effort override, developer instructions and stdin prompt", () => {

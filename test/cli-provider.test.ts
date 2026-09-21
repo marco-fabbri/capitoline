@@ -83,6 +83,21 @@ describe("CliProvider", () => {
     expect(await spy.handles[0]!.result).toMatchObject({ aborted: true, timedOut: false });
     expect(Date.now() - t0).toBeLessThan(2000);
   });
+  it("drops adapter-internal meta and tool events from a text run", async () => {
+    const chatty: Adapter = {
+      buildCommand: (cfg) => ({ args: cfg.args, stdin: "" }),
+      async *parse(lines) {
+        for await (const _ of jsonLines(lines)) { /* drain */ }
+        yield { type: "meta", conversationId: "c1" };
+        yield { type: "tool", phase: "call", name: "generate_image", raw: "{}" };
+        yield { type: "text", delta: "hi" };
+        yield { type: "tool", phase: "done", name: "generate_image", raw: "{}" };
+        yield { type: "done" };
+      },
+    };
+    const ev = await run(provider("replay", {}, runner, chatty));
+    expect(ev).toEqual([{ type: "text", delta: "hi" }, { type: "done" }]);
+  });
   it("writes attachments into the sandbox as attachment-<n>.<ext>", async () => {
     // Adapter that turns the fake CLI's "cwd" listing into a text event.
     const listing: Adapter = {
@@ -135,6 +150,12 @@ describe("buildProviders", () => {
     };
     expect(() => buildProviders({ ...config, providers: { codex: withImage } }, runner, createLogger("t")))
       .toThrow(/provider "codex" has image models but its adapter cannot generate images/);
+  });
+  it("throws when a provider has image models but no image.collect command", () => {
+    const agy = config.providers.antigravity;
+    const noCollect = { ...agy, image: { ...agy.image, collect: undefined } };
+    expect(() => buildProviders({ ...config, providers: { antigravity: noCollect } }, runner, createLogger("t")))
+      .toThrow(/provider "antigravity" has image models but no image.collect command/);
   });
   it("copies kind and timeoutS into the model specs", () => {
     const ps = buildProviders(config, runner, createLogger("t"));

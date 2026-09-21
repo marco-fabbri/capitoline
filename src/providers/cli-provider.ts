@@ -55,6 +55,9 @@ export class CliProvider implements Provider {
     let terminal = false;
     try {
       for await (const ev of this.adapter.parse(handle.lines)) {
+        // Adapter-internal events stay here: a text run has no use for them and
+        // the Provider contract (AsyncIterable<ProviderEvent>) forbids forwarding them.
+        if (ev.type === "meta" || ev.type === "tool") continue;
         if (ev.type === "done" || ev.type === "error") terminal = true;
         yield ev;
         if (terminal) return; // do not wait for the process: the answer is complete

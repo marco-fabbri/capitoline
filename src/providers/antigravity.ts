@@ -1,6 +1,6 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
-import type { ImageRequest, InternalRequest, ProviderEvent } from "../core/types.js";
+import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.js";
 import { effortValue, jsonLines, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
@@ -29,7 +29,7 @@ export const antigravityAdapter: Adapter = {
     return { args, stdin };
   },
 
-  async *parse(lines): AsyncIterable<ProviderEvent> {
+  async *parse(lines): AsyncIterable<AdapterEvent> {
     for await (const o of jsonLines(lines)) {
       const event = o.event;
       if (event === "step_update") {

@@ -3,14 +3,14 @@ import { readFileSync } from "node:fs";
 import { claudeAdapter } from "../src/providers/claude.js";
 import { loadConfig } from "../src/config.js";
 import { modelSpecs } from "../src/providers/adapter.js";
-import type { ProviderEvent } from "../src/core/types.js";
+import type { AdapterEvent } from "../src/core/types.js";
 
 const cfg = loadConfig("config/capitoline.yaml").providers.claude;
 const models = modelSpecs("claude", cfg);
 const opus = models.find((m) => m.name === "claude-opus")!;
 
 async function* linesOf(path: string) { for (const l of readFileSync(path, "utf8").split("\n")) yield l; }
-async function events(path: string) { const out: ProviderEvent[] = []; for await (const e of claudeAdapter.parse(linesOf(path))) out.push(e); return out; }
+async function events(path: string) { const out: AdapterEvent[] = []; for await (const e of claudeAdapter.parse(linesOf(path))) out.push(e); return out; }
 
 describe("claude adapter", () => {
   it("builds the command with model, effort and system prompt, prompt on stdin", () => {
@@ -46,7 +46,7 @@ describe("claude adapter", () => {
   });
   it("maps an error result to a typed error", async () => {
     async function* l() { yield JSON.stringify({ type: "result", is_error: true, subtype: "error_during_execution", result: "Login expired · Please run /login" }); }
-    const out: ProviderEvent[] = []; for await (const e of claudeAdapter.parse(l())) out.push(e);
+    const out: AdapterEvent[] = []; for await (const e of claudeAdapter.parse(l())) out.push(e);
     expect(out).toEqual([{ type: "error", kind: "auth_expired", detail: "Login expired · Please run /login" }]);
   });
 });

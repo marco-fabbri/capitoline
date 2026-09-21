@@ -1,6 +1,6 @@
 import type { Effort, ModelKind, ProviderConfig } from "../config.js";
 import { nearestEffort } from "../core/prompt.js";
-import type { ErrorKind, ImageRequest, InternalRequest, ProviderEvent } from "../core/types.js";
+import type { AdapterEvent, ErrorKind, ImageRequest, InternalRequest, ProviderEvent } from "../core/types.js";
 
 export type { ModelKind };
 export interface ModelSpec {
@@ -18,7 +18,8 @@ export type ImageCommand = Command;
 
 export interface Adapter {
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command;
-  parse(lines: AsyncIterable<string>): AsyncIterable<ProviderEvent>;
+  /** May yield adapter-internal events (meta, tool); the provider consumes them. */
+  parse(lines: AsyncIterable<string>): AsyncIterable<AdapterEvent>;
   /** Present only for adapters whose CLI can generate images. */
   buildImageCommand?(cfg: ProviderConfig, model: ModelSpec, req: ImageRequest): ImageCommand;
 }

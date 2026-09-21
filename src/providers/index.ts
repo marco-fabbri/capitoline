@@ -14,10 +14,13 @@ export function buildProviders(cfg: Config, runner: Runner, log: Logger): Provid
     const adapter = ADAPTERS[id];
     if (!adapter) throw new Error(`no adapter for provider "${id}" (known: ${Object.keys(ADAPTERS).join(", ")})`);
     // Caught at startup rather than on the first image request: an image model
-    // on a text-only CLI is a configuration mistake, not a runtime condition.
-    if (Object.values(pc.models).some((m) => m.kind === "image") && !adapter.buildImageCommand) {
-      throw new Error(`provider "${id}" has image models but its adapter cannot generate images`);
-    }
+    // on a text-only CLI, or without a collect command, is a configuration
+    // mistake, not a runtime condition. The collect check duplicates the config
+    // schema's refinement on purpose: providers can be built from a hand-made
+    // config that never went through parseConfig.
+    const hasImage = Object.values(pc.models).some((m) => m.kind === "image");
+    if (hasImage && !adapter.buildImageCommand) throw new Error(`provider "${id}" has image models but its adapter cannot generate images`);
+    if (hasImage && !pc.image.collect) throw new Error(`provider "${id}" has image models but no image.collect command`);
     return new CliProvider(id, pc, adapter, runner, log.child({ provider: id }));
   });
 }

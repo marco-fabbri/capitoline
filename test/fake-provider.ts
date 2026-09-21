@@ -10,7 +10,15 @@ export class FakeProvider implements Provider {
   imageScript: ProviderEvent[] = [];
   healthResult: HealthStatus = { ok: true, checkedAt: 0 };
   delayMs = 0;
-  constructor(readonly id: string, private modelList: FakeModel[], public script: Script, readonly concurrencyLimit = 1) {}
+  // Present only when the fake declares an image model, like a real provider
+  // whose adapter cannot generate images: Core's "provider without generateImage"
+  // branch needs a fake that lacks the method.
+  generateImage?: (req: ImageRequest, m: ModelSpec, signal?: AbortSignal) => AsyncIterable<ProviderEvent>;
+  constructor(readonly id: string, private modelList: FakeModel[], public script: Script, readonly concurrencyLimit = 1) {
+    if (modelList.some((m) => typeof m !== "string" && m.kind === "image")) {
+      this.generateImage = (req, _m, signal) => { this.imageCalls.push(req); return this.play(this.imageScript, signal); };
+    }
+  }
   models(): ModelSpec[] {
     return this.modelList.map((m) => {
       const { name, kind } = typeof m === "string" ? { name: m, kind: "text" as const } : m;
@@ -21,10 +29,6 @@ export class FakeProvider implements Provider {
     this.calls.push(req);
     const events = typeof this.script === "function" ? this.script(req) : this.script;
     yield* this.play(events, signal);
-  }
-  async *generateImage(req: ImageRequest, _m: ModelSpec, signal?: AbortSignal): AsyncIterable<ProviderEvent> {
-    this.imageCalls.push(req);
-    yield* this.play(this.imageScript, signal);
   }
   private async *play(events: ProviderEvent[], signal?: AbortSignal): AsyncIterable<ProviderEvent> {
     for (const ev of events) {
