@@ -18,8 +18,10 @@ Three steps need the owner with a browser on the Mac: `claude setup-token`
 Debian 13 or Ubuntu 24.04, 2 cores, 4 GB RAM, 20 GB disk, outbound
 internet, no inbound ports. Where the variants differ:
 
-- Proxmox LXC: unprivileged, nesting off. Inbound comes only through the
-  tunnel, so the container does not need any port forwarded.
+- Proxmox LXC: unprivileged, with `features: nesting=1`. Without nesting,
+  systemd 257 on Debian 13 does not start cleanly in an unprivileged
+  container (`pct create ... --unprivileged 1 --features nesting=1`).
+  Inbound comes only through the tunnel, so no port is forwarded.
 - Nutanix AHV: a cloud-init Debian/Ubuntu image, VirtIO disk and NIC.
 - Bare metal: nothing special.
 
@@ -218,8 +220,13 @@ sudo -Hu runner env | grep DBUS      # must print the bus address
 (`/etc/capitoline` is created in §7; create it first if you are following
 this section before that one.)
 
-**d. Login, once, over SSH.** The CLI prints a URL; open it on the Mac,
-sign in, paste the code back.
+**d. Login, once, over SSH, by the owner.** The CLI prints a URL; open it
+on the Mac, sign in, paste the code back. Do this from an interactive SSH
+session of your own: in `-p` mode the CLI waits only 60 s for the code and
+the URL is bound to that single run (PKCE), so relaying the URL and the code
+through a chat or a ticket does not fit in the window, and without a TTY the
+CLI refuses to start the login at all ("authentication required. Run 'agy'
+to log in").
 
 ```sh
 sudo -iu runner agy       # complete the URL/code flow, then /quit
@@ -239,7 +246,11 @@ status gnome-keyring.service` and `journalctl --user-unit gnome-keyring
 
 Record here what made it work on the first host, with the date:
 
-- Verified on: _(fill in at deployment: distribution, gnome-keyring version, date)_
+- Verified on: Debian 13.6 unprivileged LXC (Proxmox 9.2, `nesting=1`),
+  gnome-keyring 48.0, dbus-user-session, 2026-09-21. The login keyring
+  (`~/.local/share/keyrings/login.keyring`) was written by the interactive
+  `agy` login and read back by `agy` started through `sudo -Hu runner` with
+  the `env_file` bus address; reboot test passed 2026-09-21 (`pct reboot`, then `agy` through `sudo -Hu runner` answered without any manual step).
 
 ### 6.4 Antigravity tool permissions
 
