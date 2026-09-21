@@ -8,9 +8,6 @@ had two review findings and both are already fixed in the current code
 (attachment name validation, eager line buffering); the Runner section below is
 not one of them but a later observation from the host, still to be confirmed.
 
-## Providers
-- `src/providers/antigravity.ts`: verify on the host, on a capture where `cache_read_tokens` and `thinking_tokens` are not zero, whether the CLI's own `total_tokens` already includes them. B2 added both to the usage formula (input gains the cached tokens, output the thinking ones) because every fixture in hand has them at zero, so no capture can say which side they sit on; if the CLI counts them already, the formula counts them twice and the budget windows go from understating this provider to overstating it. Reduce it to `input_tokens`/`output_tokens` in that case. Host-only check: nothing in the repository can settle it.
-
 ## Runner
 
 - Observation to confirm on the host: watch `/var/lib/capitoline/sandboxes` while the service is up. The one empty `run-…` directory seen on the Mac now has an explanation and a fix (a grandchild inheriting stdout kept `close` from firing, so the run never settled: `src/runner/runner.ts` bounds that wait since A6), and the startup sweep removes whatever an earlier process left behind — which is exactly why the remaining symptom is a `run-…` directory appearing there *between* two restarts. That means a run that hung rather than one that was killed, and it is the only thing left that would show a second leak path. Nothing else in the repository looks at that directory while the gateway is running.

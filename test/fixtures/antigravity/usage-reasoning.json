@@ -1,0 +1,4 @@
+[
+  {"event":"result","result":{"status":"SUCCESS","usage":{"input_tokens":12887,"output_tokens":397,"thinking_tokens":305,"cache_read_tokens":0,"total_tokens":13284}}},
+  {"event":"result","result":{"status":"SUCCESS","usage":{"input_tokens":4789,"output_tokens":357,"thinking_tokens":307,"cache_read_tokens":8092,"total_tokens":5146}}}
+]

@@ -161,13 +161,30 @@ describe("antigravity adapter", () => {
     })());
     expect(ev.map((e) => e.type)).toEqual(["done"]);
   });
-  it("counts cached and thinking tokens, like the claude adapter", async () => {
-    // The CLI reports them as fields of their own; leaving them out understated
-    // every budget window of this provider as soon as caching kicked in.
-    const ev = await events((async function* () {
-      yield JSON.stringify({ event: "result", result: { status: "SUCCESS", usage: { input_tokens: 10, output_tokens: 2, thinking_tokens: 5, cache_read_tokens: 7, total_tokens: 24 } } });
-    })());
-    expect(ev).toEqual([{ type: "done", usage: { input: 17, output: 7 } }]);
+  it("counts the cached reads as input and the thinking tokens only once", async () => {
+    // The capture that settled it (host, 2026-09-22, gemini-3.1-pro-high, the
+    // same prompt twice so the second run reads cache). Both runs have
+    // non-zero thinking tokens, and the second non-zero cached reads, which is
+    // what no earlier fixture had: the two assertions at the end are the
+    // measurement itself, so a formula that counts the thinking tokens again
+    // or drops the cached reads fails here.
+    const runs = JSON.parse(readFileSync("test/fixtures/antigravity/usage-reasoning.json", "utf8")) as { result: { usage: Record<string, number> } }[];
+    const usage: { input: number; output: number }[] = [];
+    for (const line of runs) {
+      const ev = await events((async function* () { yield JSON.stringify(line); })());
+      expect(ev.map((e) => e.type)).toEqual(["done"]);
+      usage.push((ev[0] as any).usage);
+    }
+    expect(usage[0]).toEqual({ input: 12887, output: 397 });
+    expect(usage[1]).toEqual({ input: 12881, output: 357 });
+    runs.forEach((line, i) => {
+      const u = line.result.usage;
+      // The CLI's own total is input + output, so the thinking tokens are
+      // already inside it and the cached reads are outside it.
+      expect(u.total_tokens).toBe(u.input_tokens + u.output_tokens);
+      expect(u.thinking_tokens).toBeGreaterThan(0);
+      expect(usage[i].input + usage[i].output - u.cache_read_tokens).toBe(u.total_tokens);
+    });
   });
   it("maps the real expired-credential capture to auth_expired", async () => {
     // The capture is the CLI's --print-json result object; in stream mode the

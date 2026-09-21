@@ -88,18 +88,17 @@ export const antigravityAdapter: Adapter = {
           yield { type: "error", kind: classifyError(detail), detail };
           return;
         }
-        // Aligned with claude.ts, which counts cache reads and creations as
-        // input: this CLI reports cached and thinking tokens as fields of
-        // their own (Anthropic's API folds thinking into output_tokens), and
-        // counting only input/output understated every budget window of this
-        // provider as soon as caching or thinking kicked in. Every fixture in
-        // hand has both at zero, so which side the CLI's own total_tokens puts
-        // them on cannot be read off a capture yet; a cache read is input the
-        // turn was billed for and a thinking token is output the model
-        // produced, and both windows are informational (spec 7.1), so the
-        // formula errs towards counting more rather than less.
+        // Measured on the host, 2026-09-22, on the capture in
+        // test/fixtures/antigravity/usage-reasoning.json (gemini-3.1-pro-high,
+        // the same prompt twice so the second run reads cache, both runs with
+        // non-zero thinking tokens): the CLI's own total_tokens is exactly
+        // input_tokens + output_tokens. So the thinking tokens are already
+        // inside output_tokens — as in Anthropic's API, which folds thinking
+        // into output_tokens — and adding them would count them twice, while
+        // the cached reads sit outside that sum and are input the turn was
+        // billed for, exactly as claude.ts treats cache_read_input_tokens.
         const u = r.usage ?? {};
-        yield { type: "done", usage: { input: (u.input_tokens ?? 0) + (u.cache_read_tokens ?? 0), output: (u.output_tokens ?? 0) + (u.thinking_tokens ?? 0) } };
+        yield { type: "done", usage: { input: (u.input_tokens ?? 0) + (u.cache_read_tokens ?? 0), output: u.output_tokens ?? 0 } };
         return;
       }
     }
