@@ -4,7 +4,7 @@ import type { HealthStatus, ModelKind, ModelSpec, Provider } from "../providers/
 import { H5, type CallerUsage, type UsageStore } from "../usage/store.js";
 import { flatten, splitSystem } from "./prompt.js";
 import { Semaphore } from "./semaphore.js";
-import { CapitolineError, type ErrorKind, type ImageRequest, type InternalRequest, type ProviderEvent } from "./types.js";
+import { CLIENT_MESSAGE, CapitolineError, type ErrorKind, type ImageRequest, type InternalRequest, type ProviderEvent } from "./types.js";
 
 /**
  * What a virtual model is owned by in `/v1/models` and in the `capitoline`
@@ -73,6 +73,11 @@ export type VirtualRun = (question: string, ctx: Context) => AsyncIterable<Counc
  * inside `listModels()`, so a council that answered by calling `listModels()`
  * again would recurse forever. The list it receives holds the real models
  * alone, which are the only ones a seat can be filled from.
+ *
+ * It is asked twice about the same council, and must answer the same way both
+ * times: once when the model is listed, and once in front of a request for it
+ * (`deliberate`), because what a listing published a minute ago is not what
+ * the seats can do now.
  */
 export type VirtualAvailability = (models: ModelInfo[]) => { available: boolean; reason?: string };
 
@@ -157,6 +162,17 @@ export class Core {
   }
 
   listModels(): ModelInfo[] {
+    // The virtual models come last, decided against a snapshot of the real ones
+    // taken before the first of them is appended: a council is seated from
+    // models a provider serves, never from another council.
+    const real = this.realModels();
+    return [...real, ...[...this.virtuals].map(([name, v]) => this.virtualInfo(name, v, real))];
+  }
+
+  // The real models alone, which are the only ones a seat can be filled from:
+  // the listing above appends the virtual ones to this, and the gate on the
+  // virtual path (`virtualState`) decides against this and nothing else.
+  private realModels(): ModelInfo[] {
     const out: ModelInfo[] = [];
     for (const [id, s] of this.states) {
       const reason = this.unavailableReason(s);
@@ -171,18 +187,22 @@ export class Core {
         out.push({ name: m.name, provider: id, kind: m.kind, available: modelReason === undefined, reason: modelReason, overBudget, ...(m.kind === "image" && quota ? { quota } : {}) });
       }
     }
-    // The virtual models come last, decided against a snapshot of the real ones
-    // taken before the first of them is appended: a council is seated from
-    // models a provider serves, never from another council. `overBudget` is
-    // false for the same reason a council has no provider — the budgets are the
-    // providers' own, and the member calls carry the flag of whatever served
-    // them.
-    const real = [...out];
-    for (const [name, v] of this.virtuals) {
-      const state = v.availability?.(real) ?? { available: true };
-      out.push({ name, provider: VIRTUAL_PROVIDER, kind: "council", available: state.available, ...(state.reason !== undefined ? { reason: state.reason } : {}), overBudget: false });
-    }
     return out;
+  }
+
+  // One virtual model as it is listed. `overBudget` is false for the same
+  // reason a council has no provider — the budgets are the providers' own, and
+  // the member calls carry the flag of whatever served them.
+  private virtualInfo(name: string, v: Virtual, real: ModelInfo[]): ModelInfo {
+    const state = this.virtualState(v, real);
+    return { name, provider: VIRTUAL_PROVIDER, kind: "council", available: state.available, ...(state.reason !== undefined ? { reason: state.reason } : {}), overBudget: false };
+  }
+
+  // Whether a virtual model can serve a request, against the real models as
+  // they stand. A virtual model registered without an availability rule (a
+  // test, a virtual model that is always on) is always available.
+  private virtualState(v: Virtual, real: ModelInfo[]): { available: boolean; reason?: string } {
+    return v.availability?.(real) ?? { available: true };
   }
 
   /**
@@ -277,7 +297,29 @@ export class Core {
   async *deliberate(req: InternalRequest, ctx: Context): AsyncIterable<CouncilEvent> {
     const virtual = this.virtuals.get(req.model);
     if (!virtual) throw new CapitolineError("bad_request", `model "${req.model}" is not a council`);
-    yield* virtual.run(this.questionOf(req), ctx);
+    // What the request carries and a council cannot: refused here, before nine
+    // real calls are spent on a question that is not the one the client asked
+    // (spec 6.1, "reject explicitly what cannot be honored").
+    //
+    // An attachment has no channel in any of the three prompts, which are the
+    // strategy and take a question and nothing else (§12.8); the conversion of
+    // an OpenAI body leaves the image in `attachments` and only its text in the
+    // message, so accepting this would deliberate on the text alone — and on a
+    // message that is an image and nothing else, on the empty question. The
+    // empty question is refused in its own right for the same reason: every
+    // seat would be asked nothing, and the ranking stage would rank the answers
+    // to it.
+    if (req.attachments?.length) throw new CapitolineError("bad_request", `model "${req.model}" is a council and cannot take attachments: ask a single model`);
+    const question = this.questionOf(req);
+    if (question.trim() === "") throw new CapitolineError("bad_request", `model "${req.model}" is a council and needs a question`);
+    // The same gate `guarded()` puts in front of a real model, for the virtual
+    // one: a council whose seats cannot fill the quorum is refused with the
+    // refusal /v1/models and /health have already published, instead of
+    // spending the one call it can make and returning a single model's answer
+    // under the council's name (§12.5, spec 6.1).
+    const state = this.virtualState(virtual, this.realModels());
+    if (!state.available) throw new CapitolineError("model_unavailable", `model "${req.model}" unavailable: ${state.reason ?? "the council cannot be seated"}`);
+    yield* virtual.run(question, ctx);
   }
 
   /**
@@ -297,7 +339,13 @@ export class Core {
     for await (const ev of this.deliberate(req, ctx)) {
       if (ev.type === "text") yield ev;
       else if (ev.type === "done") yield { type: "done", usage: ev.usage };
-      else if (ev.type === "error") throw new CapitolineError(ev.kind, ev.detail);
+      // The kind travels, the council's own words do not: the detail names the
+      // models of every chain and what each was refused for, and this gateway
+      // answers every other failure with the fixed sentence of its kind (spec
+      // 8.3). It is written to the log by the council as it happens, and the
+      // un-blinded account of a deliberation that did finish reaches the client
+      // in the `capitoline` field, which is where §12.6 puts it.
+      else if (ev.type === "error") throw new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind]);
     }
   }
 

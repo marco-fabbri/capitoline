@@ -157,6 +157,15 @@ export const ConfigSchema = z
     }
     const seen = new Map<string, string>();
     for (const [id, p] of Object.entries(cfg.providers)) {
+      // The gateway owns this namespace on both sides of a model entry, not
+      // only on the name: a virtual model is listed with `provider:
+      // "capitoline"` (core's VIRTUAL_PROVIDER), so a provider carrying that id
+      // would stand on /health beside model entries that claim the same owner,
+      // with its pause and its health indistinguishable at a glance from the
+      // council's own — which has neither.
+      if (id.startsWith("capitoline")) {
+        ctx.addIssue({ code: "custom", path: ["providers", id], message: `provider id "${id}" is reserved for the council` });
+      }
       // `in` would accept an inherited key such as "toString".
       if (!Object.hasOwn(p.models, p.health_model)) {
         ctx.addIssue({ code: "custom", path: ["providers", id, "health_model"], message: `health_model "${p.health_model}" is not one of provider ${id}'s models` });

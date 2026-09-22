@@ -101,6 +101,16 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   app.post("/v1/chat/completions", async (req: Request, res: Response) => {
     let conv;
     try { conv = convertChatRequest(req.body); } catch (e) { return sendError(res, e, opts.log); }
+    // A council has no channel for reasoning_effort: its member calls are made
+    // by the council itself, each with the effort its own model is configured
+    // for, and its three prompts are the strategy rather than a request field
+    // (§12.8). Spec 6.1 allows it to be ignored, never silently: it joins the
+    // ignored list — the header and the `capitoline` block of the answer — the
+    // same way `temperature` does for every other model.
+    if (conv.req.effort !== undefined && core.isVirtual(conv.req.model)) {
+      conv.ignored.push("reasoning_effort");
+      conv.req.effort = undefined;
+    }
     const ac = new AbortController();
     res.on("close", () => { if (!res.writableFinished) ac.abort(); });
     const provider = core.listModels().find((m) => m.name === conv.req.model)?.provider ?? "unknown";

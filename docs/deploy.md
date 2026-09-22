@@ -655,6 +655,33 @@ That is what shows a prompt that has grown or a model change that costs more.
 For one figure across the three, count calls, not tokens: `calls` is the same
 unit everywhere.
 
+**The council, through the tunnel, is asked for streaming.** `capitoline` is
+not one call but nine, in three stages, and the first two produce no output at
+all: every member is answering, or ranking, and nothing is written until the
+judge starts the synthesis. Each stage is bounded per member by
+`council.capitoline.stage_timeout_s` (300 s in the shipped configuration), so
+the wait before the first byte is minutes, not seconds — while Cloudflare's
+edge gives up on an origin that has sent nothing for 100 s and answers the
+client `524`. The deliberation does not stop with it: the nine calls carry on,
+spending three subscriptions for a client that is already gone.
+
+So through the tunnel a council is asked for with `stream: true`, which opens
+the response immediately and sends one line per stage while the panel works:
+
+```sh
+curl -N -s https://api.example.com/v1/chat/completions \
+  -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"capitoline","stream":true,"messages":[{"role":"user","content":"why?"}]}'
+```
+
+The non-streaming shape (`"stream": false`, the default) builds the whole body
+before sending a byte, so nothing can keep the edge from timing it out: it is
+for a client on the host itself (`http://127.0.0.1:8080`, inside the tunnel's
+reach) and for the MCP tool, which has a timeout of its own (§10). The same
+applies to any single model slow enough to stay silent for 100 s, but a
+council is the only thing here that does it by design.
+
 ## 10. Claude Code as MCP client (on the Mac)
 
 ```sh

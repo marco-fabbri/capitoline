@@ -9,6 +9,8 @@ import { createLogger } from "../src/log.js";
 import type { ProviderEvent } from "../src/core/types.js";
 import type { RequestHandler } from "express";
 import type { Identity } from "../src/server/access.js";
+import { Council, type CouncilEvent } from "../src/council/council.js";
+import type { CouncilConfig, Deliberation, Seat } from "../src/council/types.js";
 
 const OK: ProviderEvent[] = [{ type: "text", delta: "hel" }, { type: "text", delta: "lo" }, { type: "done", usage: { input: 3, output: 2 } }];
 function make(script: ProviderEvent[] = OK, access?: RequestHandler) {
@@ -434,6 +436,97 @@ describe("GET /health", () => {
   });
 });
 
+
+// --- The council on the HTTP surface ------------------------------------
+//
+// The routing itself is Core's business (test/core.test.ts); what the two
+// endpoints do with a virtual model is here. Two seats and a judge is the
+// repository's panel in miniature: enough for a quorum, and small enough that
+// taking one provider down breaks it.
+const COUNCIL_SEATS: Seat[] = [{ family: "anthropic", models: ["claude-opus"] }, { family: "openai", models: ["codex-astra"] }];
+const COUNCIL_JUDGE: Seat = { family: "anthropic", models: ["claude-haiku"] };
+const COUNCIL_CFG: CouncilConfig = { seats: COUNCIL_SEATS, judge: COUNCIL_JUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, stageTimeoutS: 5 };
+
+function makeCouncil() {
+  const claude = new FakeProvider("claude", ["claude-opus", "claude-haiku"], OK, 2);
+  const codex = new FakeProvider("codex", ["codex-astra"], OK, 1);
+  const usage = new UsageStore(":memory:");
+  const core = new Core([claude, codex], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+  const council = new Council("capitoline", COUNCIL_CFG, core, createLogger("t"));
+  core.registerVirtual("capitoline", (q, ctx) => council.deliberate(q, ctx), (models) => council.seatable(models));
+  return { core, claude, codex, app: createApp(core, { log: createLogger("t") }) };
+}
+
+/** A deliberation detail with nothing in it: these tests carry it, none of them reads it. */
+const DETAIL: Deliberation = {
+  deliberationId: "d-1", strategyVersion: 1, members: [], lost: [], rankings: [], aggregate: [],
+  judge: { model: "claude-haiku", blind: true }, calls: 2,
+};
+const SYNTHESIS: CouncilEvent[] = [{ type: "text", delta: "the synthesis" }, { type: "done", usage: { input: 6, output: 2 }, detail: DETAIL }];
+
+// A council that answers at once, for the tests that are about the request and
+// not about the deliberation: nine real calls would prove nothing here.
+function makeVirtual(events: CouncilEvent[] = SYNTHESIS) {
+  const p = new FakeProvider("claude", ["claude-opus"], OK, 1);
+  const usage = new UsageStore(":memory:");
+  const core = new Core([p], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+  core.registerVirtual("capitoline", async function* () { yield* events; });
+  return { core, app: createApp(core, { log: createLogger("t") }) };
+}
+
+describe("a council over HTTP", () => {
+  it("is listed while its quorum can be filled, and is dropped with its reason on /health once it cannot", async () => {
+    const { app, core, claude, codex } = makeCouncil();
+    const listing = async () => (await request(app).get("/v1/models")).body.data as { id: string; owned_by: string; capitoline: { kind: string } }[];
+    expect((await listing()).map((m) => [m.id, m.owned_by, m.capitoline.kind])).toContainEqual(["capitoline", "capitoline", "council"]);
+    codex.healthResult = { ok: false, kind: "auth_expired", detail: "expired", checkedAt: 0 };
+    await core.checkHealth("codex");
+    // /v1/models carries the available models and nothing else (spec 6.4), so
+    // a council that cannot seat its quorum leaves the list exactly as a
+    // paused model does. The reason is read from /health — and from the MCP
+    // list_models tool, which also reports the unavailable ones.
+    expect((await listing()).map((m) => m.id)).not.toContain("capitoline");
+    const health = await request(app).get("/health");
+    const listed = health.body.models.find((m: { name: string }) => m.name === "capitoline");
+    expect(listed).toMatchObject({ available: false, kind: "council", provider: "capitoline" });
+    expect(listed.reason).toMatch(/1 of 2 seats/);
+    expect(listed.reason).toMatch(/quorum is 2/);
+    expect(listed.reason).not.toMatch(/expired/);          // never the provider's own words
+    // And the request is refused with it, instead of spending the one call
+    // left and answering with a single model under the council's name.
+    const r = await request(app).post("/v1/chat/completions").send({ model: "capitoline", messages: [{ role: "user", content: "why?" }] });
+    expect(r.status).toBe(404);
+    expect(r.body.error.code).toBe("model_unavailable");
+    expect(claude.calls.length).toBe(0);
+  });
+
+  it("declares reasoning_effort ignored for a council instead of dropping it", async () => {
+    const { app } = makeVirtual();
+    const r = await request(app).post("/v1/chat/completions")
+      .send({ model: "capitoline", messages: [{ role: "user", content: "why?" }], reasoning_effort: "high" });
+    expect(r.status).toBe(200);
+    expect(r.body.choices[0].message.content).toBe("the synthesis");
+    // The gateway honors reasoning_effort on every real model, so dropping it
+    // here in silence would be a lie about what was asked (spec 6.1).
+    expect(r.headers["x-capitoline-ignored"]).toBe("reasoning_effort");
+    expect(r.body.capitoline.ignored).toEqual(["reasoning_effort"]);
+    const real = await request(make().app).post("/v1/chat/completions").send(body({ reasoning_effort: "high" }));
+    expect(real.headers["x-capitoline-ignored"]).toBeUndefined();
+  });
+
+  it("refuses a council request whose message is an image", async () => {
+    const { app } = makeVirtual();
+    const r = await request(app).post("/v1/chat/completions").send({
+      model: "capitoline",
+      messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }] }],
+    });
+    // The image travels in `attachments` and the message keeps only its text,
+    // which here is nothing: served, this would have been nine calls on the
+    // empty question with the image seen by nobody.
+    expect(r.status).toBe(400);
+    expect(r.body.error.code).toBe("bad_request");
+  });
+});
 
 // B4: with more than one application behind the gateway, the row has to say
 // which one spent the window. The identity is the Access middleware's, and it

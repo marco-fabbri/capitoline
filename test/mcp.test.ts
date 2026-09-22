@@ -109,6 +109,32 @@ describe("MCP", () => {
     await c.close();
   });
 
+  it("ask_model refuses a council and sends the caller to the tool that reports the stages", async () => {
+    // A deliberation is nine calls over several minutes, and the only progress
+    // ask_model can send counts the characters of the text it is receiving:
+    // nothing at all while the first two stages run, which is the silence
+    // §12.6 exists to avoid in Claude Code. ask_council is where it belongs.
+    let started = false;
+    core.registerVirtual("capitoline", async function* () { started = true; yield { type: "text", delta: "the synthesis" }; });
+    const c = await client();
+    const r = await c.callTool({ name: "ask_model", arguments: { model: "capitoline", prompt: "q" } });
+    expect(r.isError).toBe(true);
+    expect((r.content as Block[])[0].text).toMatch(/bad_request.*council.*ask_council/);
+    expect(started).toBe(false);
+    await c.close();
+  });
+
+  it("list_models names the council's kind beside the other two", async () => {
+    core.registerVirtual("capitoline", async function* () { yield { type: "text", delta: "the synthesis" }; });
+    const c = await client();
+    const listed = (await c.listTools()).tools.find((t) => t.name === "list_models")!;
+    expect(listed.description).toMatch(/text, image or council/);
+    const r = await c.callTool({ name: "list_models", arguments: {} });
+    const models = JSON.parse((r.content as Block[])[0].text!) as { name: string; kind: string }[];
+    expect(models.find((m) => m.name === "capitoline")!.kind).toBe("council");
+    await c.close();
+  });
+
   // B5: the MCP spec requires the progress value of every notification to be
   // larger than the one before. Forty text events is the case that breaks the
   // event count: the last periodic mark lands on event 40 and the completion

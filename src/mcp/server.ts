@@ -64,7 +64,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
   // place a client can read the image quota of an exhausted provider: its
   // `resetAt` says when generating becomes possible again.
   server.registerTool("list_models", {
-    description: "List the models Capitoline can route to right now, with kind (text or image), availability, budget state and, for image models, the quota of the current window (used, limit, resetAt).",
+    description: "List the models Capitoline can route to right now, with kind (text, image or council), availability, budget state and, for image models, the quota of the current window (used, limit, resetAt).",
     inputSchema: {},
   }, async () => {
     const models = core.listModels().map((m) => ({ name: m.name, provider: m.provider, kind: m.kind, available: m.available, ...(m.reason ? { reason: m.reason } : {}), over_budget: m.overBudget, ...(m.quota ? { quota: m.quota } : {}) }));
@@ -81,6 +81,13 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     },
     outputSchema: { model: z.string(), provider: z.string(), usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }) },
   }, async ({ model, prompt, effort, system }, extra) => {
+    // A council is not one model and this tool cannot run one: a deliberation
+    // is nine calls over several minutes, and the only progress this tool can
+    // send counts the characters of the text it is receiving — nothing at all
+    // while the first two stages run, which is the silence §12.6 exists to
+    // avoid in Claude Code. It is refused here, before the calls are spent,
+    // and the caller is sent to the tool that reports the stages.
+    if (core.isVirtual(model)) return toolError(new CapitolineError("bad_request", `model "${model}" is a council: use ask_council`), "ask_model", model);
     const messages: Message[] = [];
     if (system) messages.push({ role: "system", text: system });
     messages.push({ role: "user", text: prompt });

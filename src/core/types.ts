@@ -48,6 +48,28 @@ export type AdapterEvent =
 
 export type FailureKind = ErrorKind | "unknown_model" | "model_unavailable" | "queue_full" | "bad_request" | "unauthorized";
 
+// What the client is told for each failure. CLI detail, and the council's own
+// account of which seats it lost, stay in the log (spec 8.3).
+//
+// `Record<FailureKind, string>` and not `Record<string, string>`: the map is
+// read as `CLIENT_MESSAGE[kind]` wherever a kind becomes an answer, and with an
+// index signature a missing key compiles as a `string` and is `undefined` at
+// run time — a 503 whose JSON body has no `message` at all, with the compiler
+// silent. Typed this way, a `FailureKind` nobody wrote a sentence for is a
+// compile error.
+export const CLIENT_MESSAGE: Record<FailureKind, string> = {
+  auth_expired: "provider authentication expired; the model is unavailable until it is renewed",
+  rate_limited: "provider rate limit reached",
+  timeout: "the model did not answer within the time limit",
+  cli_crashed: "the provider process failed",
+  bad_output: "the provider returned unreadable output",
+  queue_full: "the gateway is busy: the provider queue did not open in time",
+  model_unavailable: "the model is unavailable",
+  unknown_model: "unknown model",
+  bad_request: "the request is not valid",
+  unauthorized: "authentication required",
+};
+
 export class CapitolineError extends Error {
   readonly kind: FailureKind;
   readonly retryAfterS?: number;

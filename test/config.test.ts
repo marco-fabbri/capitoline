@@ -250,6 +250,16 @@ describe("config", () => {
     expect(() => parseConfig(text("capitol"))).not.toThrow();
   });
 
+  it("rejects a provider id in the council's namespace", () => {
+    // A virtual model is listed with `provider: "capitoline"`, so a provider
+    // carrying that id would stand on /health beside model entries claiming
+    // the same owner, its pause and its health indistinguishable from the
+    // council's own — which has neither.
+    expect(() => parseConfig(configOf({ capitoline: {} }))).toThrow(/reserved/);
+    expect(() => parseConfig(configOf({ "capitoline-2": {} }))).toThrow(/reserved/);
+    expect(() => parseConfig(configOf({ capitol: {} }))).not.toThrow();
+  });
+
   it("loads the council of both configuration files", () => {
     for (const file of BOTH_FILES) {
       const cfg = loadConfig(file);

@@ -3,7 +3,7 @@ import { Core } from "../src/core/core.js";
 import { UsageStore } from "../src/usage/store.js";
 import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
-import type { ProviderEvent } from "../src/core/types.js";
+import { CLIENT_MESSAGE, type ProviderEvent } from "../src/core/types.js";
 import { Council, type CouncilEvent } from "../src/council/council.js";
 import type { CouncilConfig, Deliberation, Seat } from "../src/council/types.js";
 
@@ -688,6 +688,36 @@ describe("Core virtual models", () => {
     expect(events).toEqual(failed);      // the event form is left whole for the transports
   });
 
+  it("refuses what a council has no channel for, before a single call is spent", async () => {
+    const { core } = make();
+    const { run, seen } = fakeRun(answered);
+    core.registerVirtual("capitoline", run);
+    // The OpenAI conversion puts an image in `attachments` and leaves only the
+    // text of the message behind, so a message that is an image and nothing
+    // else would reach the panel as the empty question: nine real calls on
+    // three subscriptions, on nothing, with the image seen by nobody.
+    const withImage = { ...req("capitoline"), messages: [{ role: "user" as const, text: "" }], attachments: [{ mime: "image/png", bytes: Buffer.from("x") }] };
+    await expect(drain(core.execute(withImage, { source: "http" }))).rejects.toMatchObject({ kind: "bad_request" });
+    // The empty question in its own right: every seat would be asked nothing,
+    // and the ranking stage would rank the answers to it.
+    const empty = { ...req("capitoline"), messages: [{ role: "user" as const, text: "   " }] };
+    await expect(drain(core.execute(empty, { source: "http" }))).rejects.toMatchObject({ kind: "bad_request" });
+    const deliberating = (async () => { for await (const _ev of core.deliberate(empty, { source: "http" })) { /* never reached */ } })();
+    await expect(deliberating).rejects.toMatchObject({ kind: "bad_request" });
+    expect(seen).toEqual([]);                          // the deliberation never started
+  });
+
+  it("answers a failed council with the sentence of its kind and none of its account", async () => {
+    const { core } = make();
+    const detail = "no member answered: anthropic claude-opus rate_limited, claude-sonnet rate_limited; openai codex-astra rate_limited";
+    core.registerVirtual("capitoline", fakeRun([{ type: "error", kind: "rate_limited", detail }]).run);
+    // Which chains were refused and for what is the log's business and the
+    // `capitoline` field's (§12.6): a 4xx/5xx body of this gateway carries the
+    // fixed sentence of the kind, whatever model was asked for.
+    await expect(drain(core.execute(req("capitoline"), { source: "http" })))
+      .rejects.toMatchObject({ kind: "rate_limited", message: CLIENT_MESSAGE.rate_limited });
+  });
+
   it("refuses a name a provider already serves, and the same name twice", () => {
     const { core } = make();
     const { run } = fakeRun(answered);
@@ -739,6 +769,20 @@ describe("Core council availability", () => {
     expect(listed.reason).toMatch(/1 of 2 seats/);
     expect(listed.reason).toMatch(/quorum/);
     expect(listed.reason).not.toMatch(/expired/);
+  });
+
+  it("refuses a request for a council whose quorum cannot be filled", async () => {
+    const { core, claude, codex } = makeSeated();
+    codex.healthResult = { ok: false, kind: "auth_expired", detail: "expired", checkedAt: 0 };
+    await core.checkHealth("codex");
+    // The same refusal guarded() gives for a real model whose provider is
+    // down, and the one /v1/models and /health have already published: with
+    // one seat left the council would otherwise spend a call and hand back a
+    // single model's answer under its own name (§12.5, spec 6.1).
+    await expect(drain(core.execute(req("capitoline"), { source: "http" }))).rejects.toMatchObject({ kind: "model_unavailable" });
+    const deliberating = (async () => { for await (const _ev of core.deliberate(req("capitoline"), { source: "http" })) { /* never reached */ } })();
+    await expect(deliberating).rejects.toMatchObject({ kind: "model_unavailable" });
+    expect(claude.calls.length).toBe(0);
   });
 
   it("seats a council from the real models alone, never from another council", () => {
