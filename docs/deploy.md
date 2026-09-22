@@ -624,6 +624,18 @@ existed (the database is upgraded in place, the history is kept). The
 gateway's own health probes are left out of the breakdown — on this host they
 are most of the table and would bury the rest under one `null` row.
 
+The token counts here and in `/health` follow each provider's own convention,
+and are therefore not comparable with each other. OpenAI reports cached and
+reasoning tokens *inside* the prompt and completion counts, so `codex.ts` adds
+neither; Anthropic reports cached reads *beside* the input, so `claude.ts` adds
+them; Antigravity leaves its cached reads out of its own total and keeps its
+thinking tokens inside the output (measured, `docs/spike-2026-09.md` §10), so
+`antigravity.ts` adds the first and not the second. Each adapter is right for
+the CLI it reads, and no single formula would make the three numbers mean the
+same thing. Read them against the same provider's history — that is what shows
+a prompt that has grown or a model change that costs more. For one figure
+across the three, count calls, not tokens: `calls` is the same unit everywhere.
+
 ## 10. Claude Code as MCP client (on the Mac)
 
 ```sh

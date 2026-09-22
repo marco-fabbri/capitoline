@@ -41,6 +41,8 @@ Images: `POST /v1/images/generations` serves the models declared with `kind: ima
 
 MCP: `POST /mcp` (streamable HTTP) with tools `list_models`, `ask_model` and `generate_image` (the image comes back as an MCP image content block). Registration from Claude Code is in `docs/deploy.md` §10. Raise the tool timeout on the client side first — `export MCP_TOOL_TIMEOUT=600000` in the shell that starts Claude Code: a CLI answer can take minutes and an image 11-45 s, well past the default. Capitoline sends a progress notification every 5 s while it draws, to clients that ask for one (a request with a progress token), but a notification postpones the deadline only in a client that sets `resetTimeoutOnProgress` (off by default in the MCP TypeScript SDK), so the raised timeout is what actually carries the call (spec §6.2).
 
+Token counts — in the `capitoline` field of every response, in `GET /v1/usage` and in `/health` — follow each provider's own convention: OpenAI counts cached and reasoning tokens inside the prompt and completion totals, Anthropic reports cached reads beside the input, Antigravity leaves them out of its own total and keeps its thinking tokens inside the output (measured, `docs/spike-2026-09.md` §10). Each adapter is right for the CLI it reads, so the numbers are comparable with the same provider's own history and not comparable with another provider's. For one figure across all three, count calls, not tokens.
+
 After updating a CLI, run `scripts/smoke.sh` (see `docs/update-clis.md`); it needs `curl` and `jq` on the machine it runs from.
 
 ## Principles
