@@ -43,3 +43,32 @@ export interface CouncilConfig {
   /** Per member, per stage. A member that overruns loses its seat, the deliberation continues. */
   stageTimeoutS: number;
 }
+
+/**
+ * One member's vote on one labelled answer. `rank` starts at 1 and ties are
+ * allowed, so three members can be ranked 1, 1, 2; `reason` is the member's
+ * own words and reaches the client with the rest of the detail (§12.6). Only
+ * ever built by `parseRanking()`, which refuses anything it cannot trust.
+ */
+export interface Ranking {
+  label: string;
+  rank: number;
+  reason: string;
+}
+
+/**
+ * The panel's verdict on one label, once every surviving ranking is counted.
+ *
+ * `averageRank` is 0 — never a valid rank, which starts at 1 — when `votes` is
+ * 0, and means "nobody ranked this answer", not "ranked first". A number is
+ * used rather than null or Infinity because this crosses the wire inside the
+ * `capitoline` field of an ordinary JSON response, where `Infinity` serialises
+ * to null anyway and a nullable field would force every reader to handle two
+ * shapes. It happens when a member's ranking could not be parsed and the label
+ * belongs to a member nobody else ranked, or when no ranking survived at all.
+ */
+export interface Aggregate {
+  label: string;
+  averageRank: number;
+  votes: number;
+}
