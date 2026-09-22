@@ -26,6 +26,19 @@ not one of them but a later observation from the host, still to be confirmed.
 
   Still open, and in this order. **The measurement**: the same question through strategy 2 as through strategy 1, on the Nutanix question already run three times, which is the only thing that can say whether the prompt bought anything — a prompt is a hypothesis until a run tests it. And then, only if it did not, **the fourth stage**: one member checking the synthesis against the answers, which doubles the tail of every deliberation and should not be built while a cheaper remedy is untested.
 
+## Measurement
+
+- **Nothing records which model actually answered.** The configuration names CLI *aliases* — `opus`, `fable`, `haiku` — not dated model ids, and that is mostly right: the day Anthropic moves the `opus` alias onto a new model, `claude-opus` serves it with no configuration change, no fixture drift and no failing test, and the gateway rides the improvement for free. The cost is that every measurement it produces is undated underneath. The ladder series in `docs/spike-2026-09.md` §11, the judge comparison between strategy 1 and 2, every row of the usage table: all of them say `claude-opus`, and none says which Opus. We version our own prompts with `STRATEGY_VERSION` precisely so two runs months apart can be compared, and then leave the models below unversioned — so the next time a number moves, nothing will say whether the council changed or the model did.
+
+  The remedy is close and was verified rather than assumed (2026-09-22, on the host): the CLI reports the real id of what it served.
+
+  ```
+  $ claude -p --model haiku --output-format json "Reply with the single word: ok"
+  modelUsage keys: ['claude-haiku-4-5-20251001']
+  ```
+
+  So `claude.ts` already has the field in front of it. Recording it beside the gateway name in the usage row — a nullable column, since the other two CLIs may not report an equivalent and an old row has none — makes every measurement self-describing and costs one parse and one column. Check first what `codex` and `agy` give: Codex's `turn.completed` and Antigravity's own envelope may carry the same thing under another name, and a column that only Claude ever fills is worth less than one all three do. **This is worth more than the two remaining ladders**: a ladder produces numbers, and this is what keeps the numbers readable.
+
 ## Deployment
 
 - `config/overlay.example.yaml`: `providers.claude.args` is a repository value duplicated in the host's overlay, and so, in the same class, is `providers.antigravity.image.collect`. It is forced by the merge rules — a list replaces and is never appended to, so a host that adds `--settings /home/runner/.claude/capitoline.json` has to write the whole command line out — and it leaves open exactly the drift the overlay exists to close: after a pull that adds a flag to `claude`'s args the host keeps passing the old list, `npm run check-config` stays green because the schema is satisfied either way, and nothing reports it. Mitigated for now by a re-read command in `docs/deploy.md` §7, which is a step in a runbook and therefore only as reliable as whoever runs it. The way out is to stop duplicating: a dedicated key the host sets instead of the whole list (`args_extra`, or a `settings_file` the claude adapter appends as `--settings <path>` when set), or a `check-config` that fails when the overlay's list does not start with the repository's. The first removes the problem, the second only reports it.
@@ -36,6 +49,16 @@ not one of them but a later observation from the host, still to be confirmed.
 
 ## Runner
 
+
+## Dated
+
+- **October 2026: ChatGPT Pro becomes Plus** (2026-09-22). The Codex subscription drops back from Pro to Plus. Assessed the same day, and the conclusion is that **nothing needs changing beforehand**: the design already absorbs a scarce provider. A refused provider is paused, disappears from `/v1/models`, and the council's seat chains read that state and step down to another family without spending a call; `runHealthCheck` skips a paused provider, so the hourly probe stops too; and with `min_members: 2` the reference panel deliberates with three members instead of four, which is degrading honestly rather than failing. The gateway does no polling, so a pause only ever costs a call when a request actually arrives.
+
+  Two things are genuinely worth doing, both after the switch and not before it. **Re-capture `test/fixtures/codex/models.txt`**: the cache is per account (it carries an `identity` field), so Plus may serve fewer slugs. The generalised id check will fail on its own if a configured slug disappears, which is the mechanism working, but the sharp edge is that `health_model` is `codex-gpt-5.5` — if Plus does not serve it the probe fails and every Codex model becomes unreachable, a one-line fix but the only place where the change bites instead of degrading. And **re-read the judge chains**: `codex-gpt-6-astra` heads the ladder's chain because "this ladder spends no Anthropic window, and that is the scarce one" — a sentence that inverts when Codex becomes the scarce one.
+
+  Not to be built: `capitoline-openai` (see below) would want three concurrent `codex exec` processes on a Plus allowance, which is the wrong shape. `providers.codex.concurrency: 1` stays.
+
+  One thing no configuration can fix, recorded so nobody looks for the setting: **Codex declares no windows and reports no reset instant**, so `overBudget` is always false for it and a refusal falls back on the doubling backoff rather than a real reopening time. Claude reports both and Codex reports neither. Declaring a budget would not help either, because the gateway's budgets are in tokens while Codex's limits are counted in messages — a budget in calls does not exist today.
 
 ## Phase 2 and beyond
 
