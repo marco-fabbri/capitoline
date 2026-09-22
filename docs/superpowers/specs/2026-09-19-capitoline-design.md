@@ -311,9 +311,61 @@ Done 2026-09-20 on the Mac for items 1 and 3 to 9; results in `docs/spike-2026-0
 
 Items 3 to 8 can be done on the Mac, where the CLIs are already authenticated; only item 2 needs the LXC.
 
-## 12. Phase 2 sketch (not part of this spec)
+## 12. Phase 2: the council
 
-Council as virtual model `capitoline`, initial strategy from karpathy/llm-council: independent answers in parallel → anonymous peer review with ranking (labels `Response A/B/C`, JSON output instead of regex) → synthesis by a configurable judge. Members and judge in configuration; failed member → council continues and declares it in the `capitoline` field. Same per-provider queue. MCP tool `ask_council`. Variants (`-fast`, revision stage) only after measuring consumption and quality of the first.
+Design settled 2026-09-22. The council is a virtual model, `capitoline`, served by the same endpoints as every other: a client asks for it in `model` and receives an ordinary completion, or calls the MCP tool `ask_council`.
+
+### 12.1 Three stages, nine calls
+
+The strategy is karpathy/llm-council's, with the changes noted below:
+
+1. **Independent answers.** Every seated member answers the same question, in parallel.
+2. **Anonymous peer ranking.** Each member receives the others' answers labelled `Response A`, `B`, … and ranks them. The reply is JSON against a schema, not prose parsed by a regex.
+3. **Synthesis.** A judge, seated separately, writes the final answer from the labelled answers and the aggregate ranking.
+
+Four seats is the default: nine calls, one per answer, one per ranking, one for the synthesis. The members run truly in parallel because one seat per family means no two contend for the same provider's queue.
+
+### 12.2 Seats are families with a fallback chain
+
+A seat declares a family and an ordered list of models, not a model. Two reasons, both learned the hard way:
+
+- **Quotas run out.** On 2026-09-21 the Fable model was refused while the same subscription answered on Opus and Sonnet. A member list naming a model outright would have broken every deliberation that day.
+- **A panel needs independent judgment.** Models of one family share their blind spots, so they fail the same way and rank each other's failures highly. Three Anthropic seats would give one lineage three votes out of four and spend one 5-hour window three times over.
+
+Seating happens in two steps, and both are needed:
+
+- **Before the call**, the seat takes the first model of its chain that the health and quota state reports available. Fable paused until Friday is skipped without spending a call to discover it.
+- **After an unforeseen refusal**, the seat steps down the chain once and retries. The first refusal of any window is by definition not in the state yet, so without this a deliberation fails whenever a quota turns over mid-flight; with a single step it cannot cascade through the whole chain.
+
+Default seats: Anthropic, OpenAI, Google, and open weights through `gpt-oss-120b` on Antigravity. Watch for one model reachable through two channels — `claude-opus` and `agy-claude-opus` are one opinion in two seats.
+
+### 12.3 The judge
+
+Seated apart from the members and blind, both by default and both configurable (`judge.allow_member`, `judge.blind`). karpathy/llm-council does the opposite on both counts: its chairman is also a member and sees everything at synthesis. Keeping the judge out costs one call in nine and removes any question of a synthesizer weighing its own answer; keeping it blind makes the deliberation blind end to end. The transparency is not lost, it moves: the response carries the un-blinded detail.
+
+Not configurable: the anonymity of the ranking stage. It is the mechanism the whole design rests on, and an option to disable it would only offer a way to produce a skewed ranking without noticing.
+
+### 12.4 Anonymity that can be reproduced
+
+Labels are assigned by shuffling the members with a seed derived from the question, so two deliberations on the same question pair the same labels with the same seats. A strange result can be repeated and studied. The mapping never appears in any prompt; it appears in the response, after the fact.
+
+### 12.5 What partial failure means
+
+A member that errors or times out is dropped and declared; the deliberation continues with the rest. Below two answers there is nothing to rank: with one, the gateway returns that answer and says plainly that no council took place, rather than dressing a single opinion as a synthesis.
+
+### 12.6 What the client receives
+
+The synthesis is the message content. The `capitoline` field carries the rest: each member with its real model name and its answer, the rankings and their aggregate, which seats fell back and why, which seats were lost, and the token cost. A client that wants only the answer ignores the field, as OpenAI clients do with unknown fields.
+
+While the first two stages run there is nothing to stream token by token, so a streaming request receives progress lines instead — `2/4 answers`, `rankings`, then the synthesis, which does stream as it is written. Over MCP the same states are sent as progress notifications, which is also what keeps Claude Code from abandoning a call that takes minutes.
+
+### 12.7 Accounting
+
+Nine calls are nine rows in the usage table, each under the real model that served it, because quotas belong to those models and not to the council. A deliberation identifier ties them together, so the cost of one question can be summed.
+
+### 12.8 The prompts are the strategy
+
+The three prompts live in the code, not in the configuration: they are not CLI details but the strategy itself. Changing them changes the behaviour, so it changes the name — `capitoline` becomes `capitoline-2`, and a client that wants the old behaviour keeps asking for it. Variants (`-fast` without the ranking stage, a revision round, the chain of roles recorded in the backlog) come only after the first one has been measured.
 
 ## 13. Decisions taken and alternatives discarded
 
