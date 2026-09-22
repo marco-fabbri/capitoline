@@ -4,10 +4,25 @@ import type { ErrorKind } from "../core/types.js";
 // token or an exhausted window (spike open item 3) must be added to the tests
 // when they happen; until then these are the documented strings.
 const AUTH = /login expired|not logged in|unauthori[sz]ed|\b401\b|invalid.*token|expired.*token|authentication (failed|required)|please run \/login|codex login/i;
-const RATE = /rate.?limit|\b429\b|too many requests|usage limit|quota|resets? at|capacity/i;
+const RATE = /rate.?limit|\b429\b|too many requests|usage limit|quota|resets? at/i;
+// The provider's own infrastructure, not the owner's quota. Real capture on the
+// host, 2026-09-22: "UNAVAILABLE (code 503): No capacity available for model
+// gpt-oss-120b-medium on the server", with the prose "Our servers are
+// experiencing high traffic right now, please try again in a minute".
+//
+// `capacity` used to sit in RATE, for the exhaustion wordings, and "No capacity
+// available" contains the word: the transient fault was read as an exhausted
+// subscription, the provider was paused and the strike counter advanced. The
+// word moves here, where it belongs, and RATE keeps the wordings that are
+// actually about a limit.
+const BUSY = /\b503\b|UNAVAILABLE|no capacity|capacity available|overloaded|high traffic|server is busy|try again in a (?:moment|minute|few)/i;
 
+// BUSY before RATE: "please try again in a minute" sits next to a quota reset
+// in more than one CLI's prose, and a 503 that also says "rate limit" is still
+// a 503. AUTH stays first — an expired login can be reported with any status.
 export function classifyError(text: string): ErrorKind {
   if (AUTH.test(text)) return "auth_expired";
+  if (BUSY.test(text)) return "busy";
   if (RATE.test(text)) return "rate_limited";
   return "cli_crashed";
 }

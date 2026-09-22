@@ -16,7 +16,13 @@ export interface InternalRequest {
 // (the CLI tool has none); the response reports the real dimensions.
 export interface ImageRequest { model: string; prompt: string }
 
-export type ErrorKind = "auth_expired" | "rate_limited" | "timeout" | "cli_crashed" | "bad_output";
+// `busy` is a transient failure of the provider's own infrastructure, not a
+// limit on the owner's subscription: a 503 with no capacity, a server under
+// load. It is the one refusal that says nothing about quota, so it must never
+// pause a provider or advance its strikes — a minute of backoff, doubling, over
+// a condition that clears in seconds took the whole Antigravity provider down
+// while its other seat was answering (host, 2026-09-22).
+export type ErrorKind = "auth_expired" | "rate_limited" | "busy" | "timeout" | "cli_crashed" | "bad_output";
 // resetsAt: unix **seconds**, as the CLIs report them, next to the
 // milliseconds of `updatedAt` in the usage store's rate_windows row and of
 // every Date.now() around it. The two units sit in the same table, so the
@@ -60,6 +66,7 @@ export type FailureKind = ErrorKind | "unknown_model" | "model_unavailable" | "q
 export const CLIENT_MESSAGE: Record<FailureKind, string> = {
   auth_expired: "provider authentication expired; the model is unavailable until it is renewed",
   rate_limited: "provider rate limit reached",
+  busy: "the provider is temporarily out of capacity",
   timeout: "the model did not answer within the time limit",
   cli_crashed: "the provider process failed",
   bad_output: "the provider returned unreadable output",

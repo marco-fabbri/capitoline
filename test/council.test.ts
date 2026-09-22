@@ -78,11 +78,17 @@ const leaky = (kind: "rate_limited" | "cli_crashed"): ProviderEvent[] =>
   [{ type: "error", kind, detail: `${SENTINEL}: Traceback (most recent call last) ...` }];
 
 interface PanelOptions {
-  /** Per model: what the fake answers instead of the default, at every stage. */
-  overrides?: Record<string, ProviderEvent[]>;
+  /**
+   * Per model: what the fake answers instead of the default, at every stage.
+   * A function is called per request, which is how a model that fails once and
+   * then answers is written.
+   */
+  overrides?: Record<string, ProviderEvent[] | ((req: InternalRequest) => ProviderEvent[])>;
   /** Models that answer the ranking stage with something no parser can trust. */
   badRanking?: string[];
   cfg?: Partial<CouncilConfig>;
+  /** The busy backoff in milliseconds; a test that means to watch the wait sets it. */
+  busyRetryMs?: number;
 }
 
 // A real Core over fake providers, which is the point: every member call has to
@@ -92,7 +98,7 @@ function panel(opts: PanelOptions = {}) {
   const overrides = new Map(Object.entries(opts.overrides ?? {}));
   const reply = (req: InternalRequest): ProviderEvent[] => {
     const over = overrides.get(req.model);
-    if (over) return over;
+    if (over) return typeof over === "function" ? over(req) : over;
     const prompt = req.messages[0].text;
     const stage = stageOf(prompt);
     const broken = stage === "rankings" && (opts.badRanking ?? []).includes(req.model);
@@ -105,7 +111,9 @@ function panel(opts: PanelOptions = {}) {
   const agy = new FakeProvider("agy", ["agy-pro", "agy-flash", "agy-oss"], reply, 2);
   const store = new UsageStore(":memory:");
   const core = new Core([claude, codex, agy], store, { maxWaitMs: 500, budgets: {}, log: createLogger("t") });
-  const council = new Council("capitoline", { ...CFG, ...opts.cfg }, core, createLogger("t"));
+  // A millisecond of busy backoff, not five seconds: the wait is a real timer
+  // and every test that never meets a busy provider would otherwise pay for it.
+  const council = new Council("capitoline", { ...CFG, ...opts.cfg }, core, createLogger("t"), opts.busyRetryMs ?? 1);
   const calls = () => [...claude.calls, ...codex.calls, ...agy.calls];
   return {
     claude, codex, agy, store, core, council, calls,
@@ -494,5 +502,36 @@ describe("Council", () => {
     expect(events.find((e) => e.type === "error")).toBeUndefined();
     expect(p.promptsOf("rankings")).toEqual([]);
     expect(p.promptsOf("synthesis")).toEqual([]);
+  });
+});
+
+describe("a busy provider", () => {
+  const BUSY: ProviderEvent[] = [{ type: "error", kind: "busy", detail: "UNAVAILABLE (code 503): No capacity available for model gpt-oss-120b-medium on the server" }];
+
+  it("is waited out in place, and the seat keeps the model it was given", async () => {
+    // The capture that named the kind: `agy-oss` answered 503 during the first
+    // real deliberation. The model was not refused, the provider's server was
+    // full, so stepping down the chain would move to another model of the same
+    // provider and buy nothing.
+    let asked = 0;
+    const p = panel({ overrides: { "agy-oss": () => (++asked === 1 ? BUSY : [{ type: "text", delta: ANSWERS["agy-oss"] }, { type: "done", usage: { input: 10, output: 2 } }]) } });
+    const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
+    const done = events.find((e) => e.type === "done")!;
+    expect(done.detail.lost).toEqual([]);
+    expect(done.detail.members.map((m) => m.model)).toContain("agy-oss");
+    // Asked twice, and the second time the same model: no fallback recorded.
+    expect(asked).toBeGreaterThanOrEqual(2);
+    expect(done.detail.members.find((m) => m.model === "agy-oss")!.fellBackFrom).toBeUndefined();
+  });
+
+  it("loses the seat when the wait does not help, without stepping down", async () => {
+    const p = panel({ overrides: { "agy-oss": BUSY } });
+    const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
+    const done = events.find((e) => e.type === "done")!;
+    expect(done.detail.lost).toEqual([{ family: "open-weights", model: "agy-oss", reason: "busy" }]);
+    // The provider is untouched: a full server says nothing about the quota,
+    // so its other seat keeps answering and no pause was installed.
+    expect(p.core.providerStates().find((x) => x.id === "agy")).toMatchObject({ pausedUntil: null, strikes: 0 });
+    expect(done.detail.members.map((m) => m.model)).toContain("agy-pro");
   });
 });

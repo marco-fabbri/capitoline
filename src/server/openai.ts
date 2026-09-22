@@ -92,6 +92,10 @@ export function httpStatus(e: CapitolineError | FailureKind): { status: number; 
     case "unknown_model": return { status: 404 };
     case "rate_limited": return { status: 429, retryAfterS: retry ?? 60 };
     case "queue_full": return { status: 503, retryAfterS: retry ?? 30 };
+    // The provider is full, not the quota: seconds, not the minute a rate
+    // limit gets, because the condition clears by itself and a client that
+    // waits a minute over it has been told to wait for nothing.
+    case "busy": return { status: 503, retryAfterS: retry ?? 5 };
     // A request that hit an expired login is a server-side failure worth
     // retrying later; a model already known to be unavailable is simply not
     // offered (it is missing from /v1/models too), so spec 6.1/8.3 say 404.

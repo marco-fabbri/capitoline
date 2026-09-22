@@ -15,8 +15,29 @@ describe("classifyError", () => {
     ["quota exceeded for the current window", "rate_limited"],
     ["segmentation fault", "cli_crashed"],
     ["", "cli_crashed"],
+    // The capture that named the kind (host, 2026-09-22): both halves of what
+    // Antigravity answered, each of which used to read as rate_limited because
+    // the rate pattern listed `capacity`.
+    ["UNAVAILABLE (code 503): No capacity available for model gpt-oss-120b-medium on the server", "busy"],
+    ["Our servers are experiencing high traffic right now, please try again in a minute", "busy"],
+    ["503 Service Unavailable", "busy"],
+    ["The model is overloaded. Please try again in a moment.", "busy"],
   ])("classifies %j as %s", (text, kind) => {
     expect(classifyError(text)).toBe(kind);
+  });
+
+  // The two are told apart by the one word that used to conflate them: a
+  // subscription with nothing left is not a server with no room, and only the
+  // first is worth pausing a provider over.
+  it("keeps an exhausted quota apart from a full server", () => {
+    expect(classifyError("You've reached your usage limit for this 5-hour window")).toBe("rate_limited");
+    expect(classifyError("No capacity available")).toBe("busy");
+  });
+
+  // A 503 whose prose also says "rate limit" is still a 503: the status is the
+  // structured fact and the prose is the last resort (spike §9).
+  it("reads a 503 that also mentions a rate limit as busy", () => {
+    expect(classifyError("503: rate limit on the shared pool, try again in a minute")).toBe("busy");
   });
 });
 

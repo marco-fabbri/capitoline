@@ -93,6 +93,21 @@ describe("Core", () => {
     expect(await drain(core.execute(req("a-1"), { source: "http" }))).toEqual(OK);
     expect(core.listModels().find((m) => m.name === "a-1")!.available).toBe(true);
   });
+  it("neither pauses nor strikes a provider that answered busy", async () => {
+    // The capture of 2026-09-22 read as rate_limited, because the rate pattern
+    // listed `capacity`: the whole provider went down for a minute, with the
+    // strike counter advanced, while its other seat was answering fine.
+    const t = 1_000_000;
+    const { core, a } = make({ now: () => t });
+    a.script = [{ type: "error", kind: "busy", detail: "UNAVAILABLE (code 503): No capacity available" }];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(core.providerStates().find((p) => p.id === "a")).toMatchObject({ pausedUntil: null, strikes: 0 });
+    expect(core.pauseRemainingS("a", "a-1")).toBeUndefined();
+    // Nothing is held back: the next request goes straight through.
+    a.script = OK;
+    expect(await drain(core.execute(req("a-1"), { source: "http" }))).toEqual(OK);
+    expect(core.listModels().every((m) => m.available)).toBe(true);
+  });
   it("darkens every gateway name of a refused model, not the one that called", async () => {
     // Since the ladder shipped, two names resolve to one CLI id:
     // `agy-gemini-pro` at the default effort *is* `gemini-3.1-pro-high`, which

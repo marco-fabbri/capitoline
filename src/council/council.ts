@@ -75,6 +75,15 @@ export interface CouncilCore {
  */
 const STEP_DOWN = new Set<FailureKind>(["rate_limited", "auth_expired"]);
 
+/**
+ * `busy` is deliberately **not** in `STEP_DOWN`: the model was not refused,
+ * the provider's server was full, so the chain's next model — often on the
+ * same provider — buys nothing, and stepping down would spend the seat's one
+ * retry moving away from a model that is about to answer. The seat waits and
+ * asks the same model again, once (§12.2's retry, spent differently).
+ */
+const BUSY_RETRIES = 1;
+
 /** The reasons `Core.listModels()` gives that are already a failure kind, so an unseatable chain reports what the state knew rather than a flat "unavailable". */
 const KNOWN_REASONS = new Set<string>(["rate_limited", "auth_expired", "timeout", "cli_crashed", "bad_output", "unknown_model"]);
 const kindOfReason = (reason: string | undefined): FailureKind =>
@@ -94,8 +103,10 @@ const kindOfReason = (reason: string | undefined): FailureKind =>
  * until it has been placed.
  */
 const RANK: Record<FailureKind, number> = {
-  rate_limited: 0, auth_expired: 1, queue_full: 2, timeout: 3,
-  cli_crashed: 4, bad_output: 5, model_unavailable: 6, unknown_model: 7, bad_request: 8, unauthorized: 9,
+  // `busy` above `rate_limited`: both are worth retrying, and this one clears
+  // in seconds rather than in hours, so it is the more actionable of the two.
+  busy: 0, rate_limited: 1, auth_expired: 2, queue_full: 3, timeout: 4,
+  cli_crashed: 5, bad_output: 6, model_unavailable: 7, unknown_model: 8, bad_request: 9, unauthorized: 10,
 };
 /**
  * A failure and, when the refusal named one, how long the client must wait.
@@ -192,6 +203,8 @@ export class Council {
     private readonly cfg: CouncilConfig,
     private readonly core: CouncilCore,
     private readonly log: Logger,
+    /** How long a seat waits before asking a busy provider again; shortened by tests. */
+    private readonly busyRetryMs = 5_000,
   ) {}
 
   /**
@@ -433,11 +446,27 @@ export class Council {
    */
   private async ask(run: Run, s: Seat, first: string, question: string, ctx: CouncilContext, skipped: string[]): Promise<MemberOutcome> {
     const fellBackFrom = [...skipped];
+    // A call, not a read: the flag is looked at again after an await, and a
+    // narrowed property would make the second look a compile error rather than
+    // the question it is.
+    const aborted = (): boolean => ctx.signal?.aborted === true;
     let model = first;
+    let busyLeft = BUSY_RETRIES;
     for (let attempt = 0; ; attempt++) {
       const result = await this.call(run, model, answerPrompt(question), ctx);
       if (result.ok) return { ok: true, member: { seat: s, model, label: "", answer: result.text, fellBackFrom } };
-      const next = attempt === 0 && STEP_DOWN.has(result.kind) && ctx.signal?.aborted !== true
+      // Waited out in place, not stepped down: the same model is asked again.
+      // The attempt counter is not advanced, so a seat that then meets a real
+      // refusal still has its step down.
+      if (result.kind === "busy" && busyLeft > 0 && !aborted()) {
+        busyLeft--;
+        this.log.warn({ council: this.name, family: s.family, model, seconds: this.busyRetryMs / 1000 }, "a seat waits out a busy provider");
+        await new Promise((r) => setTimeout(r, this.busyRetryMs));
+        if (aborted()) return { ok: false, kind: "busy", lost: { family: s.family, model, reason: "busy", ...(fellBackFrom.length > 0 ? { fellBackFrom } : {}) } };
+        attempt--;
+        continue;
+      }
+      const next = attempt === 0 && STEP_DOWN.has(result.kind) && !aborted()
         ? nextInChain(s, model, this.core.listModels())
         : null;
       if (next === null) {

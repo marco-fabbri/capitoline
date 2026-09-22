@@ -163,13 +163,23 @@ describe("POST /v1/chat/completions", () => {
     expect(p.calls).toHaveLength(0);
   });
   it.each([
-    ["auth_expired", 503], ["rate_limited", 429], ["timeout", 504], ["cli_crashed", 502], ["bad_output", 502],
+    ["auth_expired", 503], ["rate_limited", 429], ["busy", 503], ["timeout", 504], ["cli_crashed", 502], ["bad_output", 502],
   ] as const)("maps provider error %s to %d", async (kind, status) => {
     const { app } = make([{ type: "error", kind, detail: "secret stderr" }]);
     const r = await request(app).post("/v1/chat/completions").send(body());
     expect(r.status).toBe(status);
     expect(r.body.error.code).toBe(kind);
     expect(JSON.stringify(r.body)).not.toContain("secret stderr");
+  });
+  it("tells a client to come back in seconds when the provider was busy, not in a minute", async () => {
+    // A full server clears by itself. The minute a rate limit gets would send
+    // the client away from a provider that is already answering again, and
+    // nothing was paused, so there is no pause for it to wait out.
+    const { app, core } = make([{ type: "error", kind: "busy", detail: "503 no capacity" }]);
+    const r = await request(app).post("/v1/chat/completions").send(body());
+    expect(r.status).toBe(503);
+    expect(r.headers["retry-after"]).toBe("5");
+    expect(core.providerStates()[0]).toMatchObject({ pausedUntil: null, strikes: 0 });
   });
   it("answers Retry-After with the pause Core installed (provider figure plus the minute of slack)", async () => {
     const { app } = make([{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 120 }]);
@@ -376,7 +386,7 @@ describe("POST /v1/images/generations", () => {
     expect(Number(r.headers["retry-after"])).toBeGreaterThanOrEqual(1);
   });
   it.each([
-    ["auth_expired", 503], ["timeout", 504], ["cli_crashed", 502], ["bad_output", 502],
+    ["auth_expired", 503], ["busy", 503], ["timeout", 504], ["cli_crashed", 502], ["bad_output", 502],
   ] as const)("maps provider error %s to %d", async (kind, status) => {
     const { app } = makeImages([{ type: "error", kind, detail: "secret stderr" }]);
     const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
