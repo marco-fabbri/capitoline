@@ -349,13 +349,26 @@ describe("config", () => {
       }
       // The judge is neither a rung nor Gemini at all: the ladder under test
       // must not synthesize its own measurement. claude-haiku is the cheapest
-      // model of another family, and it sits in no seat of any council — with
-      // judge_allow_member false, a judge the panel could take would leave the
-      // chain empty on the day the seats walk down to it.
-      expect(ladder.judge, file).toEqual({ family: "anthropic", models: ["claude-haiku"] });
-      expect([ladder.judgeAllowMember, ladder.judgeBlind, ladder.minMembers], file).toEqual([false, true, 2]);
+      // model of another family, and agy-claude-sonnet stands behind it for
+      // the reason every chain exists — the refusal that is not in the state
+      // yet. A rung already known paused is simply not seated and the
+      // deliberation degrades honestly, but a first refusal at the judge with
+      // an empty chain ends six spent calls in an error (design §12.2). The
+      // fallback is billed to the Google subscription, so it spends none of
+      // the Anthropic window this ladder was put on Gemini to spare.
+      expect(ladder.judge, file).toEqual({ family: "anthropic", models: ["claude-haiku", "agy-claude-sonnet"] });
+      // Every rung or nothing: a ladder missing one has nothing to compare the
+      // cheap rungs against, so the quorum is the whole panel and a lost rung
+      // makes the instrument refuse instead of spending five uninterpretable
+      // calls. The schema allows min_members == seats.length; only more is
+      // rejected.
+      expect([ladder.judgeAllowMember, ladder.judgeBlind, ladder.minMembers], file).toEqual([false, true, 3]);
+      expect(ladder.minMembers, file).toBe(ladder.seats.length);
+      // judge_allow_member is false, so every model of the judge's chain must
+      // be one no council can seat — otherwise the filter in seatJudge() drops
+      // it on exactly the day it is needed.
       const seatedAnywhere = new Set(Object.values(cfg.council).flatMap((c) => c.seats.flatMap((s) => s.models)));
-      expect(seatedAnywhere.has("claude-haiku"), file).toBe(false);
+      for (const m of ladder.judge.models) expect(seatedAnywhere.has(m), `${file} ${m}`).toBe(false);
       expect(ladder.stageTimeoutS, file).toBe(cfg.council.capitoline.stageTimeoutS);
     }
   });

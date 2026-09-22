@@ -295,6 +295,70 @@ describe("a council end to end", () => {
     // usage table and not off the deliberation's own count.
     expect((await rows()) - before).toBe(5);
   }, 30_000);
+
+  // The capability ladder, through the same door: three rungs of one lineage
+  // on one Antigravity subscription (plan 2026-09-22-council-variants, task
+  // 3). It is configuration only, so nothing here tests an engine path the two
+  // tests above do not — except the one runtime risk the task carries, which
+  // no unit test can reach: three `agy` processes starting in the same
+  // instant, twice, against `providers.antigravity.concurrency: 3`. A slot
+  // short and a rung would wait out server.queue.max_wait_s and be declared
+  // lost to queue_full in stage 1, or drop its ballot in stage 2, which is
+  // what `lost` and the three rankings below assert. The fake CLIs need no new
+  // flag: fake-agy.sh picks its recording from the prompt, never from the
+  // model id, so the three rungs replay the same chat and ranking fixtures the
+  // panel's Antigravity seats do.
+  it("deliberates capitoline-gemini over three rungs of one subscription and writes seven usage rows", async () => {
+    const before = await rows();
+    const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "capitoline-gemini", messages: [{ role: "user", content: COUNCIL_QUESTION }] }),
+    });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      model: string; choices: { message: { content: string } }[];
+      capitoline: { provider: string; council: Deliberation };
+    };
+    expect(body.model).toBe("capitoline-gemini");
+    expect(body.choices[0].message.content).toBe(COUNCIL_SYNTHESIS);
+
+    const d = body.capitoline.council;
+    // The reference panel's shape with a different roster: the blind ranking
+    // is the measurement itself here, so `ranking` stays on and the shape is
+    // "ranked", not "fast".
+    expect(d.shape).toBe("ranked");
+    // One seat per rung, the family naming the rung and the model carrying its
+    // reasoning level in its own id. All three answer what the same
+    // subscription answers a direct request, since only the id differs.
+    expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
+      ["pro-high", "agy-gemini-pro-high", ANSWERS.agy],
+      ["flash-high", "agy-gemini-flash-high", ANSWERS.agy],
+      ["flash-low", "agy-gemini-flash-low", ANSWERS.agy],
+    ]);
+    // No chain on any rung, so a rung that failed could only be lost, never
+    // replaced — and with min_members 3 a single loss would have ended the
+    // deliberation before the judge. An empty `lost` is therefore also the
+    // assertion that the third slot exists.
+    expect(d.members.every((m) => m.fellBackFrom === undefined)).toBe(true);
+    expect(d.lost).toEqual([]);
+    expect(d.members.map((m) => m.label).sort()).toEqual(["Response A", "Response B", "Response C"]);
+    // Three ballots cast and three parsed: stage 2 ran three `agy` processes
+    // in parallel as stage 1 did, and a rung that had waited out the queue
+    // would be missing from this list.
+    expect(d.rankings.map((x) => x.by).sort()).toEqual(["agy-gemini-flash-high", "agy-gemini-flash-low", "agy-gemini-pro-high"]);
+    expect(d.aggregate).toEqual([
+      { label: "Response B", averageRank: 1, votes: 3 },
+      { label: "Response A", averageRank: 2, votes: 3 },
+      { label: "Response C", averageRank: 3, votes: 3 },
+    ]);
+    // The head of the judge's chain, seated because no rung can take it: the
+    // ladder does not synthesize its own measurement.
+    expect(d.judge).toEqual({ model: "claude-haiku", blind: true });
+    // Seven calls: three answers, three rankings, one synthesis — the panel's
+    // nine less the seat it does not have, read off the usage table.
+    expect(d.calls).toBe(7);
+    expect((await rows()) - before).toBe(7);
+  }, 30_000);
 });
 
 // The three fakes replay one recording per stage, chosen from the prompt they

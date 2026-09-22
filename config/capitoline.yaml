@@ -116,6 +116,18 @@ providers:
       # is what makes a seat a rung: `agy-gemini-pro` above answers at whatever
       # effort the request asks for, while `agy-gemini-pro-high` is one fixed
       # point on the ladder. Every id is one `agy models` lists.
+      #
+      # These three are aliases: every one of their CLI ids is already
+      # reachable under another name in this table. `agy-gemini-pro`
+      # at the default effort resolves to gemini-3.1-pro-high (efforts
+      # [low, high], and the medium tie breaks upward), `agy-gemini-flash` at
+      # high to gemini-3.8-flash-high, and `agy-image` already carries
+      # gemini-3.8-flash-low. A model pause is keyed by the gateway name the
+      # refusal named and not by cli_model, so a quota refusal on one alias
+      # does not cover the other: the reference panel's google seat will spend
+      # one call rediscovering a model this ladder has just seen exhausted,
+      # and then step down. One call per deliberation, not a break; keying the
+      # pause by cli_model is an engine change and sits in docs/backlog.md.
       agy-gemini-pro-high:   { cli_model: gemini-3.1-pro-high,   effort_suffix: false }
       agy-gemini-flash-high: { cli_model: gemini-3.8-flash-high, effort_suffix: false }
       agy-gemini-flash-low:  { cli_model: gemini-3.8-flash-low,  effort_suffix: false }
@@ -246,10 +258,29 @@ council:
       - { family: flash-low,  models: [agy-gemini-flash-low] }
     # The judge is no rung, and no Gemini at all: the ladder under test must
     # not synthesize its own measurement. claude-haiku is the cheapest model of
-    # another family and sits in no seat of any council, so nothing has to
-    # stand behind it in the chain the way it does for the reference panel.
-    judge: { family: anthropic, models: [claude-haiku] }
+    # another family, and with judge_allow_member: false it must be one no
+    # member can take, which these Gemini seats never could.
+    #
+    # A second model stands behind it for the reason every chain exists, and it
+    # is not the judge_allow_member one: the refusal nobody foresaw. A model
+    # already known paused is never seated at all and the deliberation degrades
+    # honestly — the best-ranked answer is returned unsynthesised — but the
+    # first refusal of a window is by definition not in the state yet (design
+    # §12.2), and with nothing after claude-haiku that single refusal throws
+    # away six Gemini calls already spent and hands the client an error instead
+    # of an answer. agy-claude-sonnet is the same lineage through the Google
+    # subscription, so the step down spends no Anthropic window — the reason
+    # this ladder is on Gemini in the first place — it sits in no seat of any
+    # council, and by the time it is reached the members have already released
+    # their Antigravity slots.
+    judge: { family: anthropic, models: [claude-haiku, agy-claude-sonnet] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
-    min_members: 2              # two rungs still compare, and the response names the one that was lost
+    # Every rung or nothing, unlike the two panels above. A ladder missing one
+    # of its rungs measures nothing: "how far down can I go" needs the
+    # expensive rung present to compare the cheap ones against, and flash-high
+    # against flash-low on its own answers no question. So the instrument
+    # refuses rather than spending five calls on a run nobody can read, and
+    # /v1/models says plainly that it cannot be run today.
+    min_members: 3
     stage_timeout_s: 300        # per member, per stage — not for the whole deliberation

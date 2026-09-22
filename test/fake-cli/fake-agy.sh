@@ -12,13 +12,25 @@ set -euo pipefail
 dir="$(cd "$(dirname "$0")" && pwd)"
 stdin="$(cat)"
 # The council's ranking stage is chosen the same way (see fake-claude.sh): this
-# CLI seats two of the four members, so its ranking recording is asked for
-# twice per deliberation, and it wraps the array in an object, the third shape
-# parseRanking tolerates. It is never asked to synthesize: the judge's chain is
-# Anthropic-only.
+# CLI seats two of the four members of the panels, all three rungs of
+# capitoline-gemini, and it wraps the array in an object, the third shape
+# parseRanking tolerates. It is never asked to synthesize: every judge chain
+# reaches an Anthropic model first.
+#
+# Two ranking recordings, because parseRanking refuses a ballot that names a
+# label it was not shown and one that leaves a shown label out: a four-seat
+# panel is ranked over Response A..D, the three-rung ladder over A..C. The
+# presence of "Response D" in the prompt is what tells them apart — the prompt
+# lists exactly the labels on the table — so a ladder deliberation produces
+# three parsed ballots instead of three silent parse failures, and a rung lost
+# in stage 2 shows up as a missing ranking rather than as nothing at all.
 case "$stdin" in
   *"generate_image tool exactly once"*) fixture="$dir/../fixtures/antigravity/image-run.jsonl" ;;
-  *"Reply with JSON only"*)             fixture="$dir/../fixtures/antigravity/council-ranking.jsonl" ;;
+  *"Reply with JSON only"*)
+    case "$stdin" in
+      *"Response D"*) fixture="$dir/../fixtures/antigravity/council-ranking.jsonl" ;;
+      *)              fixture="$dir/../fixtures/antigravity/council-ranking-3.jsonl" ;;
+    esac ;;
   *)                                    fixture="$dir/../fixtures/antigravity/stream-json.jsonl" ;;
 esac
 exec node "$dir/fake-cli.mjs" --mode replay --file "$fixture" <<<"$stdin"
