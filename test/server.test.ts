@@ -190,6 +190,30 @@ describe("POST /v1/chat/completions", () => {
     expect(r.body.error.code).toBe(kind);
     expect(JSON.stringify(r.body)).not.toContain("secret stderr");
   });
+  it("reports the model that actually answered, and stays quiet when the CLI said nothing", async () => {
+    // app-one stores the model of every recipe and could only store the
+    // alias, while the gateway knew the dated id and kept it to itself
+    // (issue #2). `model` stays the alias an OpenAI client asked for; the
+    // resolved id rides in the gateway's own field.
+    const { app } = make([{ type: "text", delta: "hi" }, { type: "done", usage: { input: 1, output: 1 }, cliModelId: "claude-opus-5-5" }]);
+    const r = await request(app).post("/v1/chat/completions").send(body());
+    expect(r.body.model).toBe("claude-opus");
+    expect(r.body.capitoline).toEqual({ provider: "claude", cliModelId: "claude-opus-5-5", ignored: [] });
+
+    // Codex and Antigravity report nothing, and the field is then absent
+    // rather than null: a client falls back to the name it asked for.
+    const plain = make([{ type: "text", delta: "hi" }, { type: "done", usage: { input: 1, output: 1 } }]);
+    const r2 = await request(plain.app).post("/v1/chat/completions").send(body());
+    expect(r2.body.capitoline).toEqual({ provider: "claude", ignored: [] });
+  });
+  it("carries the model that answered on the final chunk of a stream", async () => {
+    const { app } = make([{ type: "text", delta: "hi" }, { type: "done", usage: { input: 1, output: 1 }, cliModelId: "claude-opus-5-5" }]);
+    const r = await request(app).post("/v1/chat/completions").send({ ...body(), stream: true });
+    const chunks = r.text.split("\n\n").filter((c) => c.startsWith("data: ") && !c.includes("[DONE]")).map((c) => JSON.parse(c.slice(6)));
+    const last = chunks.at(-1);
+    expect(last.choices[0].finish_reason).toBe("stop");
+    expect(last.capitoline).toEqual({ provider: "claude", cliModelId: "claude-opus-5-5", ignored: [] });
+  });
   it("tells a client to come back in seconds when the provider was busy, not in a minute", async () => {
     // A full server clears by itself. The minute a rate limit gets would send
     // the client away from a provider that is already answering again, and

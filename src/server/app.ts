@@ -219,6 +219,13 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     const id = `chatcmpl-${crypto.randomUUID()}`;
     let text = "";
     let usage: Usage | undefined;
+    // The dated id of what actually answered, when the CLI reported one. Only
+    // Claude does: its model names are aliases that move onto a new model
+    // without a word, while a Codex slug and an Antigravity id are the model
+    // itself. A caller that keeps a record of who wrote what — app-one
+    // stores the model of every recipe — can then store the model and not
+    // only the name it asked for (issue #2).
+    let cliModelId: string | undefined;
     let started = false;
     try {
       const ignored = ignoredHeader(conv.ignored);
@@ -230,16 +237,18 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
             if (!started) { beginSse(res); res.write(sseChunk(conv.req.model, id, { role: "assistant", content: "" }, null)); started = true; }
             res.write(sseChunk(conv.req.model, id, { content: ev.delta }, null));
           } else text += ev.delta;
-        } else if (ev.type === "done") usage = ev.usage;
+        } else if (ev.type === "done") { usage = ev.usage; cliModelId = ev.cliModelId; }
         else if (ev.type === "error") throw providerError(ev, provider, conv.req.model);
       }
       if (ac.signal.aborted) return; // client went away: nothing left to answer
       if (conv.req.stream) {
         if (!started) { beginSse(res); res.write(sseChunk(conv.req.model, id, { role: "assistant", content: "" }, null)); }
-        res.write(sseChunk(conv.req.model, id, {}, "stop", usage));
+        // `model` stays the alias the client asked for, as an OpenAI client
+        // expects; the resolved id rides in the gateway's own field.
+        res.write(sseChunk(conv.req.model, id, {}, "stop", usage, { provider, ...(cliModelId !== undefined ? { cliModelId } : {}), ignored: conv.ignored }));
         res.write("data: [DONE]\n\n");
         res.end();
-      } else res.json(completionResponse(conv.req.model, text, usage, { provider, ignored: conv.ignored }));
+      } else res.json(completionResponse(conv.req.model, text, usage, { provider, ...(cliModelId !== undefined ? { cliModelId } : {}), ignored: conv.ignored }));
     } catch (e) {
       if (res.headersSent) {
         const err = e instanceof CapitolineError ? e : new CapitolineError("bad_output", "internal error");

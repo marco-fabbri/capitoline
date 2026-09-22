@@ -90,7 +90,11 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     // Claude Code does (#1). The server sends the text block as well, for a
     // client that reads that instead; what it must never do is put the payload
     // in only one of the two.
-    outputSchema: { text: z.string(), model: z.string(), provider: z.string(), usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }) },
+    // cliModelId is optional because only Claude reports one: its model names
+    // are aliases that move onto a new model without a word, while a Codex
+    // slug and an Antigravity id are the model itself. Absent means "the CLI
+    // said nothing", and a client falls back to `model` (issue #2).
+    outputSchema: { text: z.string(), model: z.string(), provider: z.string(), cliModelId: z.string().optional(), usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }) },
   }, async ({ model, prompt, effort, system }, extra) => {
     // A council is not one model and this tool cannot run one: a deliberation
     // is nine calls over several minutes, and the only progress this tool can
@@ -105,6 +109,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     const token = extra._meta?.progressToken;
     let text = "";
     let usage: Usage | undefined;
+    let cliModelId: string | undefined;
     let n = 0;
     // Two counters on purpose. `n` counts text events and only decides when a
     // mark is due; the notification carries `sent`, which counts the
@@ -118,11 +123,11 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     try {
       for await (const ev of core.execute({ model, messages, effort, stream: true }, { signal: extra.signal, source: "mcp", caller })) {
         if (ev.type === "text") { text += ev.delta; if (++n % TEXT_PROGRESS_EVERY === 0) await progress(false); }
-        else if (ev.type === "done") usage = ev.usage;
+        else if (ev.type === "done") { usage = ev.usage; cliModelId = ev.cliModelId; }
         else if (ev.type === "error") throw providerError(ev, providerOf(model), model);
       }
       await progress(true);
-      const structured = { text, model, provider: providerOf(model), usage: { prompt_tokens: usage?.input ?? 0, completion_tokens: usage?.output ?? 0 } };
+      const structured = { text, model, provider: providerOf(model), ...(cliModelId !== undefined ? { cliModelId } : {}), usage: { prompt_tokens: usage?.input ?? 0, completion_tokens: usage?.output ?? 0 } };
       return { content: [{ type: "text", text }], structuredContent: structured };
     } catch (e) {
       return toolError(e, "ask_model", model);
