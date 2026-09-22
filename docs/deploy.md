@@ -392,8 +392,8 @@ shipped `capitoline`'s.
 
 | Key | Why it reads as it does |
 |---|---|
-| `seats` | four families, each a **chain** and never one model: the first model the health and quota state reports available takes the seat, and an unforeseen refusal steps down the chain once. `agy-claude-*` is deliberately not seated — it is the Anthropic seat's opinion through another channel, and a panel of four wants four judgments |
-| `judge` | `claude-haiku` closes the chain because it sits in no seat: with `judge_allow_member: false` the judge needs a model the panel cannot have taken, and on a day when Fable and Opus are both refused the Anthropic seat walks down to `claude-sonnet` and would otherwise leave the judge nothing after eight of the nine calls have been spent |
+| `seats` | four families, each a **chain** and never one model: the first model the health and quota state reports available takes the seat, and an unforeseen refusal steps down the chain once. `agy-claude-*` is deliberately not seated — it is the Anthropic seat's opinion through another channel, and a panel of four wants four judgments. `capitoline-gemini` is the exception, and deliberately: its three seats are single models, because a rung that steps down is no longer the rung whose capability was being measured, so a refused rung is a lost seat (design §12.5) and, with `min_members: 3`, the ladder does not run at all |
+| `judge` | `claude-haiku` closes the chain because it sits in no seat: with `judge_allow_member: false` the judge needs a model the panel cannot have taken, and on a day when Fable and Opus are both refused the Anthropic seat walks down to `claude-sonnet` and would otherwise leave the judge nothing after eight of the nine calls have been spent. `capitoline-gemini` puts `agy-claude-sonnet` behind `claude-haiku`: the same lineage through the Antigravity subscription, so the first unforeseen refusal of a window does not throw away the six Gemini calls already spent, and the step down spends no Anthropic window — the reason that ladder is on Gemini in the first place |
 | `judge_allow_member` | `false` — the judge is seated apart, so no synthesizer weighs an answer it wrote itself. `true` reproduces karpathy/llm-council's shape, where the chairman is also a member |
 | `judge_blind` | `true` — the judge sees the labels, never the real model names, so the deliberation is blind end to end. The transparency is not lost, it moves: the client's `capitoline.council` field carries the un-blinded record |
 | `min_members` | `2` — below two answers there is nothing to rank. With one the gateway returns that answer and says no council took place, rather than dressing a single opinion as a synthesis. `capitoline-gemini` sets `3`, its whole seating: a ladder missing a rung has nothing to compare against and measures nothing, so it refuses and `/v1/models` says it cannot be run today |
@@ -734,16 +734,18 @@ sudo -u capitoline sqlite3 -readonly /var/lib/capitoline/usage.sqlite \
 ```
 
 **The council, through the tunnel, is asked for streaming.** `capitoline` is
-not one call but nine, in three stages, and the first two produce no output at
-all: every member is answering, or ranking, and nothing is written until the
-judge starts the synthesis. `capitoline-fast` skips the ranking stage and is
-no better off — one silent stage of four answers is still minutes of nothing.
-Each stage is bounded per member by
-`council.capitoline.stage_timeout_s` (300 s in the shipped configuration), so
-the wait before the first byte is minutes, not seconds — while Cloudflare's
-edge gives up on an origin that has sent nothing for 100 s and answers the
-client `524`. The deliberation does not stop with it: the nine calls carry on,
-spending three subscriptions for a client that is already gone.
+not one call but nine, in three stages, and the first two produce no output
+at all: every member is answering, or ranking, and nothing is written until
+the judge starts the synthesis. `capitoline-fast` skips the ranking stage
+and is no better off — one silent stage of four answers is still minutes of
+nothing. Each stage is bounded per member by each council's
+`stage_timeout_s` (300 s in all three shipped blocks), so the wait before
+the first byte is minutes, not seconds — while Cloudflare's edge gives up on
+an origin that has sent nothing for 100 s and answers the client `524`. The
+deliberation does not stop with it: its calls carry on — nine for the
+reference panel, five for `capitoline-fast`, seven for `capitoline-gemini`,
+six of those on the one Antigravity subscription — spending the
+subscriptions for a client that is already gone.
 
 So through the tunnel a council is asked for with `stream: true`, which opens
 the response before the first stage — not on the first token, which is minutes
@@ -792,14 +794,15 @@ export MCP_TOOL_TIMEOUT=1200000
 ```
 
 Twenty minutes, and the figure is `ask_council`'s: a deliberation has no
-deadline of its own, only each member of each stage has one —
-`council.capitoline.stage_timeout_s`, 300 s in the shipped configuration
-(§9) — and the three stages run in sequence, so the worst case is above
-900 s with nothing wrong. The timeout has to stay larger than three times
-`stage_timeout_s`; re-derive it whenever that value changes. Below it Claude
-Code drops a call the gateway keeps running, and the nine calls carry on
-spending three subscriptions for a client that is already gone — the MCP
-twin of the `524` of §9.
+deadline of its own, only each member of each stage has one — each council's
+`stage_timeout_s`, 300 s in all three shipped blocks (§9) — and the three
+stages run in sequence, so the worst case is above 900 s with nothing wrong.
+The timeout has to stay larger than three times `stage_timeout_s`; re-derive
+it whenever that value changes. Below it Claude Code drops a call the
+gateway keeps running, and the deliberation's calls carry on — nine for the
+reference panel, five for `capitoline-fast`, seven for `capitoline-gemini` —
+spending the subscriptions for a client that is already gone: the MCP twin
+of the `524` of §9.
 
 This is the only thing that keeps a long call alive. `ask_council` sends a
 progress notification as each stage opens and as each member comes back

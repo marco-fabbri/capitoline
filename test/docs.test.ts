@@ -92,6 +92,26 @@ const councilTable = (text: string, where: string): Map<string, string> => {
   return rows;
 };
 
+// The explanation of one configuration key, out of the `| Key |` tables of
+// §7. There are several of them in that section, so the table is chosen by
+// the key it documents rather than by position. The council table documents
+// the three blocks at once, so a row that states only the reference panel's
+// reading is a row that is false for a variant.
+const keyRow = (text: string, where: string, key: string): string => {
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\|\s*Key\s*\|/.test(lines[i])) continue;
+    for (const line of lines.slice(i + 2)) {
+      if (!line.startsWith("|")) break;
+      const cells = line.split("|").slice(1, -1).map((c) => c.trim());
+      if (cells[0].replaceAll("`", "") === key) return cells[1];
+    }
+  }
+  expect.fail(`no \`${key}\` row in any key table of ${where}`);
+};
+
+const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+
 describe("the three councils, as documented", () => {
   it("are all in the README with their price in calls", () => {
     const rows = councilTable(section(readFileSync("README.md", "utf8"), "## Use it"), "the README");
@@ -118,8 +138,39 @@ describe("the three councils, as documented", () => {
     // so the paragraph has to name that council and not another.
     const largest = COUNCILS.reduce((a, b) => (seatsOn("antigravity", b[1]) > seatsOn("antigravity", a[1]) ? b : a));
     const paragraph = s.slice(slots!.index, s.indexOf("\n\n", slots!.index));
-    expect(paragraph, "the largest Antigravity council is not the one named").toMatch(largest[0]);
+    // Backticked and bounded, not a bare substring: `capitoline` is a prefix
+    // of the other two names, so a plain toMatch on the largest council's name
+    // is satisfied by a paragraph that names only the other two — the exact
+    // mistake this test exists to catch.
+    const named = (n: string): RegExp => new RegExp("`" + n + "`");
+    expect(paragraph, "the largest Antigravity council is not the one named").toMatch(named(largest[0]));
     expect(paragraph).toMatch(/largest/);
+    // And every council the paragraph names is named with the number of
+    // Antigravity seats it actually has — the first number word after its
+    // name, which is where the prose states it — so no council other than the
+    // largest can be presented as the largest.
+    for (const [name, c] of COUNCILS) {
+      const at = paragraph.search(named(name));
+      if (at < 0) continue;
+      const after = paragraph.slice(at, at + 80);
+      const stated = new RegExp(`\\b(${WORDS.join("|")})\\b`).exec(after);
+      const word = WORDS[seatsOn("antigravity", c)];
+      expect(stated?.[1], `${name} seats ${word} chains on Antigravity, and the paragraph says otherwise`).toBe(word);
+    }
+  });
+
+  // The §7 table documents all three blocks with the reference panel's
+  // values, so every row whose reading differs for a variant has to carry the
+  // exception. The judge row is the one that went stale first: the ladder's
+  // chain does not close on `claude-haiku`, it opens on it.
+  it("name the last model of every judge chain that is not the reference panel's, docs/deploy.md §7", () => {
+    const cell = keyRow(section(readFileSync("docs/deploy.md", "utf8"), "## 7. "), "docs/deploy.md §7", "judge");
+    const reference = CONFIG.council.capitoline.judge.models.join(",");
+    for (const [name, c] of COUNCILS) {
+      if (c.judge.models.join(",") === reference) continue;
+      const last = c.judge.models[c.judge.models.length - 1];
+      expect(cell, `${name}: its judge chain ends on ${last}, which the row never names`).toMatch(new RegExp("`" + last + "`"));
+    }
   });
 
   // Adding a council is the one configuration change that can make a provider
@@ -151,6 +202,16 @@ describe("the spec, §12", () => {
   // The two shapes that were considered and dropped. Their reasons are the
   // part that does not survive a conversation, and without them the next
   // reader proposes them again — both look cheap on paper.
+  // §12.1 is where src/config.ts sends the operator who trips the slot check
+  // ("(design §12.1)"), so a figure that contradicts the file sends them to
+  // the one paragraph that is wrong. Pinned to the file exactly as the
+  // runbook's is.
+  it("states the Antigravity concurrency the shipped file states", () => {
+    const slots = /`providers\.antigravity\.concurrency` is `(\d+)`/.exec(s);
+    expect(slots, "the spec no longer states the Antigravity concurrency").not.toBeNull();
+    expect(Number(slots![1])).toBe(CONFIG.providers.antigravity.concurrency);
+  });
+
   it("says why the two dropped variants were dropped", () => {
     expect(s).toMatch(/cannot break a tie/);
     expect(s).toMatch(/one pair in three|deadlock/);
