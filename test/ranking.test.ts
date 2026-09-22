@@ -175,9 +175,30 @@ describe("prompts", () => {
     { label: "Response C", averageRank: 0, votes: 0 },
   ];
 
-  it("names a strategy version, because changing a prompt changes the model name", () => {
-    expect(STRATEGY_VERSION).toBe(1);
+  it("names a strategy version, bumped whenever a prompt changes", () => {
+    // 2 since 2026-09-22: the synthesis prompt stopped merging freely, after a
+    // judge shipped a claim none of the members had made (docs/backlog.md).
+    expect(STRATEGY_VERSION).toBe(2);
     expect(Number.isInteger(STRATEGY_VERSION)).toBe(true);
+  });
+
+  // The remedy, pinned in the prompt that carries it: a judge told to build on
+  // the top-ranked answer, and told outright not to invent a claim out of two
+  // that disagree, which is the failure that was measured.
+  it("tells the judge to build on the top-ranked answer and to invent nothing", () => {
+    const ranked = synthesisPrompt("q", [{ label: "Response A", text: "a" }], AGG, true);
+    expect(ranked).toMatch(/top-ranked/);
+    expect(ranked).toMatch(/neither of them made/);
+    expect(ranked).toMatch(/[Aa]ssert nothing/);
+    // And the ranking is still evidence rather than an order: a judge that
+    // could not depart from a wrong first place would be a ranking with extra
+    // steps, and the panel's ordering of the tail is noisy (spike §11).
+    expect(ranked).toMatch(/not an instruction/);
+    // The council without a ranking stage has no top answer to build on, but
+    // the same guard against a claim nobody made applies to it.
+    const unranked = synthesisPrompt("q", [{ label: "Response A", text: "a" }], [], true);
+    expect(unranked).not.toMatch(/top-ranked/);
+    expect(unranked).toMatch(/neither of them made/);
   });
 
   // The serialised schema is embedded verbatim in the ranking prompt and

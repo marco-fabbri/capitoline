@@ -365,7 +365,7 @@ Nine calls are nine rows in the usage table, each under the real model that serv
 
 ### 12.8 The prompts are the strategy
 
-The three prompts live in the code, not in the configuration: they are not CLI details but the strategy itself. Changing them changes the behaviour, so it changes the name — `capitoline` becomes `capitoline-2`, and a client that wants the old behaviour keeps asking for it. Variants come only after the first shape has been measured: the two that ship, and the two that were considered and rejected, are §12.9.
+The three prompts live in the code, not in the configuration: they are not CLI details but the strategy itself. Changing them changes the behaviour, so `STRATEGY_VERSION` is bumped and every `Deliberation` reports it: two runs months apart can then be compared, and a name whose behaviour has moved says so. Keeping the previous strategy on the air beside the new one — `capitoline` answering as before while `capitoline-2` answers the new way — means keeping its prompts in the file and adding a council entry for them, and that is done when a caller has measured something worth preserving rather than on every change. Version 2 (2026-09-22) kept nothing: version 1's only measurement is the one that found the flaw it fixes. Variants come only after the first shape has been measured: the two that ship, and the two that were considered and rejected, are §12.9.
 
 ### 12.9 Variants: what is configuration, what is not, and how they are named
 

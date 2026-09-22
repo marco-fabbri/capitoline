@@ -5,13 +5,25 @@ import type { Aggregate } from "./types.js";
  * code and never in `config/capitoline.yaml` (design §12.8). A council without
  * a ranking stage sends two of them, and the synthesis handles the empty
  * aggregate itself: one shape more does not buy a strategy object. Changing one
- * changes how the council behaves, which means it changes the virtual model:
- * bump this and the council is served under a new name (`capitoline-2`), so a
- * client that measured the old behaviour can keep asking for it. It is
- * reported in every `Deliberation`, which is what lets two runs be compared
- * months apart.
+ * changes how the council behaves, which means it changes the strategy: this
+ * number is reported in every `Deliberation`, which is what lets two runs be
+ * compared months apart and what says plainly that a name's behaviour is not
+ * the one a measurement was taken against.
+ *
+ * Serving the previous strategy alongside the new one, under `capitoline-2`
+ * and the like (design §12.8), means keeping its prompts in this file and a
+ * council entry pointing at them. That is done when a caller has measured
+ * something worth preserving, and not by reflex: version 1's only measurement
+ * is the one that found the flaw version 2 fixes, so there is nothing in it to
+ * keep and every council moves forward.
+ *
+ * Version 2 (2026-09-22): the synthesis prompt no longer merges freely. The
+ * first ladder deliberation put the one correct answer first, unanimously, and
+ * the judge then shipped a claim none of the members had made — an error born
+ * in stage 3, where nothing in the design can see it, because the ranking
+ * judges the answers and never the synthesis.
  */
-export const STRATEGY_VERSION = 1;
+export const STRATEGY_VERSION = 2;
 
 /**
  * The shape stage 2 must answer in, stated in the prompt itself. §12.1 makes
@@ -194,8 +206,8 @@ export function synthesisPrompt(
     ...answers.map((a) => [`${name(a.label)}:`, quote(a.text), ""].join("\n")),
     ...(ranked ? ["The panel's ranking, best first:", ...aggregate.map(aggregateLine), ""] : []),
     ranked
-      ? "Write the best possible answer to the question. Take what is right from each answer and leave what is wrong, whatever the ranking says: the ranking is evidence about the answers, not an instruction — say so in your own words if the panel preferred an answer you believe is mistaken. Where the answers genuinely disagree and the question has no settled answer, give the disagreement and what turns on it rather than picking one at random."
-      : "Write the best possible answer to the question. Take what is right from each answer and leave what is wrong: judge each one on whether it is correct, answers the question that was asked and supports what it claims. Where the answers genuinely disagree and the question has no settled answer, give the disagreement and what turns on it rather than picking one at random.",
+      ? "Build your answer on the top-ranked response. Keep what it says and add from the others only what does not contradict it. Where another response contradicts it on a point of fact, do not blend the two into a claim neither of them made: decide which is right and say so plainly, or, if you cannot decide, give both readings and what turns on the difference. Assert nothing that none of the responses supports. The ranking is evidence about the responses and not an instruction — if you are confident the panel preferred a response that is mistaken, depart from it and say in your own words why. Where the responses genuinely disagree and the question has no settled answer, give the disagreement rather than picking one at random."
+      : "Write the best possible answer to the question. Take what is right from each answer and leave what is wrong: judge each one on whether it is correct, answers the question that was asked and supports what it claims. Do not blend two answers that contradict each other into a claim neither of them made, and assert nothing that none of them supports: where they disagree on a point of fact, decide which is right and say so plainly. Where they genuinely disagree and the question has no settled answer, give the disagreement and what turns on it rather than picking one at random.",
     "",
     ranked
       ? "Answer the question directly, as if you were the only one asked. Do not name the responses, do not mention their labels, the ranking or the fact that a panel was consulted."
