@@ -1,7 +1,7 @@
 import type { Server } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { loadConfig } from "./config.js";
+import { loadConfigWithOverlay } from "./config.js";
 import { Core } from "./core/core.js";
 import { createLogger, type Logger } from "./log.js";
 import { createMcpHandler } from "./mcp/server.js";
@@ -22,6 +22,13 @@ export interface StartOverrides {
   providers?: Provider[];
   /** Grace before an in-flight connection is destroyed during close(); defaults to SHUTDOWN_GRACE_MS. */
   shutdownGraceMs?: number;
+  /**
+   * Host overlay merged over the configuration file, defaulting to
+   * `CAPITOLINE_OVERLAY`. The default is read here rather than at the call
+   * site below so that the deployed path — the environment variable the
+   * systemd unit sets — is the one the tests exercise.
+   */
+  overlayPath?: string;
 }
 
 /**
@@ -50,7 +57,12 @@ function listen(app: ReturnType<typeof createApp>, port: number, log: Logger): P
 
 export async function start(configPath: string, overrides: StartOverrides = {}) {
   const log = createLogger("capitoline");
-  const cfg = loadConfig(configPath);
+  const overlayPath = overrides.overlayPath ?? process.env.CAPITOLINE_OVERLAY;
+  const { config: cfg, overlayKeys } = loadConfigWithOverlay(configPath, overlayPath);
+  // Which files the configuration came from, and which keys the host's overlay
+  // set — the keys only. `server.access.audience` is not a secret, but a log
+  // line that prints the overlay's values is a habit this one does not start.
+  log.info({ config: configPath, overlay: overlayPath ?? null, overlayKeys }, "configuration loaded");
   // Named and always built, even when providers are injected: it is the one
   // instance that knows sandbox_root, and the startup sweep of stale run-*
   // directories hangs off it. Constructing it touches nothing.

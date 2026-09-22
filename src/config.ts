@@ -164,15 +164,95 @@ export type Config = z.infer<typeof ConfigSchema>;
 export type ProviderConfig = Config["providers"][string];
 export type ModelConfig = ProviderConfig["models"][string];
 
-export function parseConfig(text: string): Config {
-  const result = ConfigSchema.safeParse(parse(text));
+/** `source` names the files the value came from, and is empty for a single one. */
+function validate(value: unknown, source: string): Config {
+  const result = ConfigSchema.safeParse(value);
   if (!result.success) {
     const lines = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
-    throw new Error(`invalid configuration:\n${lines.join("\n")}`);
+    throw new Error(`invalid configuration${source}:\n${lines.join("\n")}`);
   }
   return result.data;
 }
 
-export function loadConfig(path: string): Config {
-  return parseConfig(readFileSync(path, "utf8"));
+export function parseConfig(text: string): Config {
+  return validate(parse(text), "");
+}
+
+const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Deep merge of a host overlay over the repository configuration, before the
+ * schema sees either. The rules, one line each, because the host writes the
+ * overlay by hand and has to be able to predict the result:
+ *
+ * - two objects merge key by key, recursively: an overlay naming one binary
+ *   leaves the rest of that provider alone;
+ * - anything else in the overlay replaces the base's value entirely. An array
+ *   is one value, never a concatenation: `args` is a whole command line, and a
+ *   host that changes a flag needs the base's list gone, not extended;
+ * - `null` is a value, not a deletion. `effort_flag: null` and `runner.user:
+ *   null` are declared values of this schema, so an overlay must be able to
+ *   set them, and no key can be removed — there is nothing a host would remove
+ *   that it could not instead set.
+ *
+ * The base is not modified: it stays what the repository file parsed to.
+ */
+export function mergeConfig(base: unknown, overlay: unknown): unknown {
+  if (!isPlain(base) || !isPlain(overlay)) return overlay;
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    // defineProperty, not assignment: a key literally named "__proto__" in the
+    // overlay would otherwise reach the setter and change the prototype of
+    // every object in the process, instead of becoming an unknown key that the
+    // strict schema rejects by name a few lines below.
+    Object.defineProperty(out, key, { value: mergeConfig(out[key], value), writable: true, enumerable: true, configurable: true });
+  }
+  return out;
+}
+
+/** The dotted path of every value the overlay sets; an array is one leaf. */
+function leafKeys(value: unknown, prefix = ""): string[] {
+  if (!isPlain(value)) return prefix ? [prefix] : [];
+  return Object.entries(value).flatMap(([k, v]) => leafKeys(v, prefix ? `${prefix}.${k}` : k));
+}
+
+export interface LoadedConfig {
+  config: Config;
+  /** The keys the overlay set, for the startup log — keys, never values. */
+  overlayKeys: string[];
+}
+
+/**
+ * The configuration, plus what the overlay contributed.
+ *
+ * With no overlay path this is exactly what it has always been: one file, one
+ * validation. That path has to stay, because the deployed host runs a full
+ * hand-made copy of the configuration until its runbook step is applied.
+ *
+ * With one, both files are parsed, the overlay is merged over the base and the
+ * result is validated once by the same strict schema — so a key the overlay
+ * mistypes is rejected by name, and a key added upstream arrives with the pull
+ * that carries it instead of being retyped on the host.
+ *
+ * A missing overlay file is an error, never a silent skip: naming a file that
+ * is not there is a mistake, and skipping it would start the gateway on the
+ * repository's own paths, sandboxes, database and user.
+ */
+export function loadConfigWithOverlay(path: string, overlayPath?: string): LoadedConfig {
+  const base = parse(readFileSync(path, "utf8"));
+  if (overlayPath === undefined) return { config: validate(base, ""), overlayKeys: [] };
+  let text: string;
+  try {
+    text = readFileSync(overlayPath, "utf8");
+  } catch (e) {
+    throw new Error(`cannot read the configuration overlay ${overlayPath}: ${(e as Error).message}`, { cause: e });
+  }
+  const overlay = parse(text);
+  // Both file names in the message: the key the schema rejects is in one of
+  // the two, and the reader has to know which file to open.
+  return { config: validate(mergeConfig(base, overlay), ` (${path} + ${overlayPath})`), overlayKeys: leafKeys(overlay) };
+}
+
+export function loadConfig(path: string, overlayPath?: string): Config {
+  return loadConfigWithOverlay(path, overlayPath).config;
 }

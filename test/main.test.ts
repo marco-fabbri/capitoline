@@ -188,6 +188,66 @@ describe("start()", () => {
   });
 });
 
+describe("start() with a host overlay", () => {
+  /** An overlay written to a directory of its own, next to the database it points at. */
+  function overlay(body: (db: string) => string): { path: string; db: string } {
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-overlay-"));
+    const db = join(dir, "usage.sqlite");
+    const path = join(dir, "overlay.yaml");
+    writeFileSync(path, body(db));
+    return { path, db };
+  }
+
+  it("merges the overlay over the configuration it is given", async () => {
+    // usage.db_path is the observable one: the e2e configuration keeps the
+    // store in memory, so a file on disk can only come from the overlay.
+    const { path, db } = overlay((f) => `usage:\n  db_path: "${f}"\n`);
+    const p = new FakeProvider("claude", ["claude-opus"], OK);
+    const app = await start(CONFIG, { port: 0, providers: [p], overlayPath: path });
+    try {
+      expect(existsSync(db)).toBe(true);
+    } finally { await app.close(); }
+  });
+
+  it("takes the overlay from CAPITOLINE_OVERLAY when none is passed", async () => {
+    // What the systemd unit sets, and the only path the deployed service uses.
+    const { path, db } = overlay((f) => `usage:\n  db_path: "${f}"\n`);
+    const before = process.env.CAPITOLINE_OVERLAY;
+    process.env.CAPITOLINE_OVERLAY = path;
+    const p = new FakeProvider("claude", ["claude-opus"], OK);
+    try {
+      const app = await start(CONFIG, { port: 0, providers: [p] });
+      try {
+        expect(existsSync(db)).toBe(true);
+      } finally { await app.close(); }
+    } finally {
+      if (before === undefined) delete process.env.CAPITOLINE_OVERLAY;
+      else process.env.CAPITOLINE_OVERLAY = before;
+    }
+  });
+
+  it("refuses to start when the overlay names a file that is not there", async () => {
+    // Loud, like every other configuration mistake: the alternative is a
+    // gateway running on the repository's own paths and user.
+    const absent = join(mkdtempSync(join(tmpdir(), "capitoline-overlay-")), "absent.yaml");
+    const p = new FakeProvider("claude", ["claude-opus"], OK);
+    await expect(start(CONFIG, { port: 0, providers: [p], overlayPath: absent })).rejects.toThrow(absent);
+  });
+
+  it("starts as it does today when no overlay is named", async () => {
+    const before = process.env.CAPITOLINE_OVERLAY;
+    delete process.env.CAPITOLINE_OVERLAY;
+    const p = new FakeProvider("claude", ["claude-opus"], OK);
+    try {
+      const app = await start(CONFIG, { port: 0, providers: [p] });
+      try {
+        const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
+        expect(((await r.json()) as { data: { id: string }[] }).data.map((m) => m.id)).toEqual(["claude-opus"]);
+      } finally { await app.close(); }
+    } finally { if (before !== undefined) process.env.CAPITOLINE_OVERLAY = before; }
+  });
+});
+
 describe("close()", () => {
   it("waits five seconds for an in-flight response by default", () => {
     // Pinned: every other test here overrides the grace, so a production value

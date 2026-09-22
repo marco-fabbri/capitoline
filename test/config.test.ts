@@ -1,5 +1,8 @@
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { loadConfig, parseConfig } from "../src/config.js";
+import { loadConfig, loadConfigWithOverlay, mergeConfig, parseConfig } from "../src/config.js";
 
 // Every inline configuration below is built from these two helpers. The
 // provider block must carry all the keys the schema requires, so a key added
@@ -285,5 +288,157 @@ describe("the end-to-end configuration tracks the repository one", () => {
     }
     expect(e2e.providers.antigravity.image.collect).toEqual(["test/fake-cli/fake-collect-image.sh"]);
     expect(repo.providers.antigravity.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
+  });
+});
+
+// The host overlay. /etc/capitoline/capitoline.yaml used to be a full
+// hand-made copy of the repository file, and it drifted twice in one day: a
+// required key added upstream reached the host only when someone retyped it,
+// once through a restart loop. The base now arrives with the pull that changes
+// it, and the host writes only what is genuinely local.
+describe("mergeConfig", () => {
+  it("merges objects key by key", () => {
+    expect(mergeConfig({ a: { b: 1, c: 2 }, d: 3 }, { a: { c: 9 } })).toEqual({ a: { b: 1, c: 9 }, d: 3 });
+  });
+  it("replaces an array instead of appending to it", () => {
+    // What a host that changes a flag needs: `args` is the whole command line,
+    // and a concatenation would leave the base's flags in place next to the
+    // ones meant to replace them.
+    expect(mergeConfig({ a: ["x", "y"] }, { a: ["z"] })).toEqual({ a: ["z"] });
+    expect(mergeConfig({ a: ["x"] }, { a: [] })).toEqual({ a: [] });
+  });
+  it("treats null as a value, not as a deletion", () => {
+    // `effort_flag: null` and `runner.user: null` are declared values in this
+    // schema, so an overlay must be able to set them.
+    expect(mergeConfig({ a: "--effort" }, { a: null })).toEqual({ a: null });
+  });
+  it("lets a scalar in the overlay replace a whole object", () => {
+    expect(mergeConfig({ a: { b: 1 } }, { a: "x" })).toEqual({ a: "x" });
+    expect(mergeConfig({ a: 1 }, { b: 2 })).toEqual({ a: 1, b: 2 });
+  });
+  it("leaves the base untouched", () => {
+    // The base is the parsed repository file; a merge that wrote into it would
+    // make a second load return something else than the first.
+    const base = { a: { b: 1 } };
+    expect(mergeConfig(base, { a: { b: 2 } })).toEqual({ a: { b: 2 } });
+    expect(base).toEqual({ a: { b: 1 } });
+  });
+  it("does not let a key named __proto__ reach the prototype", () => {
+    // The overlay is a file on the host, parsed before the schema sees it: a
+    // plain assignment would run the setter and change every object in the
+    // process instead of adding a key the strict schema would reject by name.
+    const merged = mergeConfig({}, JSON.parse('{"__proto__": {"polluted": true}}')) as Record<string, unknown>;
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf(merged)).toBe(Object.prototype);
+  });
+});
+
+describe("loadConfig with a host overlay", () => {
+  /** An overlay written to a directory of its own; returns its path. */
+  function overlayFile(text: string): string {
+    const path = join(mkdtempSync(join(tmpdir(), "capitoline-overlay-")), "overlay.yaml");
+    writeFileSync(path, text);
+    return path;
+  }
+  const REPO = "config/capitoline.yaml";
+
+  it("behaves exactly as today when no overlay is passed", () => {
+    // The deployed service runs a full hand-made copy until its runbook step is
+    // applied by hand, so the single-file path must stay untouched.
+    const asToday = parseConfig(readFileSync(REPO, "utf8"));
+    expect(loadConfig(REPO)).toEqual(asToday);
+    expect(loadConfig(REPO, undefined)).toEqual(asToday);
+    expect(loadConfigWithOverlay(REPO).overlayKeys).toEqual([]);
+  });
+
+  it("changes one binary and leaves the rest of the provider intact", () => {
+    const repo = loadConfig(REPO);
+    const cfg = loadConfig(REPO, overlayFile("providers:\n  claude:\n    binary: /home/runner/.npm-global/bin/claude\n"));
+    expect(cfg.providers.claude.binary).toBe("/home/runner/.npm-global/bin/claude");
+    // Everything else of that provider, and the other two providers whole.
+    expect({ ...cfg.providers.claude, binary: repo.providers.claude.binary }).toEqual(repo.providers.claude);
+    expect(cfg.providers.codex).toEqual(repo.providers.codex);
+    expect(cfg.providers.antigravity).toEqual(repo.providers.antigravity);
+    expect({ ...cfg, providers: repo.providers }).toEqual(repo);
+  });
+
+  it("replaces an array rather than appending to it", () => {
+    const cfg = loadConfig(REPO, overlayFile("providers:\n  claude:\n    args: [-p, --settings, /home/runner/.claude/capitoline.json]\n"));
+    expect(cfg.providers.claude.args).toEqual(["-p", "--settings", "/home/runner/.claude/capitoline.json"]);
+    expect(cfg.providers.claude.args).not.toContain("--verbose");
+  });
+
+  it("keeps a null the overlay sets", () => {
+    const cfg = loadConfig(REPO, overlayFile("runner:\n  user: null\nproviders:\n  claude:\n    effort_flag: null\n"));
+    expect(cfg.runner.user).toBeNull();
+    expect(loadConfig(REPO).providers.claude.effort_flag).toBe("--effort");
+    expect(cfg.providers.claude.effort_flag).toBeNull();
+  });
+
+  it("rejects an unknown key the overlay adds, naming the overlay", () => {
+    // The whole point of the strict schema, now applied to the file the host
+    // actually edits: `usr` for `user` would run the CLIs as the gateway's own
+    // user. The message names both files, because the key is in only one.
+    const path = overlayFile("runner:\n  usr: nobody\n");
+    expect(() => loadConfig(REPO, path)).toThrow(/runner: Unrecognized key\(s\) in object: 'usr'/);
+    expect(() => loadConfig(REPO, path)).toThrow(path);
+    expect(() => loadConfig(REPO, path)).toThrow(REPO);
+    // With no overlay the message is the one the runbook quotes, unchanged.
+    expect(() => parseConfig("providers: {}\nrunner: { sandbox_root: /tmp/x }\n")).toThrow(/^invalid configuration:\n/);
+  });
+
+  it("raises when the overlay file is not there", () => {
+    // Naming a file that does not exist is a mistake, not a request to skip it:
+    // a silent skip would start the gateway with the repository's own paths,
+    // sandboxes and database, as the wrong user.
+    const absent = join(mkdtempSync(join(tmpdir(), "capitoline-overlay-")), "absent.yaml");
+    expect(() => loadConfig(REPO, absent)).toThrow(absent);
+    expect(() => loadConfig(REPO, absent)).toThrow(/overlay/);
+  });
+});
+
+// The overlay the host writes, kept honest the same way test/e2e.config.yaml
+// is: it is the template docs/deploy.md §7 points at, so a key added to it by
+// mistake, or a host difference dropped from it, fails here.
+describe("config/overlay.example.yaml", () => {
+  const EXAMPLE = "config/overlay.example.yaml";
+  // Exactly the host-specific keys, and nothing else: anything else belongs to
+  // the repository file and must arrive with the pull that changes it.
+  const HOST_KEYS = [
+    "providers.antigravity.binary",
+    "providers.antigravity.image.collect",
+    "providers.claude.args",              // the whole list: arrays replace, and the host's carries --settings
+    "providers.claude.binary",
+    "providers.codex.binary",
+    "runner.sandbox_root",
+    "runner.user",
+    "server.access.audience",
+    "server.access.team_domain",
+    "usage.db_path",
+  ];
+
+  it("sets exactly the host-specific keys", () => {
+    const { overlayKeys } = loadConfigWithOverlay("config/capitoline.yaml", EXAMPLE);
+    expect([...overlayKeys].sort()).toEqual(HOST_KEYS);
+    // Paths, never values: this is what the startup log prints, and the log
+    // must not grow the habit of carrying the file's contents.
+    for (const k of overlayKeys) expect(k).toMatch(/^[A-Za-z_][\w.-]*$/);
+  });
+
+  it("merges over the repository configuration into the host's own", () => {
+    const cfg = loadConfig("config/capitoline.yaml", EXAMPLE);
+    expect(cfg.runner.user).toBe("runner");
+    expect(cfg.runner.sandbox_root).toBe("/var/lib/capitoline/sandboxes");
+    expect(cfg.usage.db_path).toBe("/var/lib/capitoline/usage.sqlite");
+    expect(cfg.providers.claude.binary).toBe("/home/runner/.npm-global/bin/claude");
+    expect(cfg.providers.codex.binary).toBe("/home/runner/.npm-global/bin/codex");
+    expect(cfg.providers.antigravity.binary).toBe("/home/runner/.local/bin/agy");
+    expect(cfg.providers.antigravity.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
+    // Access is filled in §9 of the runbook; both empty is the disabled pair.
+    expect(cfg.server.access).toEqual({ team_domain: "", audience: "" });
+    // The replaced list is the repository's plus the host's token file, and it
+    // must still be a complete command line: nothing is appended for it.
+    const repo = loadConfig("config/capitoline.yaml").providers.claude.args;
+    expect(cfg.providers.claude.args).toEqual([...repo, "--settings", "/home/runner/.claude/capitoline.json"]);
   });
 });

@@ -34,7 +34,7 @@ On the host, as root:
    through the tunnel with the service token, from the host or from the Mac:
 
    ```sh
-   cd /var/lib/capitoline/app && CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml \
+   cd /var/lib/capitoline/app && \
      CF_ACCESS_CLIENT_ID=<id> CF_ACCESS_CLIENT_SECRET=<secret> \
      scripts/smoke.sh https://api.example.com
    ```

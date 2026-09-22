@@ -1,0 +1,69 @@
+# Host overlay: the template for /etc/capitoline/overlay.yaml (docs/deploy.md §7).
+#
+# The service loads config/capitoline.yaml from the clone as the base and
+# merges this file over it, so everything that is not host-specific — flags,
+# model aliases, effort mapping, timeouts, budgets — arrives with the `git
+# pull` that changes it and is not repeated here. What stays is the dozen
+# lines the host genuinely says differently: where the binaries are, who runs
+# them, where the sandboxes and the database live, and the Access application.
+#
+# Merge rules (src/config.ts, mergeConfig): objects merge key by key; a scalar
+# or a list replaces the base's value whole, never appending to it; `null` is a
+# value, not a deletion. The merged result is validated once by the same strict
+# schema, so a mistyped key here is rejected by name.
+#
+# Secrets are not in this file and never should be: the Claude OAuth token
+# lives in /home/runner/.claude/capitoline.json, owned by runner and 0600, and
+# the gateway process never reads it.
+
+runner:
+  user: runner                                # the CLIs run as this user, through sudo (§5)
+  sandbox_root: /var/lib/capitoline/sandboxes
+
+usage:
+  db_path: /var/lib/capitoline/usage.sqlite    # absolute: the service's working directory is the clone
+
+server:
+  access:
+    # Filled in §9, from the Zero Trust dashboard. Both empty disables the JWT
+    # verification, which is the only state in which this gateway may be
+    # reachable from 127.0.0.1 alone.
+    team_domain: ""      # <your-team>.cloudflareaccess.com
+    audience: ""         # the Access application's AUD tag
+
+providers:
+  claude:
+    binary: /home/runner/.npm-global/bin/claude
+    # The whole list, because a list replaces and is never appended to. It is
+    # the repository's command line plus the one host argument: --settings
+    # points at the file holding the OAuth token, which is readable by runner
+    # only and applies even with --setting-sources "". Re-check this list
+    # against config/capitoline.yaml after a pull that changes claude's args —
+    # it is the one place where the host still pins a repository value.
+    args:
+      - -p
+      - --output-format
+      - stream-json
+      - --verbose
+      - --include-partial-messages
+      - --tools
+      - ""
+      - --strict-mcp-config
+      - --disable-slash-commands
+      - --setting-sources
+      - ""
+      - --no-session-persistence
+      - --permission-prompts
+      - none
+      - --settings
+      - /home/runner/.claude/capitoline.json
+
+  codex:
+    binary: /home/runner/.npm-global/bin/codex
+
+  antigravity:
+    binary: /home/runner/.local/bin/agy
+    image:
+      # Must be the path the sudoers rule of §5 names: the gateway user runs
+      # this exact path as runner, and nothing else.
+      collect: [/usr/local/bin/capitoline-collect-image]

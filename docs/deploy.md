@@ -298,89 +298,93 @@ sudo -Hu capitoline git clone <repo url> /var/lib/capitoline/app
 cd /var/lib/capitoline/app
 sudo -Hu capitoline npm ci
 sudo -Hu capitoline npm run build
-cp config/capitoline.yaml /etc/capitoline/capitoline.yaml
-chown root:capitoline /etc/capitoline/capitoline.yaml
-chmod 0640 /etc/capitoline/capitoline.yaml
+cp config/overlay.example.yaml /etc/capitoline/overlay.yaml
+chown root:capitoline /etc/capitoline/overlay.yaml
+chmod 0640 /etc/capitoline/overlay.yaml
 ```
 
 `-H` matters: without it `sudo` keeps root's `HOME`, npm looks for its cache
 in `/root/.npm` and `npm ci` fails with `EACCES`. With it the cache lands in
 `/var/lib/capitoline/.npm`.
 
-Edit `/etc/capitoline/capitoline.yaml`:
+**Two files, one configuration.** The service reads `config/capitoline.yaml`
+from the clone — the repository's own file, which every `git pull` updates —
+and merges `/etc/capitoline/overlay.yaml` over it. The overlay holds only what
+this host says differently: where the binaries are, who runs them, where the
+sandboxes and the database live, the Access application. Everything else —
+flags, model aliases, effort mapping, timeouts, budgets — arrives with the
+pull that changes it. That is the whole point of the shape: the production
+file used to be a full hand-made copy, so a required key added upstream
+reached the host only when someone retyped it, and on 2026-09-22 that cost two
+restart loops in one day.
+
+Merge rules, from `mergeConfig` in `src/config.ts`:
+
+- objects merge key by key, so naming one binary leaves the rest of that
+  provider untouched;
+- a scalar or a **list replaces** the base's value whole. A list is never
+  appended to — that is what a host changing a flag needs, and it is why the
+  `claude` block writes out the whole `args` list to add one argument;
+- `null` is a value, not a deletion: `effort_flag: null` and `runner.user:
+  null` are declared values of this schema;
+- the merged result is validated once, by the same strict schema the single
+  file went through, so a key the overlay mistypes is rejected by name rather
+  than dropped.
+
+Edit `/etc/capitoline/overlay.yaml`:
 
 | Key | Production value |
 |---|---|
 | `runner.user` | `runner` |
 | `runner.sandbox_root` | `/var/lib/capitoline/sandboxes` |
-| `usage.db_path` | `/var/lib/capitoline/usage.sqlite` |
+| `usage.db_path` | `/var/lib/capitoline/usage.sqlite` — absolute, because the service's working directory is the clone |
 | `providers.claude.binary` | `/home/runner/.npm-global/bin/claude` |
-| `providers.claude.args` | append `--settings` and `/home/runner/.claude/capitoline.json` as two list items |
+| `providers.claude.args` | the repository's list plus `--settings` and `/home/runner/.claude/capitoline.json` as two more items, written out in full because a list replaces. That file (owned by `runner`, mode `0600`) holds `{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}`, and `--settings` applies even with `--setting-sources ""`, so the gateway process never sees the token. It is the one value the overlay pins against the repository: re-read it after a pull that changes `providers.claude.args` |
 | `providers.codex.binary` | `/home/runner/.npm-global/bin/codex` |
 | `providers.antigravity.binary` | `/home/runner/.local/bin/agy` |
-| `providers.antigravity.image.collect` | `[/usr/local/bin/capitoline-collect-image]` — already the value in the repository copy; it must match the sudoers path of §5 (a developer machine sets `runner.user: null` and points `image.collect` at `scripts/capitoline-collect-image`; the runner then spawns it directly, as the developer, so it reads that machine's own `$HOME`) |
-| `providers.antigravity.image.min_bytes` | `200000` — keep it: below this the collected file is a placeholder, not a picture, and the request fails with `bad_output` rather than returning a grey rectangle (placeholders were observed at 2-65 KB against 1.8-2.4 MB for a real image, hence the threshold) |
-| `providers.antigravity.image.quota_per_window` | `12` — the short image quota, 12 generations per 5 hours (the window length is fixed in the code, `H5`), reported only: the gateway never blocks on it. `/health` (`providers[].imageQuota`) and `/v1/models` (`capitoline.quota`) show `used` against it, and `used` is a lower bound rather than an exact count: it counts the successful generations served by the images endpoint, while a text run that invokes `generate_image` spends quota without being counted, and so does a generation the client abandons. Leave the key out and the count is still reported, with `limit: null`. The second, much longer quota of the same model (days) cannot be counted: it appears only as the `resetAt` of a quota hit, in `/health` and in the MCP `list_models` tool — never in `/v1/models`, which by then no longer lists the paused model |
-| `providers.antigravity.image.allowed_tools` | `[generate_image]` — do not extend: any other tool call aborts the run, which is what keeps an image request from turning into an agent session |
+| `providers.antigravity.image.collect` | `[/usr/local/bin/capitoline-collect-image]` — must match the sudoers path of §5 (a developer machine sets `runner.user: null` and points it at `scripts/capitoline-collect-image`; the runner then spawns it directly, as the developer, so it reads that machine's own `$HOME`) |
 | `server.access.team_domain`, `server.access.audience` | filled in §9; both empty until then |
 
-Everything else (flags, model aliases, effort mapping) stays as in the
-repository copy, including the keys an update adds to it: they are not
-optional and must be copied across (next paragraph). It is the verified set
-for the CLI versions in `docs/update-clis.md`.
+`config/overlay.example.yaml` in the repository is exactly this file with the
+Access pair left empty, and `test/config.test.ts` pins its key list: a host
+key added there without a line here, or the other way round, fails in CI.
 
-**Keys added by an update must be copied across.** This file is a hand-made
-copy, edited in place; a `git pull` changes the repository copy and never this
-one. After every pull, before restarting, see what is missing:
+Everything else stays in the repository file, the verified set for the CLI
+versions of `docs/update-clis.md`. Three of its keys are worth knowing even
+though they are not host-specific, all under `providers.antigravity.image`:
 
-```sh
-diff <(grep -oE '^[[:space:]]*[a-z_]+:' /etc/capitoline/capitoline.yaml | tr -d ' ' | sort -u)      <(grep -oE '^[[:space:]]*[a-z_]+:' config/capitoline.yaml | tr -d ' ' | sort -u)
-```
+| Key | Why it reads as it does |
+|---|---|
+| `min_bytes` | `200000` — below this the collected file is a placeholder, not a picture, and the request fails with `bad_output` rather than returning a grey rectangle (placeholders were observed at 2-65 KB against 1.8-2.4 MB for a real image) |
+| `quota_per_window` | `12` — the short image quota, 12 generations per 5 hours (the window length is fixed in the code, `H5`), reported only: the gateway never blocks on it. `/health` (`providers[].imageQuota`) and `/v1/models` (`capitoline.quota`) show `used` against it, and `used` is a lower bound rather than an exact count: it counts the successful generations served by the images endpoint, while a text run that invokes `generate_image` spends quota without being counted, and so does a generation the client abandons. Leave the key out and the count is still reported, with `limit: null`. The second, much longer quota of the same model (days) cannot be counted: it appears only as the `resetAt` of a quota hit, in `/health` and in the MCP `list_models` tool — never in `/v1/models`, which by then no longer lists the paused model |
+| `allowed_tools` | `[generate_image]` — do not extend: any other tool call aborts the run, which is what keeps an image request from turning into an agent session |
 
-It happened twice on 2026-09-22, each time costing a restart loop until the
-field was added. The backlog carries the proper fix: a host overlay merged
-over the repository file, so an upstream field arrives with the pull that
-carries it. Four keys are new, in every one of the three provider blocks:
-`providers.<id>.model_flag`, `effort_flag` and `effort_key` (task B1), and
-`system_prompt_flag_prefix` with them. They name the flags that used to be
-literals in the adapters, so the values to copy are the command lines the host
-already runs:
-
-| Provider | `model_flag` | `effort_flag` | `effort_key` | `system_prompt_flag_prefix` |
-|---|---|---|---|---|
-| `claude` | `--model` | `--effort` | `null` | `null` |
-| `codex` | `-m` | `-c` | `model_reasoning_effort` | `-c` |
-| `antigravity` | `--model` | `null` | `null` | `null` |
-
-`null` is a value here, not a missing key: it says the CLI has no such flag,
-and the key must still be present. The schema gives the four no default on
-purpose: a file without them is rejected by `check-config` naming each one
-missing (`providers.claude.system_prompt_flag_prefix: Required`), instead of
-validating and quietly invoking `codex --model <id>` with no reasoning-effort
-override, or passing Codex's system prompt as a bare argument with the `-c`
-that carries it dropped. The price of that choice is this paragraph: restart
-the service before copying the keys across and it exits on the same message,
-which under `Restart=always` (§8) is a restart loop whose only trace is the
-journal. After every `git pull`, before the restart:
-
-```sh
-diff /var/lib/capitoline/app/config/capitoline.yaml /etc/capitoline/capitoline.yaml
-```
-
-and carry over anything new, then re-validate with the command below.
-
-Validate the file after every edit, and before restarting the service:
+Validate after every edit, and before restarting the service:
 
 ```sh
 cd /var/lib/capitoline/app && sudo -Hu capitoline \
-  env CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml npm run check-config   # prints "configuration OK"
+  env CAPITOLINE_CONFIG=config/capitoline.yaml \
+      CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml npm run check-config   # prints "configuration OK"
 ```
 
-A mistyped key or an empty value is rejected at startup instead of being
-dropped silently, which under `Restart=always` (§8) is a restart loop whose
-only trace is the journal. This command loads the same file through the same
-schema, out of the service's way; it reads `dist/config.js`, so it needs the
-`npm run build` above.
+This loads and merges the same two files through the same schema, out of the
+service's way; it reads `dist/config.js`, so it needs the `npm run build`
+above. A mistyped key or an empty value is rejected here instead of at
+startup, where under `Restart=always` (§8) it is a restart loop whose only
+trace is the journal. The message names both files, since the rejected key is
+in one of the two. A missing overlay file is an error as well, never a silent
+skip: a typo in the path would otherwise start the gateway on the repository's
+own sandboxes, database and user.
+
+**A host that still runs a full copy keeps working.** Passing no overlay is
+still supported and behaves exactly as it did, so a deployment where
+`CAPITOLINE_CONFIG` alone names `/etc/capitoline/capitoline.yaml` is valid —
+it just keeps drifting, and every key added upstream has to be retyped into
+it. To migrate: write the overlay, point `CAPITOLINE_CONFIG` at the clone's
+`config/capitoline.yaml` and add `CAPITOLINE_OVERLAY` to the unit (§8),
+validate with the command above, restart, then delete the old copy. Move the
+backup with it (§11): from that moment the overlay is the only file on this
+host that is not in git.
 
 ### 7.1 Image collection helper
 
@@ -450,7 +454,8 @@ After=network-online.target time-sync.target
 User=capitoline
 Group=capitoline
 WorkingDirectory=/var/lib/capitoline/app
-Environment=CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml
+Environment=CAPITOLINE_CONFIG=/var/lib/capitoline/app/config/capitoline.yaml
+Environment=CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/node dist/main.js
 Restart=always
@@ -463,6 +468,15 @@ systemctl daemon-reload
 systemctl enable --now capitoline
 journalctl -u capitoline -f
 ```
+
+The two `CAPITOLINE_*` paths are the base and the overlay of §7, in that
+order; the base is written out in full rather than left to the working
+directory, so the unit says which files the service reads without the reader
+having to know what `WorkingDirectory` is. The first line of the journal at
+every start is `configuration loaded`, naming both files and the keys — never
+the values — the overlay set. A host that has not migrated yet keeps the
+single `CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml` and no
+`CAPITOLINE_OVERLAY`, and behaves exactly as before.
 
 `NoNewPrivileges` must stay off: `sudo` needs it. The service listens on
 `127.0.0.1:8080` only. The startup log shows `listening` first, then one
@@ -494,9 +508,10 @@ directory that appears there *while* the service is running is another matter �
 a run that hung rather than one that was killed — and is worth reading the
 journal around its timestamp.
 
-`invalid configuration:` in the journal, followed by a restart every three
-seconds, means the file named by `CAPITOLINE_CONFIG` was rejected: the lines
-below it name the key and the reason (`runner: Unrecognized key(s) in object:
+`invalid configuration` in the journal, followed by a restart every three
+seconds, means the configuration was rejected. The line names the files it was
+built from — one with `CAPITOLINE_CONFIG` alone, both when `CAPITOLINE_OVERLAY`
+is set — and the lines below it name the key and the reason (`runner: Unrecognized key(s) in object:
 'usr'`, `runner.user: String must contain at least 1 character(s)`). Fix the
 key and restart; `npm run check-config` of §7 prints the same message without
 touching the service.
@@ -657,6 +672,10 @@ Description=Capitoline backup
 Type=oneshot
 User=capitoline
 Group=capitoline
+# The host-specific file, which on a host migrated to the overlay of §7 is the
+# overlay: the base configuration is in git and needs no backup. The archive
+# entry is named `capitoline.yaml` whatever this points at.
+Environment=CAPITOLINE_CONFIG=/etc/capitoline/overlay.yaml
 ExecStart=/usr/local/bin/capitoline-backup /var/backups/capitoline
 UNIT
 cat > /etc/systemd/system/capitoline-backup.timer <<'UNIT'
@@ -685,7 +704,7 @@ run interrupted before sqlite removes them leaves both sidecars owned by
 `capitoline`, can no longer open its own database read-write, and under
 `Restart=always` that is a silent restart loop. As `capitoline` the job needs
 nothing it does not already have: it owns the database, reads
-`/etc/capitoline/capitoline.yaml` through the group of §7, and owns the
+`/etc/capitoline/overlay.yaml` through the group of §7, and owns the
 destination directory.
 
 Verify one run by hand, with the service running — that is the case the
@@ -714,11 +733,17 @@ sqlite3 /var/tmp/restore/usage.sqlite 'PRAGMA integrity_check; SELECT COUNT(*), 
 install -o capitoline -g capitoline -m 0600 \
   /var/tmp/restore/capitoline.yaml /var/tmp/restore/capitoline.checked.yaml
 cd /var/lib/capitoline/app && sudo -Hu capitoline \
-  env CAPITOLINE_CONFIG=/var/tmp/restore/capitoline.checked.yaml npm run check-config   # prints "configuration OK"
+  env CAPITOLINE_CONFIG=config/capitoline.yaml \
+      CAPITOLINE_OVERLAY=/var/tmp/restore/capitoline.checked.yaml npm run check-config   # prints "configuration OK"
 ```
 
 `integrity_check` prints `ok`, the count is non-zero and `MAX(ts)` is a
 millisecond epoch from the day the backup ran (`date -d @$(( <ts> / 1000 ))`).
+The archived configuration is the host's overlay (§11 archives whatever
+`CAPITOLINE_CONFIG` names, under the entry name `capitoline.yaml`), so it is
+validated the way the service reads it: merged over the clone's
+`config/capitoline.yaml`. On a host that never migrated it is a full
+configuration instead, and the `CAPITOLINE_OVERLAY` line comes off.
 A count that stops days before the backup means the snapshot lost the WAL —
 the failure this whole section exists to prevent — and the archive is not
 usable. The configuration is validated here, before the restart rather than
@@ -743,7 +768,7 @@ Putting it back:
 
 ```sh
 systemctl stop capitoline
-install -o root -g capitoline -m 0640 /var/tmp/restore/capitoline.yaml /etc/capitoline/capitoline.yaml
+install -o root -g capitoline -m 0640 /var/tmp/restore/capitoline.yaml /etc/capitoline/overlay.yaml
 install -o capitoline -g capitoline -m 0640 /var/tmp/restore/usage.sqlite /var/lib/capitoline/usage.sqlite
 rm -f /var/lib/capitoline/usage.sqlite-wal /var/lib/capitoline/usage.sqlite-shm
 systemctl start capitoline
@@ -779,7 +804,7 @@ Before §9 (Access not yet configured, `server.access.team_domain` empty),
 on the host:
 
 ```sh
-cd /var/lib/capitoline/app && CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml scripts/smoke.sh http://127.0.0.1:8080
+cd /var/lib/capitoline/app && scripts/smoke.sh http://127.0.0.1:8080
 # add SMOKE_IMAGE=1 to include one real generation: it spends a unit of a quota
 # that is 12 per 5 hours and 58 per week, so it is off by default. A 429 on the
 # image model is printed and does not fail the run.
@@ -797,8 +822,9 @@ CF_ACCESS_CLIENT_ID=<id> CF_ACCESS_CLIENT_SECRET=<secret> \
   scripts/smoke.sh https://api.example.com
 ```
 
-(on the host, prefix `CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml` as
-above so the model list matches the production configuration.)
+(from the clone, as above: the script reads the `health_model` of each
+provider out of `config/capitoline.yaml`, and model names are not something
+the host overlay changes.)
 
 Expected: three lines with status `200`, a short answer and a token count,
 then an `image` line with `200` and the size of the collected picture; exit
