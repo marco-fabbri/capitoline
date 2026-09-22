@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { loadConfigWithOverlay } from "./config.js";
 import { Core } from "./core/core.js";
+import { Council } from "./council/council.js";
 import { createLogger, type Logger } from "./log.js";
 import { createMcpHandler } from "./mcp/server.js";
 import { buildProviders } from "./providers/index.js";
@@ -78,6 +79,18 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const budgets = Object.fromEntries(Object.entries(cfg.providers).map(([id, p]) => [id, { window5h: p.budget.window_5h_tokens, window7d: p.budget.window_7d_tokens }]));
   const imageQuotas = Object.fromEntries(Object.entries(cfg.providers).flatMap(([id, p]) => (p.image.quota_per_window === undefined ? [] : [[id, p.image.quota_per_window] as const])));
   const core = new Core(providers, usage, { maxWaitMs: cfg.server.queue.max_wait_s * 1000, budgets, imageQuotas, log: log.child({ mod: "core" }) });
+
+  // One Council per configured council, registered as a virtual model: a client
+  // asks for `capitoline` in `model` exactly as it asks for `claude-opus`, and
+  // Core routes it here instead of to a provider. The council is handed the
+  // core itself — every member call goes back through Core.execute(), so the
+  // queue, the pauses, the health state and the usage rows apply to a member
+  // exactly as to a direct request (design §12, plan constraints).
+  for (const [name, councilCfg] of Object.entries(cfg.council)) {
+    const council = new Council(name, councilCfg, core, log.child({ mod: "council", council: name }));
+    core.registerVirtual(name, (question, ctx) => council.deliberate(question, ctx), (models) => council.seatable(models));
+    log.info({ council: name, seats: councilCfg.seats.map((s) => s.family), judge: councilCfg.judge.family }, "council registered");
+  }
 
   const access = cfg.server.access.team_domain
     ? createAccessMiddleware({ teamDomain: cfg.server.access.team_domain, audience: cfg.server.access.audience }, log.child({ mod: "access" }))

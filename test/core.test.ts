@@ -4,6 +4,8 @@ import { UsageStore } from "../src/usage/store.js";
 import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
 import type { ProviderEvent } from "../src/core/types.js";
+import { Council, type CouncilEvent } from "../src/council/council.js";
+import type { CouncilConfig, Deliberation, Seat } from "../src/council/types.js";
 
 const OK: ProviderEvent[] = [{ type: "text", delta: "hi" }, { type: "done", usage: { input: 3, output: 1 } }];
 const req = (model: string) => ({ model, stream: false, messages: [{ role: "user" as const, text: "q" }] });
@@ -582,5 +584,171 @@ describe("Core images", () => {
     c.script = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 300 }];
     await drain(core.execute(req("c-text"), { source: "http" }));
     expect(core.providerStates().find((p) => p.id === "c")!.imageQuota!.resetAt).toBeNull();
+  });
+});
+
+// --- Virtual models (task 5) ---------------------------------------------
+//
+// A council is asked for in `model` like every other model, so the routing is
+// Core's business; what the council does with the question is council.test.ts.
+// The two seats and the judge below are the repository's panel in miniature:
+// enough to seat a quorum, and small enough that taking one provider down
+// breaks it.
+const VSEATS: Seat[] = [
+  { family: "anthropic", models: ["claude-opus", "claude-sonnet"] },
+  { family: "openai", models: ["codex-astra"] },
+];
+const VJUDGE: Seat = { family: "anthropic", models: ["claude-haiku"] };
+const VCFG: CouncilConfig = { seats: VSEATS, judge: VJUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, stageTimeoutS: 5 };
+
+/** A deliberation detail with nothing in it: the routing carries it whole and never reads it. */
+const DETAIL: Deliberation = {
+  deliberationId: "d-1", strategyVersion: 1, members: [], lost: [], rankings: [], aggregate: [],
+  judge: { model: "a-2", blind: true }, calls: 2,
+};
+const answered: CouncilEvent[] = [{ type: "text", delta: "the synthesis" }, { type: "done", usage: { input: 6, output: 2 }, detail: DETAIL }];
+/** A run that replays a fixed list of events and records the question it was given. */
+function fakeRun(events: CouncilEvent[], seen: string[] = []) {
+  const run = async function* (question: string): AsyncIterable<CouncilEvent> { seen.push(question); yield* events; };
+  return { run, seen };
+}
+
+describe("Core virtual models", () => {
+  it("routes a request for a virtual model to its run and to no provider", async () => {
+    const { core, a, b } = make();
+    const { run, seen } = fakeRun(answered);
+    core.registerVirtual("capitoline", run);
+    expect(await drain(core.execute(req("capitoline"), { source: "http" }))).toEqual([
+      { type: "text", delta: "the synthesis" }, { type: "done", usage: { input: 6, output: 2 } },
+    ]);
+    expect(seen).toEqual(["q"]);
+    expect([a.calls.length, b.calls.length]).toEqual([0, 0]);
+  });
+
+  it("hands the run the whole conversation as one question, the system message included", async () => {
+    const { core } = make();
+    const { run, seen } = fakeRun(answered);
+    core.registerVirtual("capitoline", run);
+    await drain(core.execute({
+      model: "capitoline", stream: false,
+      messages: [{ role: "system", text: "Answer in French" }, { role: "user", text: "why?" }, { role: "assistant", text: "because" }, { role: "user", text: "and?" }],
+    }, { source: "http" }));
+    // The council has no system-prompt channel of its own — its prompts are the
+    // strategy (§12.8) — so a client's system message is folded into the
+    // question rather than dropped in silence.
+    expect(seen[0]).toBe("Answer in French\n\nUser: why?\n\nAssistant: because\n\nUser: and?");
+  });
+
+  it("takes no provider slot of its own: its members take them, one by one", async () => {
+    const { core, a, usage } = make();
+    a.delayMs = 20;                                    // 2 events → ~40 ms per call, two calls well inside the 200 ms max wait
+    core.registerVirtual("capitoline", async function* (question, ctx) {
+      // Two members on the same provider, which offers one slot. Had the
+      // council request taken that slot for itself, the first member would sit
+      // on the queue until maxWait and come back queue_full: this passing is
+      // what "the queue stays honest" means.
+      for (const model of ["a-1", "a-2"]) {
+        for await (const _ev of core.execute({ model, stream: false, messages: [{ role: "user", text: question }] }, { ...ctx, deliberation: "d-1" })) { /* drained */ }
+      }
+      yield* answered;
+    });
+    expect(await drain(core.execute(req("capitoline"), { source: "http" }))).toEqual([
+      { type: "text", delta: "the synthesis" }, { type: "done", usage: { input: 6, output: 2 } },
+    ]);
+    expect(a.calls.map((c) => c.model)).toEqual(["a-1", "a-2"]);
+    // The rows are the members', under the real models that served them, tied
+    // together by the deliberation (§12.7). The council itself is no provider
+    // and writes none.
+    expect(usage.totals("a", 60_000).calls).toBe(2);
+    expect(usage.totals("capitoline", 60_000).calls).toBe(0);
+    expect(usage.deliberationTotals("d-1").calls).toBe(2);
+  });
+
+  it("keeps the progress for a transport that can render it and drops it for one that cannot", async () => {
+    const { core } = make();
+    const progress: CouncilEvent = { type: "progress", stage: "answers", done: 0, total: 2 };
+    core.registerVirtual("capitoline", fakeRun([progress, ...answered]).run);
+    const events: CouncilEvent[] = [];
+    for await (const ev of core.deliberate(req("capitoline"), { source: "http" })) events.push(ev);
+    expect(events).toEqual([progress, ...answered]);
+    // An ordinary completion has nowhere to put "2/4 answers", so execute()
+    // carries the text and the usage and nothing else.
+    expect((await drain(core.execute(req("capitoline"), { source: "http" }))).map((e) => e.type)).toEqual(["text", "done"]);
+  });
+
+  it("reports the council's failure as an error of the same kind", async () => {
+    const { core } = make();
+    const failed: CouncilEvent[] = [{ type: "error", kind: "queue_full", detail: "no member answered: queue_full" }];
+    core.registerVirtual("capitoline", fakeRun(failed).run);
+    // queue_full and model_unavailable are not ErrorKinds: a council that ends
+    // on one must still reach the client as a 503 or a 404, not as a 502.
+    await expect(drain(core.execute(req("capitoline"), { source: "http" }))).rejects.toMatchObject({ kind: "queue_full" });
+    const events: CouncilEvent[] = [];
+    for await (const ev of core.deliberate(req("capitoline"), { source: "http" })) events.push(ev);
+    expect(events).toEqual(failed);      // the event form is left whole for the transports
+  });
+
+  it("refuses a name a provider already serves, and the same name twice", () => {
+    const { core } = make();
+    const { run } = fakeRun(answered);
+    expect(() => core.registerVirtual("a-1", run)).toThrow(/a-1/);
+    core.registerVirtual("capitoline", run);
+    expect(() => core.registerVirtual("capitoline", run)).toThrow(/capitoline/);
+  });
+
+  it("refuses an image request for a council, and a deliberation for a provider model", async () => {
+    const { core } = make();
+    core.registerVirtual("capitoline", fakeRun(answered).run);
+    await expect(drain(core.generateImage({ model: "capitoline", prompt: "a lighthouse" }, { source: "http" }))).rejects.toMatchObject({ kind: "bad_request" });
+    // The other way round: a provider model is no council, and a transport
+    // that asked for its deliberation asked the wrong question.
+    const deliberating = (async () => { for await (const _ev of core.deliberate(req("a-1"), { source: "http" })) { /* never reached */ } })();
+    await expect(deliberating).rejects.toMatchObject({ kind: "bad_request" });
+  });
+});
+
+/** Core, two providers holding the panel's models, and the council over them: the wiring main.ts builds. */
+function makeSeated() {
+  const claude = new FakeProvider("claude", ["claude-opus", "claude-sonnet", "claude-haiku"], OK, 2);
+  const codex = new FakeProvider("codex", ["codex-astra"], OK, 1);
+  const usage = new UsageStore(":memory:");
+  const core = new Core([claude, codex], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t") });
+  const council = new Council("capitoline", VCFG, core, createLogger("t"));
+  core.registerVirtual("capitoline", (question, ctx) => council.deliberate(question, ctx), (models) => council.seatable(models));
+  return { core, claude, codex, usage, council };
+}
+
+describe("Core council availability", () => {
+  it("lists a council as a model of its own while the quorum of its seats can be filled", () => {
+    const { core } = makeSeated();
+    expect(core.listModels().find((m) => m.name === "capitoline")).toEqual({
+      name: "capitoline", provider: "capitoline", kind: "council", available: true, overBudget: false,
+    });
+    // It is the last of the list, after the real models: the ones it is seated from.
+    expect(core.listModels().at(-1)!.name).toBe("capitoline");
+  });
+
+  it("reports the council unavailable, with the reason, once the quorum cannot be filled", async () => {
+    const { core, codex } = makeSeated();
+    codex.healthResult = { ok: false, kind: "auth_expired", detail: "expired", checkedAt: 0 };
+    await core.checkHealth("codex");
+    const listed = core.listModels().find((m) => m.name === "capitoline")!;
+    expect(listed.available).toBe(false);
+    // The reason is a count and a quorum, never a provider's own words: this
+    // travels to the client in /v1/models.
+    expect(listed.reason).toMatch(/1 of 2 seats/);
+    expect(listed.reason).toMatch(/quorum/);
+    expect(listed.reason).not.toMatch(/expired/);
+  });
+
+  it("seats a council from the real models alone, never from another council", () => {
+    const { core, council } = makeSeated();
+    const seen: string[][] = [];
+    core.registerVirtual("capitoline-2", (q, ctx) => council.deliberate(q, ctx), (models) => {
+      seen.push(models.map((m) => m.name));
+      return council.seatable(models);
+    });
+    core.listModels();
+    expect(seen[0]).toEqual(["claude-opus", "claude-sonnet", "claude-haiku", "codex-astra"]);
   });
 });

@@ -1,8 +1,20 @@
+import type { CouncilEvent } from "../council/council.js";
 import type { Logger } from "../log.js";
 import type { HealthStatus, ModelKind, ModelSpec, Provider } from "../providers/adapter.js";
 import { H5, type CallerUsage, type UsageStore } from "../usage/store.js";
+import { flatten, splitSystem } from "./prompt.js";
 import { Semaphore } from "./semaphore.js";
 import { CapitolineError, type ErrorKind, type ImageRequest, type InternalRequest, type ProviderEvent } from "./types.js";
+
+/**
+ * What a virtual model is owned by in `/v1/models` and in the `capitoline`
+ * field of a response: the gateway itself. A council is served by no provider
+ * — it is nine calls on the providers of its seats, each accounted under the
+ * real model that served it (spec §12.7).
+ */
+export const VIRTUAL_PROVIDER = "capitoline";
+/** The `kind` a virtual model is listed with, beside the "text" and "image" of the real ones. */
+export type VirtualKind = "council";
 
 // What is left of a provider's image quota. `limit` is the configured cap of
 // the short window (null when none is configured); `resetAt` is when the
@@ -11,7 +23,7 @@ import { CapitolineError, type ErrorKind, type ImageRequest, type InternalReques
 // one of days, and only the short one is countable here: the long one shows up
 // solely as a `resetAt` far in the future (spike, 2026-09-21).
 export interface ImageQuota { used: number; limit: number | null; windowStartedAt: number | null; resetAt: number | null }
-export interface ModelInfo { name: string; provider: string; kind: ModelKind; available: boolean; reason?: string; overBudget: boolean; quota?: ImageQuota }
+export interface ModelInfo { name: string; provider: string; kind: ModelKind | VirtualKind; available: boolean; reason?: string; overBudget: boolean; quota?: ImageQuota }
 export interface ProviderState {
   id: string; health: HealthStatus | null; pausedUntil: number | null; strikes: number; overBudget: boolean;
   windows: ReturnType<UsageStore["windows"]>; active: number; waiting: number; imageQuota: ImageQuota | null;
@@ -43,13 +55,36 @@ interface Entry { provider: Provider; model: ModelSpec }
 // client made directly. It is what ties the nine rows of one question
 // together in the usage table (spec 12.7); the rows stay under the real
 // models that served them, because quotas belong to those models.
-interface Context { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null; deliberation?: string }
+export interface Context { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null; deliberation?: string }
+
+/**
+ * A virtual model's work: a question in, the council's own events out. The
+ * context is the one an ordinary request carries, unchanged — the signal that
+ * cancels it, the source it came from, the caller that /v1/usage groups by —
+ * because a council member is a request like any other and inherits all three.
+ */
+export type VirtualRun = (question: string, ctx: Context) => AsyncIterable<CouncilEvent>;
+
+/**
+ * Whether a virtual model can serve a request right now, decided against the
+ * real models as `listModels()` has just reported them.
+ *
+ * The state is passed in and never read back from `Core`: this is called from
+ * inside `listModels()`, so a council that answered by calling `listModels()`
+ * again would recurse forever. The list it receives holds the real models
+ * alone, which are the only ones a seat can be filled from.
+ */
+export type VirtualAvailability = (models: ModelInfo[]) => { available: boolean; reason?: string };
+
+interface Virtual { run: VirtualRun; availability?: VirtualAvailability }
 
 export class Core {
   private readonly states = new Map<string, State>();
   private readonly modelIndex = new Map<string, Entry>();
   /** By model name: the pause installed by a refusal that named that model alone. */
   private readonly modelPauses = new Map<string, ModelPause>();
+  /** Virtual models by the name a client asks for: the councils main.ts registers. */
+  private readonly virtuals = new Map<string, Virtual>();
   /** Health checks still running; awaited by idle() before the usage store is closed. */
   private readonly inFlight = new Set<Promise<void>>();
   private readonly now: () => number;
@@ -136,7 +171,46 @@ export class Core {
         out.push({ name: m.name, provider: id, kind: m.kind, available: modelReason === undefined, reason: modelReason, overBudget, ...(m.kind === "image" && quota ? { quota } : {}) });
       }
     }
+    // The virtual models come last, decided against a snapshot of the real ones
+    // taken before the first of them is appended: a council is seated from
+    // models a provider serves, never from another council. `overBudget` is
+    // false for the same reason a council has no provider — the budgets are the
+    // providers' own, and the member calls carry the flag of whatever served
+    // them.
+    const real = [...out];
+    for (const [name, v] of this.virtuals) {
+      const state = v.availability?.(real) ?? { available: true };
+      out.push({ name, provider: VIRTUAL_PROVIDER, kind: "council", available: state.available, ...(state.reason !== undefined ? { reason: state.reason } : {}), overBudget: false });
+    }
     return out;
+  }
+
+  /**
+   * Declares a virtual model: a name a client asks for in `model` exactly as it
+   * asks for a real one, served by `run` instead of by a provider (design §12).
+   *
+   * The name is checked against the real models here as well as at
+   * configuration load, because the two lists are built from different things —
+   * the providers are constructed from the configuration, the councils are
+   * registered by `main.ts` — and a name held by both would route to one of
+   * them and never the other, with nothing saying which. It throws a plain
+   * Error: this happens at start-up, in front of the operator, and is a
+   * misconfiguration rather than an answer to any request.
+   *
+   * `availability` is optional so a caller that has no opinion (a test, a
+   * virtual model that is always on) can leave it out; a council passes the
+   * seating rule of §12.2, which is the only thing that knows what a seat is.
+   */
+  registerVirtual(name: string, run: VirtualRun, availability?: VirtualAvailability): void {
+    const owner = this.modelIndex.get(name);
+    if (owner) throw new Error(`virtual model "${name}" is also a model of provider ${owner.provider.id}`);
+    if (this.virtuals.has(name)) throw new Error(`virtual model "${name}" is already registered`);
+    this.virtuals.set(name, { run, availability });
+  }
+
+  /** Whether the name is a virtual model, which is what a transport asks before choosing between execute() and deliberate(). */
+  isVirtual(model: string): boolean {
+    return this.virtuals.has(model);
   }
 
   // The quota of a provider that has image models, null for the others. `used`
@@ -169,16 +243,78 @@ export class Core {
 
   private lookup(model: string): Entry {
     const entry = this.modelIndex.get(model);
-    if (!entry) throw new CapitolineError("unknown_model", `unknown model "${model}"`);
+    // A council reaching here is a chat model asked for on the wrong endpoint,
+    // the same mistake as an image model on /v1/chat/completions, and
+    // unknown_model (a 404) would send the caller looking for a name that is
+    // right there in /v1/models.
+    if (!entry) {
+      if (this.virtuals.has(model)) throw new CapitolineError("bad_request", `model "${model}" is a council: use the chat endpoint`);
+      throw new CapitolineError("unknown_model", `unknown model "${model}"`);
+    }
     return entry;
   }
 
   // The kind check comes before the provider state: a request for the wrong
   // endpoint is a client error whatever the provider is doing right now.
   async *execute(req: InternalRequest, ctx: Context): AsyncIterable<ProviderEvent> {
+    // A virtual model first: it is asked for in the same field and answered on
+    // the same endpoint, and it holds no concurrency slot of its own. The slots
+    // are taken by its member calls, one by one, as they come back through this
+    // very method — which is what keeps the queue, the pauses and the usage
+    // rows honest for a council member (plan, global constraints).
+    if (this.virtuals.has(req.model)) { yield* this.flattenVirtual(req, ctx); return; }
     const entry = this.lookup(req.model);
     if (entry.model.kind !== "text") throw new CapitolineError("bad_request", `model "${req.model}" generates images: use the images endpoint`);
     yield* this.guarded(entry, req.model, ctx, () => entry.provider.execute(req, entry.model, ctx.signal));
+  }
+
+  /**
+   * A virtual model's own events: the progress of the stages it is running and,
+   * at the end, the whole deliberation. This is what a transport that can
+   * render them calls — SSE progress chunks, MCP progress notifications, the
+   * `capitoline` field of a completion (spec §12.6).
+   */
+  async *deliberate(req: InternalRequest, ctx: Context): AsyncIterable<CouncilEvent> {
+    const virtual = this.virtuals.get(req.model);
+    if (!virtual) throw new CapitolineError("bad_request", `model "${req.model}" is not a council`);
+    yield* virtual.run(this.questionOf(req), ctx);
+  }
+
+  /**
+   * The same deliberation as an ordinary completion, for a caller that asked
+   * for the council without knowing it is one.
+   *
+   * The progress is dropped: an OpenAI completion has nowhere to put "2/4
+   * answers", and the whole point of the field is that a client which does not
+   * know about it sees a perfectly ordinary answer. The failure is thrown
+   * rather than yielded, because `CapitolineError` carries a `FailureKind` and
+   * the event does too: a council that ended on `queue_full` or
+   * `model_unavailable` must still reach the client as a 503 or a 404, which
+   * yielding a provider `error` event (an `ErrorKind`, five values) could not
+   * express.
+   */
+  private async *flattenVirtual(req: InternalRequest, ctx: Context): AsyncIterable<ProviderEvent> {
+    for await (const ev of this.deliberate(req, ctx)) {
+      if (ev.type === "text") yield ev;
+      else if (ev.type === "done") yield { type: "done", usage: ev.usage };
+      else if (ev.type === "error") throw new CapitolineError(ev.kind, ev.detail);
+    }
+  }
+
+  /**
+   * The conversation as the one question a council is asked (§12.1: every
+   * member answers "the same question").
+   *
+   * A system message is folded into the text instead of being dropped: the
+   * council's prompts are the strategy and have no channel for one (§12.8), and
+   * a client that wrote "answer in French" would otherwise be ignored in
+   * silence by all nine calls. `flatten` refuses a system message outright,
+   * which is why `splitSystem` comes first.
+   */
+  private questionOf(req: InternalRequest): string {
+    const { system, rest } = splitSystem(req.messages);
+    const body = flatten(rest);
+    return system === null ? body : `${system}\n\n${body}`;
   }
 
   async *generateImage(req: ImageRequest, ctx: Context): AsyncIterable<ProviderEvent> {

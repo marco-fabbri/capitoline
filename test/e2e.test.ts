@@ -18,10 +18,17 @@ beforeAll(async () => { app = await start("test/e2e.config.yaml", { port: 0 }); 
 afterAll(async () => { await app.close(); });
 
 describe("end to end with fake CLIs", () => {
-  it("serves all configured models as available after the startup health check", async () => {
+  it("serves all configured models as available after the startup health check, the council among them", async () => {
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
-    const ids = ((await r.json()) as { data: { id: string }[] }).data.map((m) => m.id).sort();
-    expect(ids).toEqual(["agy-claude-opus", "agy-claude-sonnet", "agy-gemini-3.6-flash", "agy-gemini-3.7-flash", "agy-gemini-flash", "agy-gemini-pro", "agy-gpt-oss", "agy-image", "claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "codex-gpt-5.5", "codex-gpt-5.6-sol", "codex-gpt-6-astra"]);
+    const data = ((await r.json()) as { data: { id: string; owned_by: string; capitoline: { kind: string } }[] }).data;
+    // `capitoline` is in the list because main.ts registered the configured
+    // council as a virtual model and its four seats can all be filled: a
+    // client asks for it in `model` exactly as for the real ones (design §12).
+    expect(data.map((m) => m.id).sort()).toEqual(["agy-claude-opus", "agy-claude-sonnet", "agy-gemini-3.6-flash", "agy-gemini-3.7-flash", "agy-gemini-flash", "agy-gemini-pro", "agy-gpt-oss", "agy-image", "capitoline", "claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "codex-gpt-5.5", "codex-gpt-5.6-sol", "codex-gpt-6-astra"]);
+    // Owned by the gateway and of a kind of its own: it is served by no
+    // provider, and its nine calls are accounted under the models that served
+    // them (§12.7).
+    expect(data.find((m) => m.id === "capitoline")).toMatchObject({ owned_by: "capitoline", capitoline: { kind: "council" } });
   });
   it.each([["claude-opus", "ok"], ["codex-gpt-5.5", "OK"], ["agy-gemini-flash", "ok ok\n"]])("answers through %s", async (model, expected) => {
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {

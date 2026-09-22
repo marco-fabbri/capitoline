@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Logger } from "../log.js";
 import { CapitolineError, type FailureKind, type InternalRequest, type Usage } from "../core/types.js";
 import type { ProviderEvent } from "../core/types.js";
-import { labels, nextInChain, seat } from "./seating.js";
+import { labels, nextInChain, seat, type ModelState } from "./seating.js";
 import { STRATEGY_VERSION, answerPrompt, rankingPrompt, synthesisPrompt } from "./prompts.js";
 import { aggregate, parseRanking } from "./ranking.js";
 import type { CouncilConfig, Deliberation, DeliberationMember, LostSeat, MemberRanking, Ranking, Seat } from "./types.js";
@@ -329,6 +329,28 @@ export class Council {
     }
     yield { type: "progress", stage: "synthesis", done: 1, total: 1 };
     yield this.finish(run, members, lost, rankings, verdict, model);
+  }
+
+  /**
+   * Whether this council can be served right now, against the state of the real
+   * models as `Core.listModels()` reports it: at least `min_members` of its
+   * seats must be fillable, because below the quorum there is no council at all
+   * (§12.5) and offering one would spend the members' calls to say so.
+   *
+   * The state is a parameter and not `this.core.listModels()`: this is called
+   * from inside that very listing, which is where a council appears as a model
+   * of its own. The judge is not counted — its chain is walked after the
+   * members are done, and a judge that cannot be seated costs the synthesis,
+   * not the deliberation (see `deliberate`).
+   *
+   * The reason is a count and a quorum. It travels to the client in
+   * `/v1/models`, where provider detail never goes; what each chain was refused
+   * for is in the log and in the deliberation's `lost`.
+   */
+  seatable(state: ModelState[]): { available: boolean; reason?: string } {
+    const filled = seat(this.cfg.seats, state).members.length;
+    if (filled >= this.cfg.minMembers) return { available: true };
+    return { available: false, reason: `only ${filled} of ${this.cfg.seats.length} seats can be filled: the quorum is ${this.cfg.minMembers}` };
   }
 
   /** The label each answer is ranked under (§12.4), assigned once the panel is known and never before. */
