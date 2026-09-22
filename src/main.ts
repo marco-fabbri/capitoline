@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { Server } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -75,6 +76,15 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // directories hangs off it. Constructing it touches nothing.
   const runner = createRunner({ sandboxRoot: cfg.runner.sandbox_root, user: cfg.runner.user, killGraceMs: cfg.runner.kill_grace_s * 1000, log: log.child({ mod: "runner" }) });
   const providers = overrides.providers ?? buildProviders(cfg, runner, log);
+  // The absolute path, not the configured one: `db_path` is relative by
+  // default (sensible for a developer running from the clone) and the host
+  // sets an absolute one in its overlay, so a service started without the
+  // overlay would open a different database in its working directory and the
+  // history would split with nothing saying so — /v1/usage reporting an empty
+  // day and no line anywhere. It happened on the host, 2026-09-22, to a stray
+  // empty file nothing had written to yet. The journal now always says which
+  // database is open.
+  log.info({ path: resolve(cfg.usage.db_path) }, "usage database");
   const usage = new UsageStore(cfg.usage.db_path);
   const budgets = Object.fromEntries(Object.entries(cfg.providers).map(([id, p]) => [id, { window5h: p.budget.window_5h_tokens, window7d: p.budget.window_7d_tokens }]));
   const imageQuotas = Object.fromEntries(Object.entries(cfg.providers).flatMap(([id, p]) => (p.image.quota_per_window === undefined ? [] : [[id, p.image.quota_per_window] as const])));
