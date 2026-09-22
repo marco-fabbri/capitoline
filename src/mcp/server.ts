@@ -85,7 +85,12 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       effort: z.enum(["low", "medium", "high"]).optional(),
       system: z.string().optional().describe("Optional system prompt"),
     },
-    outputSchema: { model: z.string(), provider: z.string(), usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }) },
+    // The answer is in the schema because a client that sees an outputSchema
+    // reads structuredContent and ignores the content blocks — which is what
+    // Claude Code does (#1). The server sends the text block as well, for a
+    // client that reads that instead; what it must never do is put the payload
+    // in only one of the two.
+    outputSchema: { text: z.string(), model: z.string(), provider: z.string(), usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }) },
   }, async ({ model, prompt, effort, system }, extra) => {
     // A council is not one model and this tool cannot run one: a deliberation
     // is nine calls over several minutes, and the only progress this tool can
@@ -117,7 +122,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
         else if (ev.type === "error") throw providerError(ev, providerOf(model), model);
       }
       await progress(true);
-      const structured = { model, provider: providerOf(model), usage: { prompt_tokens: usage?.input ?? 0, completion_tokens: usage?.output ?? 0 } };
+      const structured = { text, model, provider: providerOf(model), usage: { prompt_tokens: usage?.input ?? 0, completion_tokens: usage?.output ?? 0 } };
       return { content: [{ type: "text", text }], structuredContent: structured };
     } catch (e) {
       return toolError(e, "ask_model", model);
@@ -138,6 +143,12 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     // `deliberation_id` stays because it is what ties the nine usage rows of
     // this question together (§12.7).
     outputSchema: {
+      // The answer the question was put to a council for. The members already
+      // travelled in `members[].answer`, so a client reading structuredContent
+      // alone — Claude Code, as soon as a tool declares an output schema (#1) —
+      // used to get every seat and not the synthesis they were seated to
+      // produce. It is sent as a text block too, for a client that reads those.
+      synthesis: z.string(),
       council: z.string(),
       deliberation_id: z.string(),
       strategy_version: z.number(),
@@ -231,6 +242,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       }
       await progress("done");
       const structured = {
+        synthesis: text,
         council: name, deliberation_id: detail.deliberationId, strategy_version: detail.strategyVersion,
         shape: detail.shape, members: detail.members, lost: detail.lost, aggregate: detail.aggregate, judge: detail.judge,
         usage: { prompt_tokens: usage?.input ?? 0, completion_tokens: usage?.output ?? 0 }, calls: detail.calls,
@@ -247,7 +259,11 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       prompt: z.string().min(1).describe("What to draw"),
       model: z.string().min(1).optional().describe("Image model name from list_models; default: the first available image model"),
     },
-    outputSchema: { model: z.string(), provider: z.string(), mime: z.string(), width: z.number(), height: z.number(), bytes: z.number() },
+    // No outputSchema, unlike the other two tools: an image content block
+    // cannot live inside structuredContent, so a schema here would only teach
+    // the client to read a structured object and drop the image (#1). With
+    // none declared the client reads the content blocks, exactly as it already
+    // reads list_models — which is the one tool that always answered.
   }, async ({ prompt, model: requested }, extra) => {
     // Everything runs inside the try, listModels() included: it queries the
     // usage store per provider, and an exception escaping the handler would
@@ -297,8 +313,11 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
         if (extra.signal.aborted) return { isError: true as const, content: [{ type: "text" as const, text: "Capitoline error: cancelled" }] };
         throw new CapitolineError("bad_output", "the provider finished without returning an image");
       }
-      const structured = { model, provider, mime: image.mime, width: image.width, height: image.height, bytes: image.bytes.length };
-      return { content: [{ type: "image", data: image.bytes.toString("base64"), mimeType: image.mime }], structuredContent: structured };
+      // What the structured object used to say, as a text block beside the
+      // image: the same JSON, and the same fields, so nothing is lost by
+      // giving the schema up. It follows the image, which is the answer.
+      const described = JSON.stringify({ model, provider, mime: image.mime, width: image.width, height: image.height, bytes: image.bytes.length });
+      return { content: [{ type: "image", data: image.bytes.toString("base64"), mimeType: image.mime }, { type: "text", text: described }] };
     } catch (e) {
       return toolError(e, "generate_image", model);
     } finally {

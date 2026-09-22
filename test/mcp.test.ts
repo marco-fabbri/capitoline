@@ -92,9 +92,28 @@ describe("MCP", () => {
     const c = await client();
     const r = await c.callTool({ name: "ask_model", arguments: { model: "claude-opus", prompt: "q", effort: "low", system: "S" } });
     expect((r.content as { text: string }[])[0].text).toBe("answer");
-    expect(r.structuredContent).toEqual({ model: "claude-opus", provider: "claude", usage: { prompt_tokens: 5, completion_tokens: 1 } });
+    // The same answer on both sides: the text block for a client that reads
+    // the content, `text` for one that reads the structured object (#1).
+    expect(r.structuredContent).toEqual({ text: "answer", model: "claude-opus", provider: "claude", usage: { prompt_tokens: 5, completion_tokens: 1 } });
     expect(provider.calls.at(-1)!.messages).toEqual([{ role: "system", text: "S" }, { role: "user", text: "q" }]);
     expect(provider.calls.at(-1)!.effort).toBe("low");
+    await c.close();
+  });
+
+  // #1: as soon as a tool declares an output schema the client reads
+  // structuredContent and ignores the content blocks — which is what Claude
+  // Code does, and why the answer never reached it while the server was
+  // formally sending both. This test reads the structured object alone, the
+  // way that client does, and never the text block.
+  it("carries the answer in structuredContent, for a client that reads nothing else", async () => {
+    const c = await client();
+    // listTools first: the SDK client caches the output validator from it, so
+    // a structured object that does not match the declared schema is caught
+    // here instead of reaching a real client.
+    await c.listTools();
+    const r = await c.callTool({ name: "ask_model", arguments: { model: "claude-opus", prompt: "q" } });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent).toEqual({ text: "answer", model: "claude-opus", provider: "claude", usage: { prompt_tokens: 5, completion_tokens: 1 } });
     await c.close();
   });
   it("ask_model refuses an image model as a tool error", async () => {
@@ -197,6 +216,10 @@ describe("MCP", () => {
       expect(r.isError).toBeFalsy();
       expect((r.content as Block[])[0].text).toBe("the synthesis");
       expect(r.structuredContent).toEqual({
+        // The synthesis travels here as well as in the text block: the seats
+        // were already in members[].answer, and a client that reads only the
+        // structured object was getting every answer but the final one (#1).
+        synthesis: "the synthesis",
         council: "capitoline",
         deliberation_id: "d-1",
         strategy_version: 1,
@@ -213,6 +236,20 @@ describe("MCP", () => {
         calls: 5,
       });
       expect(asked).toEqual([{ question: "why?", source: "mcp", caller: "claude-code" }]);
+      await c.close();
+    });
+
+    // #1: the schema already carried members[].answer, so the seats survived a
+    // client that reads only structuredContent while the synthesis — the reason
+    // the question was put to a council at all — did not. It travels as a field
+    // of its own, read here without touching the content blocks.
+    it("carries the synthesis in structuredContent, for a client that reads nothing else", async () => {
+      register();
+      const c = await client();
+      await c.listTools();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      expect(r.isError).toBeFalsy();
+      expect(r.structuredContent).toMatchObject({ synthesis: "the synthesis", council: "capitoline", members: DETAIL.members });
       await c.close();
     });
 
@@ -452,25 +489,48 @@ describe("MCP", () => {
   });
 
   describe("generate_image", () => {
-    it("returns the image as an image block plus the structured description, without the agent's prose", async () => {
+    it("returns the image as an image block plus a text line describing it, without the agent's prose", async () => {
       const c = await client();
       const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "agy-image" } });
       expect(r.isError).toBeFalsy();
       const content = r.content as Block[];
-      expect(content).toHaveLength(1);
+      expect(content).toHaveLength(2);
       expect(content[0].type).toBe("image");
       expect(content[0].mimeType).toBe("image/jpeg");
       expect(Buffer.from(content[0].data!, "base64")).toEqual(JPEG);
       expect(JSON.stringify(r)).not.toContain("./image.png");
-      expect(r.structuredContent).toEqual({ model: "agy-image", provider: "antigravity", mime: "image/jpeg", width: 1376, height: 768, bytes: JPEG.length });
+      // The description the output schema used to carry, unchanged, in the
+      // one place an image can travel with it (#1).
+      expect(JSON.parse(content[1].text!)).toEqual({ model: "agy-image", provider: "antigravity", mime: "image/jpeg", width: 1376, height: 768, bytes: JPEG.length });
       expect(images.imageCalls.at(-1)).toEqual({ model: "agy-image", prompt: "a lighthouse" });
       await c.close();
     });
+    // #1: an image content block cannot live inside structuredContent, so this
+    // is the one tool that gives its output schema up: with none declared the
+    // client has no structured object to prefer and reads the content blocks,
+    // the way it already reads list_models. What the structured object used to
+    // say travels as a text block beside the image.
+    it("declares no output schema, so the image survives in the content blocks", async () => {
+      const c = await client();
+      const tool = (await c.listTools()).tools.find((t) => t.name === "generate_image")!;
+      expect(tool.outputSchema).toBeUndefined();
+      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "agy-image" } });
+      expect(r.isError).toBeFalsy();
+      expect(r.structuredContent).toBeUndefined();
+      const content = r.content as Block[];
+      expect(content.map((b) => b.type)).toEqual(["image", "text"]);
+      expect(Buffer.from(content[0].data!, "base64")).toEqual(JPEG);
+      expect(JSON.parse(content[1].text!)).toEqual({ model: "agy-image", provider: "antigravity", mime: "image/jpeg", width: 1376, height: 768, bytes: JPEG.length });
+      await c.close();
+    });
+
     it("defaults to the first image model when model is omitted", async () => {
       const c = await client();
       const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse" } });
       expect(r.isError).toBeFalsy();
-      expect(r.structuredContent).toMatchObject({ model: "agy-image", provider: "antigravity" });
+      // Which model the default landed on is read off the text block: this
+      // tool has no structured object to read it from any more.
+      expect(JSON.parse((r.content as Block[])[1].text!)).toMatchObject({ model: "agy-image", provider: "antigravity" });
       expect(images.imageCalls.at(-1)).toEqual({ model: "agy-image", prompt: "a lighthouse" });
       await c.close();
     });
