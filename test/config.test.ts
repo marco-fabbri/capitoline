@@ -52,10 +52,15 @@ const COUNCIL: Fields = {
   seats: "[{family: f1, models: [a]}, {family: f2, models: [b]}]",
   judge: "{family: f1, models: [a]}",
 };
-const council = (over: Fields = {}, name = "capitoline", prov: Fields = {}): string => {
+const block = (over: Fields): string => {
   const fields = Object.entries({ ...COUNCIL, ...over }).filter(([, v]) => v !== null);
-  return `council:\n  ${name}: { ${fields.map(([k, v]) => `${k}: ${v}`).join(", ")} }\n${config({ models: MODELS, concurrency: "3", ...prov })}`;
+  return `{ ${fields.map(([k, v]) => `${k}: ${v}`).join(", ")} }`;
 };
+// Several councils over that same provider, which is what the concurrency rule
+// is counted over: the slots belong to the subscription, not to one council.
+const councils = (entries: Record<string, Fields>, prov: Fields = {}): string =>
+  `council:\n${Object.entries(entries).map(([name, over]) => `  ${name}: ${block(over)}`).join("\n")}\n${config({ models: MODELS, concurrency: "3", ...prov })}`;
+const council = (over: Fields = {}, name = "capitoline", prov: Fields = {}): string => councils({ [name]: over }, prov);
 
 const BOTH_FILES = ["config/capitoline.yaml", "test/e2e.config.yaml"];
 
@@ -391,6 +396,24 @@ describe("config", () => {
       .toThrow(/providers\.x\.concurrency: .*serves 3 seats .*concurrency 2/);
     // The judge is not counted: it is seated alone, after the members are done.
     expect(() => parseConfig(council({ judge: "{family: f3, models: [c]}" }, "capitoline", { concurrency: "2" }))).not.toThrow();
+  });
+
+  it("counts the seats a provider serves across every council, not one council at a time", () => {
+    // Two councils on one subscription. Each fits on its own, and nothing
+    // serialises them at runtime: two clients asking for the two councils at
+    // the same instant draw on the same slots, and the second panel waits on
+    // the queue until max_wait_s and loses its seats exactly as an
+    // over-subscribed single council does. So the seats are summed, and both
+    // councils are named with the seats each brings — the fix is a choice
+    // between raising the slots and moving a seat out of one of them, and the
+    // reader cannot make it without seeing both.
+    const two = { capitoline: {}, "capitoline-fast": {} };
+    expect(() => parseConfig(councils(two, { concurrency: "3" })))
+      .toThrow(/providers\.x\.concurrency: provider x serves 4 seats of councils "capitoline" \(2\) and "capitoline-fast" \(2\) with concurrency 3/);
+    expect(() => parseConfig(councils(two, { concurrency: "4" }))).not.toThrow();
+    // One council still reads as one council: the message a single-council
+    // configuration produces is the one above and is not made plural by this.
+    expect(() => parseConfig(councils({ capitoline: {} }, { concurrency: "2" }))).not.toThrow();
   });
 
   it("rejects a council named after a provider model", () => {

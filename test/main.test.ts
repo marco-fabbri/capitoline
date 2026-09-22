@@ -188,6 +188,95 @@ describe("start()", () => {
   });
 });
 
+// More than one council is a configuration, not a feature: `council:` is a
+// record, the startup loop builds one Council per entry and both transports
+// take the name from the request. Nothing covered that path end to end — the
+// multi-council runtime was only ever tested by registering virtual models on
+// Core directly, never through the schema and this loop.
+describe("start() with more than one council", () => {
+  // Two panels that fit the e2e subscriptions side by side: one seat each on
+  // claude and codex, one seat each on claude and antigravity — two claude
+  // seats in all, which is what that provider's two slots offer. Named with a
+  // number, which by design §12.8 is a version of the same shape: these are
+  // the reference panel's shape with another roster, not another strategy.
+  const TWO_COUNCILS = `council:
+  capitoline-2:
+    seats:
+      - { family: anthropic, models: [claude-opus] }
+      - { family: openai,    models: [codex-gpt-5.5] }
+    judge: { family: anthropic, models: [claude-haiku] }
+    stage_timeout_s: 20
+  capitoline-3:
+    seats:
+      - { family: anthropic, models: [claude-sonnet] }
+      - { family: google,    models: [agy-gemini-flash] }
+    judge: { family: anthropic, models: [claude-haiku] }
+    stage_timeout_s: 20
+`;
+
+  /** A copy of the e2e configuration whose single council is replaced by those two. */
+  function configWithTwoCouncils(): string {
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-councils-"));
+    const path = join(dir, "config.yaml");
+    const text = readFileSync(CONFIG, "utf8");
+    const head = text.indexOf("\ncouncil:\n");
+    // As in configWithDbFile(): a literal that stopped matching would leave
+    // the shipped council in place and the test would pass for another reason.
+    expect(head).toBeGreaterThan(0);
+    writeFileSync(path, `${text.slice(0, head + 1)}${TWO_COUNCILS}`);
+    return path;
+  }
+
+  /** One fake per provider the two councils seat, all answering. */
+  const fakes = () => [
+    new FakeProvider("claude", ["claude-opus", "claude-sonnet", "claude-haiku"], OK),
+    new FakeProvider("codex", ["codex-gpt-5.5"], OK),
+    new FakeProvider("antigravity", ["agy-gemini-flash"], OK),
+  ];
+
+  it("registers every configured council and offers them all", async () => {
+    const lines: string[] = [];
+    const app = await start(configWithTwoCouncils(), { port: 0, providers: fakes(), logDest: { write: (chunk: string) => { lines.push(chunk); } } });
+    try {
+      // The startup log is where the loop is observable: one Council built per
+      // entry, each with its own seats, rather than the first one twice.
+      const registered = lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((l) => l.msg === "council registered");
+      expect(registered.map((l) => l.council)).toEqual(["capitoline-2", "capitoline-3"]);
+      expect(registered[0]).toMatchObject({ seats: ["anthropic", "openai"], judge: "anthropic" });
+      expect(registered[1]).toMatchObject({ seats: ["anthropic", "google"], judge: "anthropic" });
+      const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
+      const data = ((await r.json()) as { data: { id: string; owned_by: string }[] }).data;
+      expect(data.filter((m) => m.owned_by === "capitoline").map((m) => m.id)).toEqual(["capitoline-2", "capitoline-3"]);
+    } finally { await app.close(); }
+  });
+
+  it("gives each council an availability of its own, computed from the real models", async () => {
+    const providers = fakes();
+    // Antigravity down: the google seat of the second council cannot be
+    // filled, so that council falls below its quorum while the first, which
+    // seats nothing of that provider, is untouched. One council's state is
+    // never the other's — and a council is seated from the real models alone,
+    // never from a listing that already holds the other council.
+    providers[2].healthResult = { ok: false, kind: "cli_crashed", checkedAt: 0 };
+    const app = await start(configWithTwoCouncils(), { port: 0, providers });
+    try {
+      const health = (await (await fetch(`http://127.0.0.1:${app.port}/health`)).json()) as { models: { name: string; provider: string; kind: string; available: boolean; reason?: string }[] };
+      const seated = health.models.filter((m) => m.provider === "capitoline");
+      expect(seated.map((m) => m.name)).toEqual(["capitoline-2", "capitoline-3"]);
+      expect(seated[0]).toMatchObject({ kind: "council", available: true });
+      expect(seated[1]).toMatchObject({ kind: "council", available: false });
+      expect(seated[1].reason).toMatch(/only 1 of 2 seats/);
+      // /v1/models carries the available models only, so the healthy council
+      // is offered and the other one is not — with its models gone as well.
+      const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
+      const offered = ((await r.json()) as { data: { id: string }[] }).data.map((m) => m.id);
+      expect(offered).toContain("capitoline-2");
+      expect(offered).not.toContain("capitoline-3");
+      expect(offered).not.toContain("agy-gemini-flash");
+    } finally { await app.close(); }
+  });
+});
+
 describe("start() with a host overlay", () => {
   /** An overlay written to a directory of its own, next to the database it points at. */
   function overlay(body: (db: string) => string): { path: string; db: string } {
