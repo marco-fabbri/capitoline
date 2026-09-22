@@ -666,7 +666,10 @@ client `524`. The deliberation does not stop with it: the nine calls carry on,
 spending three subscriptions for a client that is already gone.
 
 So through the tunnel a council is asked for with `stream: true`, which opens
-the response immediately and sends one line per stage while the panel works:
+the response before the first stage — not on the first token, which is minutes
+away — and then writes a line as each stage opens and as each member comes
+back (`{"stage":"answers","done":2,"total":4}` in the chunk's `capitoline`
+field, where an OpenAI client ignores it):
 
 ```sh
 curl -N -s https://api.example.com/v1/chat/completions \

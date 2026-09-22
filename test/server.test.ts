@@ -2,11 +2,12 @@ import { describe, it, expect } from "vitest";
 import request from "supertest";
 import type { AddressInfo } from "node:net";
 import { createApp } from "../src/server/app.js";
-import { Core } from "../src/core/core.js";
+import { Core, type Context } from "../src/core/core.js";
 import { UsageStore } from "../src/usage/store.js";
 import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
-import type { ProviderEvent } from "../src/core/types.js";
+import type { InternalRequest, ProviderEvent } from "../src/core/types.js";
+import type { Script } from "./fake-provider.js";
 import type { RequestHandler } from "express";
 import type { Identity } from "../src/server/access.js";
 import { Council, type CouncilEvent } from "../src/council/council.js";
@@ -444,17 +445,41 @@ describe("GET /health", () => {
 // repository's panel in miniature: enough for a quorum, and small enough that
 // taking one provider down breaks it.
 const COUNCIL_SEATS: Seat[] = [{ family: "anthropic", models: ["claude-opus"] }, { family: "openai", models: ["codex-astra"] }];
+const THREE_SEATS: Seat[] = [...COUNCIL_SEATS, { family: "google", models: ["agy-pro"] }];
 const COUNCIL_JUDGE: Seat = { family: "anthropic", models: ["claude-haiku"] };
 const COUNCIL_CFG: CouncilConfig = { seats: COUNCIL_SEATS, judge: COUNCIL_JUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, stageTimeoutS: 5 };
 
-function makeCouncil() {
-  const claude = new FakeProvider("claude", ["claude-opus", "claude-haiku"], OK, 2);
-  const codex = new FakeProvider("codex", ["codex-astra"], OK, 1);
+// The panel's answers, one per model and none of them naming a model: they are
+// pasted into the ranking and synthesis prompts, and this file asserts that
+// what the client is shown is un-blinded while the prompts are not.
+const COUNCIL_ANSWERS: Record<string, string> = {
+  "claude-opus": "Retry once, and only on a refusal nobody predicted.",
+  "codex-astra": "Retrying twice turns one question into four calls.",
+  "agy-pro": "It depends whether the refusal is the model's or the subscription's.",
+};
+const COUNCIL_SYNTHESIS = "Retry exactly once.";
+// The stage a call belongs to, read from the prompt the council actually sent:
+// a fake panel has to answer stage 2 in JSON and stage 3 in prose, and the text
+// of the prompt is the only thing that tells them apart.
+const councilReply = (req: InternalRequest): ProviderEvent[] => {
+  const prompt = req.messages[0].text;
+  const shown = [...prompt.matchAll(/^(Response [A-Z]+):$/gm)].map((m) => m[1]);
+  const text = prompt.includes("Reply with JSON only")
+    ? JSON.stringify(shown.map((label, i) => ({ label, rank: i + 1, reason: "ranked in the order shown" })))
+    : prompt.includes("You are writing the final answer") ? COUNCIL_SYNTHESIS
+      : COUNCIL_ANSWERS[req.model] ?? "no opinion";
+  return [{ type: "text", delta: text }, { type: "done", usage: { input: 10, output: 2 } }];
+};
+
+function makeCouncil(seats: Seat[] = COUNCIL_SEATS, agyScript: Script = councilReply) {
+  const claude = new FakeProvider("claude", ["claude-opus", "claude-haiku"], councilReply, 2);
+  const codex = new FakeProvider("codex", ["codex-astra"], councilReply, 1);
+  const agy = new FakeProvider("agy", ["agy-pro"], agyScript, 1);
   const usage = new UsageStore(":memory:");
-  const core = new Core([claude, codex], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
-  const council = new Council("capitoline", COUNCIL_CFG, core, createLogger("t"));
+  const core = new Core([claude, codex, agy], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+  const council = new Council("capitoline", { ...COUNCIL_CFG, seats }, core, createLogger("t"));
   core.registerVirtual("capitoline", (q, ctx) => council.deliberate(q, ctx), (models) => council.seatable(models));
-  return { core, claude, codex, app: createApp(core, { log: createLogger("t") }) };
+  return { core, claude, codex, agy, app: createApp(core, { log: createLogger("t") }) };
 }
 
 /** A deliberation detail with nothing in it: these tests carry it, none of them reads it. */
@@ -467,10 +492,17 @@ const SYNTHESIS: CouncilEvent[] = [{ type: "text", delta: "the synthesis" }, { t
 // A council that answers at once, for the tests that are about the request and
 // not about the deliberation: nine real calls would prove nothing here.
 function makeVirtual(events: CouncilEvent[] = SYNTHESIS) {
+  return makeVirtualRun(async function* () { yield* events; });
+}
+
+// The same, with the deliberation written by hand: a test that is about *when*
+// a byte is written needs an engine it can hold still, which a scripted array
+// cannot do.
+function makeVirtualRun(run: (question: string, ctx: Context) => AsyncIterable<CouncilEvent>) {
   const p = new FakeProvider("claude", ["claude-opus"], OK, 1);
   const usage = new UsageStore(":memory:");
   const core = new Core([p], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
-  core.registerVirtual("capitoline", async function* () { yield* events; });
+  core.registerVirtual("capitoline", run);
   return { core, app: createApp(core, { log: createLogger("t") }) };
 }
 
@@ -525,6 +557,139 @@ describe("a council over HTTP", () => {
     // empty question with the image seen by nobody.
     expect(r.status).toBe(400);
     expect(r.body.error.code).toBe("bad_request");
+  });
+
+  it("returns the synthesis as the message content, with the whole deliberation in the capitoline field", async () => {
+    const { app } = makeCouncil();
+    const r = await request(app).post("/v1/chat/completions").send({ model: "capitoline", messages: [{ role: "user", content: "retry?" }] });
+    expect(r.status).toBe(200);
+    expect(r.body.model).toBe("capitoline");
+    expect(r.body.choices[0].message).toEqual({ role: "assistant", content: COUNCIL_SYNTHESIS });
+    // Two answers, two rankings, one synthesis: five calls, and the usage is
+    // the sum of all five (§12.7 counts them under the real models; this is
+    // what the client is charged for the question).
+    expect(r.body.usage).toEqual({ prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 });
+    expect(r.body.capitoline.provider).toBe("capitoline");
+    // Un-blinded, after the fact: the labels the panel ranked under sit next
+    // to the real model names, where no prompt could reach them (§12.4/12.6).
+    const d = r.body.capitoline.council as Deliberation;
+    expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
+      ["anthropic", "claude-opus", COUNCIL_ANSWERS["claude-opus"]],
+      ["openai", "codex-astra", COUNCIL_ANSWERS["codex-astra"]],
+    ]);
+    expect(d.members.map((m) => m.label).sort()).toEqual(["Response A", "Response B"]);
+    expect(d.rankings.map((r2) => r2.by).sort()).toEqual(["claude-opus", "codex-astra"]);
+    expect(d.aggregate.map((a) => a.votes)).toEqual([2, 2]);
+    expect(d.judge).toEqual({ model: "claude-haiku", blind: true });
+    expect(d.calls).toBe(5);
+    expect(d.deliberationId).toEqual(expect.any(String));
+  });
+
+  it("declares a lost seat in the deliberation, with the kind and never the provider's words", async () => {
+    const { app } = makeCouncil(THREE_SEATS, [{ type: "error", kind: "cli_crashed", detail: "SECRET-STDERR: Traceback" }]);
+    const r = await request(app).post("/v1/chat/completions").send({ model: "capitoline", messages: [{ role: "user", content: "retry?" }] });
+    expect(r.status).toBe(200);
+    const d = r.body.capitoline.council as Deliberation;
+    expect(d.members.map((m) => m.model)).toEqual(["claude-opus", "codex-astra"]);
+    expect(d.lost).toEqual([{ family: "google", model: "agy-pro", reason: "cli_crashed" }]);
+    expect(JSON.stringify(r.body)).not.toContain("SECRET-STDERR");
+  });
+
+  it("streams the progress of the two silent stages, then the synthesis, then the deliberation", async () => {
+    const { app } = makeCouncil();
+    const r = await request(app).post("/v1/chat/completions").send({ model: "capitoline", stream: true, messages: [{ role: "user", content: "retry?" }] });
+    expect(r.status).toBe(200);
+    expect(r.headers["content-type"]).toMatch(/text\/event-stream/);
+    const chunks = sseLines(r.text);
+    expect(chunks.at(-1)).toBe("[DONE]");
+    const parsed = chunks.slice(0, -1).map((c) => JSON.parse(c));
+    expect(parsed[0].choices[0].delta).toEqual({ role: "assistant", content: "" });
+
+    // A progress chunk is an ordinary OpenAI chunk with an empty content
+    // delta: a client that knows nothing of the council renders nothing, and
+    // a curious one reads the stage out of the capitoline field (§12.6).
+    const progress = parsed.filter((c) => c.capitoline?.stage !== undefined);
+    for (const c of progress) {
+      expect(c.object).toBe("chat.completion.chunk");
+      expect(c.id).toBe(parsed[0].id);
+      expect(c.model).toBe("capitoline");
+      expect(c.choices).toEqual([{ index: 0, delta: { content: "" }, finish_reason: null }]);
+    }
+    expect(progress.map((c) => [c.capitoline.stage, c.capitoline.done, c.capitoline.total])).toEqual([
+      ["answers", 0, 2], ["answers", 1, 2], ["answers", 2, 2],
+      ["rankings", 0, 2], ["rankings", 1, 2], ["rankings", 2, 2],
+      ["synthesis", 0, 1], ["synthesis", 1, 1],
+    ]);
+    // The synthesis itself is ordinary content, as from any other model.
+    expect(parsed.filter((c) => c.capitoline?.stage === undefined).map((c) => c.choices[0].delta.content ?? "").join("")).toBe(COUNCIL_SYNTHESIS);
+    const last = parsed.at(-1);
+    expect(last.choices[0].finish_reason).toBe("stop");
+    expect(last.usage).toEqual({ prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 });
+    expect(last.capitoline.provider).toBe("capitoline");
+    expect((last.capitoline.council as Deliberation).members.map((m) => m.model)).toEqual(["claude-opus", "codex-astra"]);
+  });
+
+  // The reason the stream cannot wait for the first token: two stages produce
+  // none, up to `stage_timeout_s` each, and Cloudflare's edge answers the
+  // client 524 after 100 s of silence while the nine calls carry on being
+  // spent for nobody (docs/deploy.md §9).
+  it("opens the stream before the first stage, not on the first token", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const { app } = makeVirtualRun(async function* () {
+      yield { type: "progress", stage: "answers", done: 0, total: 2 };
+      await held;                     // the panel is thinking, and says nothing
+      yield* SYNTHESIS;
+    });
+    const server = app.listen(0);
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "capitoline", stream: true, messages: [{ role: "user", content: "retry?" }] }),
+        signal: AbortSignal.timeout(3000),
+      });
+      // The headers are out while stage 1 is still running: this line is the
+      // whole test, and it hangs until the timeout without the early open.
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toMatch(/text\/event-stream/);
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let head = "";
+      while (sseLines(head).length < 2) head += decoder.decode((await reader.read()).value, { stream: true });
+      const open = sseLines(head).map((c) => JSON.parse(c));
+      expect(open[0].choices[0].delta).toEqual({ role: "assistant", content: "" });
+      expect(open[1].capitoline).toEqual({ stage: "answers", done: 0, total: 2 });
+      release();
+      let rest = head;
+      for (let step = await reader.read(); step.done !== true; step = await reader.read()) rest += decoder.decode(step.value, { stream: true });
+      expect(sseLines(rest).at(-1)).toBe("[DONE]");
+      expect(rest).toContain("the synthesis");
+    } finally {
+      release();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("refuses a council that produced no answer with the kind of the failure that ended it", async () => {
+    const { app } = makeVirtual([{ type: "error", kind: "rate_limited", detail: "every seat was refused" }]);
+    const r = await request(app).post("/v1/chat/completions").send({ model: "capitoline", messages: [{ role: "user", content: "retry?" }] });
+    expect(r.status).toBe(429);
+    expect(r.body.error.code).toBe("rate_limited");
+    expect(r.body.error.message).toBe("provider rate limit reached");
+    expect(r.text).not.toContain("every seat was refused");   // the council's own account stays in the log
+  });
+
+  it("ends a stream that already started with an error chunk and no [DONE]", async () => {
+    const { app } = makeVirtual([
+      { type: "progress", stage: "answers", done: 0, total: 2 },
+      { type: "error", kind: "queue_full", detail: "the provider queue did not open" },
+    ]);
+    const r = await request(app).post("/v1/chat/completions").send({ model: "capitoline", stream: true, messages: [{ role: "user", content: "retry?" }] });
+    expect(r.status).toBe(200);
+    const chunks = sseLines(r.text);
+    expect(chunks).not.toContain("[DONE]");
+    expect(JSON.parse(chunks.at(-1)!).error).toEqual({ message: "the gateway is busy: the provider queue did not open in time", type: "server_error", code: "queue_full" });
   });
 });
 

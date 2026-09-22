@@ -4,7 +4,8 @@ import { CapitolineError, type ProviderEvent, type Usage } from "../core/types.j
 import type { Logger } from "../log.js";
 import { callerOf } from "./access.js";
 import { convertImageRequest, imageResponse, type ImageEvent } from "./images.js";
-import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, ignoredHeader, sseChunk } from "./openai.js";
+import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, ignoredHeader, sseChunk, type Converted } from "./openai.js";
+import type { Deliberation } from "../council/council.js";
 
 function beginSse(res: Response) {
   res.status(200).setHeader("Content-Type", "text/event-stream").setHeader("Cache-Control", "no-cache");
@@ -58,6 +59,65 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     opts.log.warn({ kind: ev.kind, model, detail: ev.detail.slice(-2000) }, "provider error");
     const retry = ev.kind === "rate_limited" ? core.pauseRemainingS(provider, model) ?? ev.retryAfterS : ev.retryAfterS;
     return new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind], retry);
+  };
+
+  /**
+   * A council on the chat endpoint, in both of its shapes.
+   *
+   * The deliberation is read through `Core.deliberate()` and not through
+   * `Core.execute()`, which flattens it: the progress of the two silent stages
+   * and the un-blinded account of what the panel did are the whole point of
+   * §12.6, and `execute()` has nowhere to put either.
+   *
+   * The first event is pulled before a single byte is written. Everything a
+   * council is refused for — an attachment, the empty question, a quorum that
+   * cannot be filled — is raised there, and must still reach the client as a
+   * 400 or a 404 and not as an error inside a 200 that has already started.
+   * It costs nothing: that event is `answers 0/n`, emitted from the seating,
+   * before the first member call.
+   *
+   * Then, for a streaming request, the headers and the opening role chunk go
+   * out at once — not on the first token, as a single model's answer does.
+   * Two stages produce no token at all, up to `stage_timeout_s` each, and
+   * Cloudflare's edge answers the client 524 after 100 s of silence from the
+   * origin while the nine calls carry on being spent for nobody
+   * (docs/deploy.md §9).
+   */
+  const council = async (res: Response, conv: Converted, id: string, ac: AbortController, provider: string) => {
+    const model = conv.req.model;
+    const events = core.deliberate(conv.req, { signal: ac.signal, source: "http", caller: callerOf(res.locals.identity) })[Symbol.asyncIterator]();
+    let step = await events.next();
+    let text = "";
+    let usage: Usage | undefined;
+    let detail: Deliberation | undefined;
+    try {
+      if (conv.req.stream) { beginSse(res); res.write(sseChunk(model, id, { role: "assistant", content: "" }, null)); }
+      for (; step.done !== true; step = await events.next()) {
+        const ev = step.value;
+        if (ev.type === "progress") {
+          if (conv.req.stream) res.write(sseChunk(model, id, { content: "" }, null, undefined, { stage: ev.stage, done: ev.done, total: ev.total }));
+        } else if (ev.type === "text") {
+          if (conv.req.stream) res.write(sseChunk(model, id, { content: ev.delta }, null));
+          else text += ev.delta;
+        } else if (ev.type === "done") { usage = ev.usage; detail = ev.detail; }
+        // The kind, never the council's own account of which seats it lost:
+        // that is a log line (spec 8.3), and a deliberation that did finish
+        // hands the client the whole of it in the `capitoline` field instead.
+        else throw new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind]);
+      }
+    } finally {
+      // A deliberation left mid-stage — an error event, a client that went
+      // away — is a generator suspended at a yield, and the stage it is in
+      // would run to its timeout for nobody.
+      await events.return?.(undefined);
+    }
+    if (ac.signal.aborted) return; // client went away: nothing left to answer
+    const extra = { provider, ignored: conv.ignored, ...(detail ? { council: detail } : {}) };
+    if (conv.req.stream) {
+      res.write(sseChunk(model, id, {}, "stop", usage, extra));
+      res.write("data: [DONE]\n\n");
+      res.end();
+    } else res.json(completionResponse(model, text, usage, extra));
   };
 
   // The exempt route (spec 4) carries cached state only and names nobody:
@@ -121,6 +181,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     try {
       const ignored = ignoredHeader(conv.ignored);
       if (ignored) res.setHeader("X-Capitoline-Ignored", ignored);
+      if (core.isVirtual(conv.req.model)) return await council(res, conv, id, ac, provider);
       for await (const ev of core.execute(conv.req, { signal: ac.signal, source: "http", caller: callerOf(res.locals.identity) })) {
         if (ev.type === "text") {
           if (conv.req.stream) {

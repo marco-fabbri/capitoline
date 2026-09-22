@@ -114,9 +114,15 @@ export function completionResponse(model: string, text: string, usage: Usage | u
   };
 }
 
-export function sseChunk(model: string, id: string, delta: { role?: "assistant"; content?: string }, finish: "stop" | null, usage?: Usage): string {
+// `extra` is the chunk's own `capitoline` field, the streaming counterpart of
+// the one `completionResponse` hangs on a whole body: the council's progress
+// while the two silent stages run, and the deliberation on the final chunk. It
+// is an unknown field inside a perfectly ordinary chunk, which is exactly what
+// an OpenAI client does with it — nothing (§12.6).
+export function sseChunk(model: string, id: string, delta: { role?: "assistant"; content?: string }, finish: "stop" | null, usage?: Usage, extra?: Record<string, unknown>): string {
   const chunk: Record<string, unknown> = { id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model,
     choices: [{ index: 0, delta, finish_reason: finish }] };
   if (finish) chunk.usage = usageBlock(usage);
+  if (extra) chunk.capitoline = extra;
   return `data: ${JSON.stringify(chunk)}\n\n`;
 }
