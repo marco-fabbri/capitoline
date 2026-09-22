@@ -257,8 +257,7 @@ council:
       - { family: flash-high, models: [agy-gemini-flash-high] }
       - { family: flash-low,  models: [agy-gemini-flash-low] }
     # The judge is no rung, and no Gemini at all: the ladder under test must
-    # not synthesize its own measurement. claude-haiku is the cheapest model of
-    # another family, and with judge_allow_member: false it must be one no
+    # not synthesize its own measurement. With judge_allow_member: false it must be one no
     # member can take, which these Gemini seats never could.
     #
     # A second model stands behind it for the reason every chain exists, and it
@@ -266,14 +265,21 @@ council:
     # already known paused is never seated at all and the deliberation degrades
     # honestly — the best-ranked answer is returned unsynthesised — but the
     # first refusal of a window is by definition not in the state yet (design
-    # §12.2), and with nothing after claude-haiku that single refusal throws
-    # away six Gemini calls already spent and hands the client an error instead
-    # of an answer. agy-claude-sonnet is the same lineage through the Google
-    # subscription, so the step down spends no Anthropic window — the reason
-    # this ladder is on Gemini in the first place — it sits in no seat of any
-    # council, and by the time it is reached the members have already released
-    # their Antigravity slots.
-    judge: { family: anthropic, models: [claude-haiku, agy-claude-sonnet] }
+    # §12.2), and with nothing behind the head of the chain that single refusal
+    # throws away six Gemini calls already spent and hands the client an error
+    # instead of an answer. agy-claude-sonnet closes the chain: the same lineage
+    # through the Google subscription, so the last step down spends no Anthropic
+    # window, and it sits in no seat of any council.
+    #
+    # The head is claude-opus and not the cheapest model of the family, which is
+    # what this chain held until 2026-09-22. The judge writes the answer the
+    # client reads, so it is the one seat where economising is false economy: a
+    # synthesis is one call out of seven while the deliberation spends upwards
+    # of 150k tokens, and the first ladder run measured what the cheap judge
+    # costs — claude-haiku merged the three answers and shipped a claim none of
+    # them made, on the very point the question turned on (docs/backlog.md,
+    # "The judge can introduce an error none of the members made").
+    judge: { family: anthropic, models: [claude-opus, claude-sonnet, agy-claude-sonnet] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     # Every rung or nothing, unlike the two panels above. A ladder missing one

@@ -356,7 +356,10 @@ describe("config", () => {
       // an empty chain ends six spent calls in an error (design §12.2). The
       // fallback is billed to the Google subscription, so it spends none of
       // the Anthropic window this ladder was put on Gemini to spare.
-      expect(ladder.judge, file).toEqual({ family: "anthropic", models: ["claude-haiku", "agy-claude-sonnet"] });
+      // The head is the strongest model of the family, not the cheapest: the judge
+      // writes the answer, and the first ladder run measured a cheap judge shipping
+      // a claim none of the members made.
+      expect(ladder.judge, file).toEqual({ family: "anthropic", models: ["claude-opus", "claude-sonnet", "agy-claude-sonnet"] });
       // Every rung or nothing: a ladder missing one has nothing to compare the
       // cheap rungs against, so the quorum is the whole panel and a lost rung
       // makes the instrument refuse instead of spending five uninterpretable
@@ -364,11 +367,15 @@ describe("config", () => {
       // rejected.
       expect([ladder.judgeAllowMember, ladder.judgeBlind, ladder.minMembers], file).toEqual([false, true, 3]);
       expect(ladder.minMembers, file).toBe(ladder.seats.length);
-      // judge_allow_member is false, so every model of the judge's chain must
-      // be one no council can seat — otherwise the filter in seatJudge() drops
-      // it on exactly the day it is needed.
-      const seatedAnywhere = new Set(Object.values(cfg.council).flatMap((c) => c.seats.flatMap((s) => s.models)));
-      for (const m of ladder.judge.models) expect(seatedAnywhere.has(m), `${file} ${m}`).toBe(false);
+      // judge_allow_member is false, so no model of the judge's chain may be a
+      // seat of THIS council — seatJudge() filters the chain against the models
+      // of the deliberation it is seating (src/council/council.ts), and a chain
+      // whose every entry is a rung would leave nothing to seat. Being a member
+      // of another council is irrelevant: that is a different deliberation, and
+      // claude-opus heads this chain while also sitting in the reference
+      // panel's Anthropic seat.
+      const seatedHere = new Set(ladder.seats.flatMap((s) => s.models));
+      for (const m of ladder.judge.models) expect(seatedHere.has(m), `${file} ${m}`).toBe(false);
       expect(ladder.stageTimeoutS, file).toBe(cfg.council.capitoline.stageTimeoutS);
     }
   });

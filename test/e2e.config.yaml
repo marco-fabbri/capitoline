@@ -251,8 +251,7 @@ council:
       - { family: flash-high, models: [agy-gemini-flash-high] }
       - { family: flash-low,  models: [agy-gemini-flash-low] }
     # The judge is no rung, and no Gemini at all: the ladder under test must
-    # not synthesize its own measurement. claude-haiku is the cheapest model of
-    # another family, and with judge_allow_member: false it must be one no
+    # not synthesize its own measurement. With judge_allow_member: false it must be one no
     # member can take, which these Gemini seats never could.
     #
     # A second model stands behind it for the reason every chain exists, and it
@@ -267,7 +266,7 @@ council:
     # this ladder is on Gemini in the first place — it sits in no seat of any
     # council, and by the time it is reached the members have already released
     # their Antigravity slots.
-    judge: { family: anthropic, models: [claude-haiku, agy-claude-sonnet] }
+    judge: { family: anthropic, models: [claude-opus, claude-sonnet, agy-claude-sonnet] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     # Every rung or nothing, unlike the two panels above. A ladder missing one
