@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { loadConfig, loadConfigWithOverlay, mergeConfig, parseConfig } from "../src/config.js";
+import { loadConfig, loadConfigWithOverlay, mergeConfig, parseConfig, type Effort } from "../src/config.js";
 
 // Every inline configuration below is built from these two helpers. The
 // provider block must carry all the keys the schema requires, so a key added
@@ -39,17 +39,19 @@ const configOf = (providers: Record<string, Fields>, runner = "{ sandbox_root: /
 
 const config = (over: Fields = {}, runner?: string): string => configOf({ x: over }, runner);
 
-// A council over the inline provider, built the same way. The provider gets a
-// second model so the smallest panel the schema accepts — two seats, two
-// models — can be written without repeating the provider block.
-const TWO_MODELS = "{ a: {cli_model: a}, b: {cli_model: b} }";
+// A council over the inline provider, built the same way. The provider gets
+// three models, one per seat: the smallest panel the schema accepts is two
+// seats, and no two seats may name the same model, so a three-seat council
+// needs a third. `prov` varies the provider block for the few tests that are
+// about what a seat names rather than about the council's own keys.
+const MODELS = "{ a: {cli_model: a}, b: {cli_model: b}, c: {cli_model: c} }";
 const COUNCIL: Fields = {
   seats: "[{family: f1, models: [a]}, {family: f2, models: [b]}]",
   judge: "{family: f1, models: [a]}",
 };
-const council = (over: Fields = {}, name = "capitoline"): string => {
+const council = (over: Fields = {}, name = "capitoline", prov: Fields = {}): string => {
   const fields = Object.entries({ ...COUNCIL, ...over }).filter(([, v]) => v !== null);
-  return `council:\n  ${name}: { ${fields.map(([k, v]) => `${k}: ${v}`).join(", ")} }\n${config({ models: TWO_MODELS })}`;
+  return `council:\n  ${name}: { ${fields.map(([k, v]) => `${k}: ${v}`).join(", ")} }\n${config({ models: MODELS, ...prov })}`;
 };
 
 const BOTH_FILES = ["config/capitoline.yaml", "test/e2e.config.yaml"];
@@ -250,15 +252,30 @@ describe("config", () => {
       const cfg = loadConfig(file);
       expect(Object.keys(cfg.council), file).toEqual(["capitoline"]);
       const c = cfg.council.capitoline;
-      // One seat per family, and no family twice: models of one lineage share
-      // their blind spots, so two seats of the same family would be one
-      // opinion voting twice (design §12.2).
+      // One seat per family, and no family twice — a rule the schema enforces
+      // ("rejects two seats of the same family"), because models of one
+      // lineage share their blind spots and two seats of one family would be
+      // one opinion voting twice (design §12.2).
       expect(c.seats.map((s) => s.family), file).toEqual(["anthropic", "openai", "google", "open-weights"]);
       expect(c.seats[0].models, file).toEqual(["claude-fable", "claude-opus", "claude-sonnet"]);
       expect(c.seats[3].models, file).toEqual(["agy-gpt-oss"]);
-      expect(c.judge, file).toEqual({ family: "anthropic", models: ["claude-opus", "claude-sonnet"] });
+      expect(c.judge, file).toEqual({ family: "anthropic", models: ["claude-opus", "claude-sonnet", "claude-haiku"] });
+      // The judge is seated apart (judge_allow_member: false), so its chain
+      // must keep a model the panel cannot take: on a day when Fable and Opus
+      // are both refused the Anthropic seat walks down to claude-sonnet, and a
+      // judge chain inside the seat's would be empty with eight calls spent.
+      const seatedModels = new Set(c.seats.flatMap((s) => s.models));
+      expect(c.judge.models.filter((m) => !seatedModels.has(m)), file).not.toEqual([]);
+      // Every provider must offer a slot per seat it serves, or the second
+      // member of that provider waits on the queue and loses its seat: the
+      // default seats put google and open-weights on antigravity (design §12.1).
+      expect(cfg.providers.antigravity.concurrency, file).toBeGreaterThanOrEqual(2);
       // The snake_case the operator writes, under the names the code uses.
-      expect([c.judgeAllowMember, c.judgeBlind, c.minMembers, c.stageTimeoutS], file).toEqual([false, true, 2, 300]);
+      expect([c.judgeAllowMember, c.judgeBlind, c.minMembers], file).toEqual([false, true, 2]);
+      // Minutes on the host, seconds in the end-to-end copy: from the moment
+      // stage_timeout_s becomes a member's deadline, a test that never reaches
+      // the process would otherwise hold the suite for five minutes.
+      expect(c.stageTimeoutS, file).toBe(file === "config/capitoline.yaml" ? 300 : 20);
       // Every seated model is a model of some provider, and no seat is empty.
       const declared = Object.values(cfg.providers).flatMap((p) => Object.keys(p.models));
       for (const s of [...c.seats, c.judge]) {
@@ -281,9 +298,13 @@ describe("config", () => {
       expect(agy.models["agy-gpt-oss"].cli_model, file).toBe("gpt-oss-120b");
       expect(agy.models["agy-gpt-oss"].effort_suffix, file).toBe(true);
       for (const [name, m] of Object.entries(agy.models)) {
-        const efforts = m.effort_suffix ? (m.efforts ?? (Object.keys(agy.effort) as string[])) : [];
+        // The same two steps effortValue() takes (src/providers/adapter.ts):
+        // an effort the provider's table does not define is dropped, and the
+        // id carries the table's *value*, not the key. They coincide only
+        // while the table is the identity, and a host overlay may change it.
+        const efforts = m.effort_suffix ? (m.efforts ?? (Object.keys(agy.effort) as Effort[])).filter((e) => Object.hasOwn(agy.effort, e)) : [];
         if (efforts.length === 0) expect(listed, `${file} ${name}`).toContain(m.cli_model);
-        for (const e of efforts) expect(listed, `${file} ${name} @ ${e}`).toContain(`${m.cli_model}-${e}`);
+        for (const e of efforts) expect(listed, `${file} ${name} @ ${e}`).toContain(`${m.cli_model}-${agy.effort[e]}`);
       }
     }
   });
@@ -314,6 +335,30 @@ describe("config", () => {
       .toThrow(/"toString".*no provider/);
   });
 
+  it("rejects a seat or a judge naming a model that is not a text model", () => {
+    // A deliberation is a chat request: an image model answers it with
+    // bad_request, which no fallback retries, so the seat would be lost in the
+    // middle of a deliberation. Same rule as health_model, for the same reason.
+    const withImage: Fields = { models: "{ a: {cli_model: a}, img: {cli_model: i, kind: image} }", image: "{collect: [x]}" };
+    expect(() => parseConfig(council({ seats: "[{family: f1, models: [a, img]}, {family: f2, models: [a]}]" }, "capitoline", withImage)))
+      .toThrow(/council\.capitoline\.seats\.0\.models: .*"img".*not a text model/);
+    expect(() => parseConfig(council({ judge: "{family: f1, models: [img]}" }, "capitoline", withImage)))
+      .toThrow(/council\.capitoline\.judge\.models: .*"img".*not a text model/);
+  });
+
+  it("rejects two seats of the same family, and one model seated twice", () => {
+    // Models of one lineage share their blind spots, so a family seated twice
+    // is one opinion with two votes; the same model reached from two seats is
+    // the same thing by another route (design §12.2).
+    expect(() => parseConfig(council({ seats: "[{family: f1, models: [a]}, {family: f1, models: [b]}]" })))
+      .toThrow(/council\.capitoline\.seats\.1\.family: .*family "f1" twice/);
+    expect(() => parseConfig(council({ seats: "[{family: f1, models: [a, b]}, {family: f2, models: [b]}]" })))
+      .toThrow(/council\.capitoline\.seats\.1\.models: .*"b" in two chains/);
+    // The judge shares the first seat's chain in every default council, and
+    // judge_allow_member is what governs that: the rule is about seats only.
+    expect(() => parseConfig(council({ judge: "{family: f1, models: [a]}" }))).not.toThrow();
+  });
+
   it("rejects a council named after a provider model", () => {
     // The council is served by the same `model` field as every other model, so
     // a name held by both routes to one of them and never to the other.
@@ -325,7 +370,12 @@ describe("config", () => {
     // one is not a council (design §12.5).
     expect(() => parseConfig(council({ min_members: "1" }))).toThrow(/council\.capitoline\.min_members/);
     expect(() => parseConfig(council({ min_members: "0" }))).toThrow(/council\.capitoline\.min_members/);
-    expect(parseConfig(council({ min_members: "3" })).council.capitoline.minMembers).toBe(3);
+    // A quorum larger than the panel: reachable by no deliberation, so it is
+    // rejected here rather than nine calls in, and accepted on three seats.
+    expect(() => parseConfig(council({ min_members: "3" })))
+      .toThrow(/council\.capitoline\.min_members: .*min_members 3 but declares only 2 seats/);
+    const three = council({ min_members: "3", seats: "[{family: f1, models: [a]}, {family: f2, models: [b]}, {family: f3, models: [c]}]" });
+    expect(parseConfig(three).council.capitoline.minMembers).toBe(3);
     expect(() => parseConfig(council({ seats: "[{family: f1, models: [a]}]" })))
       .toThrow(/council\.capitoline\.seats: .*at least two seats/);
     // A seat with an empty chain can never be filled.
@@ -345,6 +395,7 @@ describe("the end-to-end configuration tracks the repository one", () => {
   // decision: it says this key is deliberately not the same on a developer
   // machine as on the host.
   const INTENDED = [
+    "council.capitoline.stageTimeoutS",          // seconds, not minutes, so a suspended member fails fast
     "providers.antigravity.binary",              // the fake CLIs replay fixtures
     "providers.antigravity.image.collect",       //   and so does the collect helper
     "providers.antigravity.timeout_s",           // seconds, not minutes, so a hung fake fails fast
@@ -389,6 +440,8 @@ describe("the end-to-end configuration tracks the repository one", () => {
       expect(p.timeout_s, id).toBeLessThanOrEqual(30);
       expect(repo.providers[id].timeout_s, id).toBeGreaterThanOrEqual(600);
     }
+    expect(e2e.council.capitoline.stageTimeoutS).toBeLessThanOrEqual(30);
+    expect(repo.council.capitoline.stageTimeoutS).toBeGreaterThanOrEqual(300);
     expect(e2e.providers.antigravity.image.collect).toEqual(["test/fake-cli/fake-collect-image.sh"]);
     expect(repo.providers.antigravity.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
   });

@@ -210,14 +210,46 @@ export const ConfigSchema = z
       if (c.minMembers < 2) {
         ctx.addIssue({ code: "custom", path: ["council", name, "min_members"], message: `council "${name}" sets min_members ${c.minMembers}: below two answers there is nothing to rank` });
       }
+      // A quorum larger than the panel can never be met, not even with every
+      // seat answering: every deliberation would spend its calls and end in
+      // the "fewer than min_members" branch, with no council at all.
+      if (c.minMembers > c.seats.length) {
+        ctx.addIssue({ code: "custom", path: ["council", name, "min_members"], message: `council "${name}" sets min_members ${c.minMembers} but declares only ${c.seats.length} seats, so the quorum can never be met` });
+      }
+      // One seat per family is what buys independent judgment: models of one
+      // lineage share their blind spots, so they fail the same way and rank
+      // each other's failures highly (design §12.2). The same model reachable
+      // from two seats is the same opinion voting twice, for the same reason.
+      const families = new Map<string, number>();
+      const seated = new Map<string, number>();
+      c.seats.forEach((s, i) => {
+        const family = families.get(s.family);
+        if (family !== undefined) {
+          ctx.addIssue({ code: "custom", path: ["council", name, "seats", i, "family"], message: `council "${name}" seats family "${s.family}" twice (seats ${family} and ${i}): one lineage would hold two votes` });
+        } else families.set(s.family, i);
+        for (const m of s.models) {
+          const other = seated.get(m);
+          if (other !== undefined && other !== i) {
+            ctx.addIssue({ code: "custom", path: ["council", name, "seats", i, "models"], message: `council "${name}" seats "${m}" in two chains (seats ${other} and ${i}): one model would answer twice` });
+          } else seated.set(m, i);
+        }
+      });
       // Every model of every chain, named against the providers. A chain is
       // written by hand and read only when a fallback happens, so a typo in it
       // can sit unnoticed until the day it is needed.
       const chain = (seat: { family: string; models: string[] }, path: (string | number)[]): void => {
         for (const m of seat.models) {
           // A Map, not the models object: `in` would accept "toString".
-          if (!seen.has(m)) {
+          const pid = seen.get(m);
+          if (pid === undefined) {
             ctx.addIssue({ code: "custom", path, message: `council "${name}" seats "${m}" for family ${seat.family}, which no provider declares` });
+            continue;
+          }
+          // A deliberation is a chat request, and an image model refuses one
+          // with bad_request, which no fallback retries: the seat would be
+          // lost mid-deliberation. Same reason health_model must be text.
+          if (cfg.providers[pid].models[m].kind !== "text") {
+            ctx.addIssue({ code: "custom", path, message: `council "${name}" seats "${m}" for family ${seat.family}, which is not a text model` });
           }
         }
       };

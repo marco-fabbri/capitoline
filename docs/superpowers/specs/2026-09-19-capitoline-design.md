@@ -323,7 +323,7 @@ The strategy is karpathy/llm-council's, with the changes noted below:
 2. **Anonymous peer ranking.** Each member receives the others' answers labelled `Response A`, `B`, … and ranks them. The reply is JSON against a schema, not prose parsed by a regex.
 3. **Synthesis.** A judge, seated separately, writes the final answer from the labelled answers and the aggregate ranking.
 
-Four seats is the default: nine calls, one per answer, one per ranking, one for the synthesis. The members run truly in parallel because one seat per family means no two contend for the same provider's queue.
+Four seats is the default: nine calls, one per answer, one per ranking, one for the synthesis. The members run in parallel only if every provider offers one concurrency slot per seat it serves: one seat per family buys independent judgment (§12.2), not a free queue, and a family is not a provider. The default seats put Google and open weights on the same Antigravity subscription, so `providers.antigravity.concurrency` is two; with one, the second of those members would sit on that provider's queue until `server.queue.max_wait_s` and lose its seat, in both parallel stages.
 
 ### 12.2 Seats are families with a fallback chain
 

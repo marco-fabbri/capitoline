@@ -352,7 +352,7 @@ describe("CliProvider.generateImage", () => {
 describe("buildProviders", () => {
   it("builds one provider per configured id with its concurrency", () => {
     const ps = buildProviders(config, runner, createLogger("t"));
-    expect(ps.map((p) => [p.id, p.concurrencyLimit]).sort()).toEqual([["antigravity", 1], ["claude", 2], ["codex", 1]]);
+    expect(ps.map((p) => [p.id, p.concurrencyLimit]).sort()).toEqual([["antigravity", 2], ["claude", 2], ["codex", 1]]);
   });
   it("throws on a provider id without an adapter", () => {
     expect(() => buildProviders({ ...config, providers: { unknown: base } }, runner, createLogger("t"))).toThrow(/no adapter/);
