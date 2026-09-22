@@ -24,6 +24,7 @@ const PROVIDER: Fields = {
   effort_flag: "null",
   effort_key: "null",
   args: "[]",
+  args_extra: "[]",
   system_prompt_flag: "null",
   system_prompt_flag_prefix: "null",
   prompt_via: "stdin",
@@ -840,8 +841,7 @@ describe("config/overlay.example.yaml", () => {
   // the repository file and must arrive with the pull that changes it.
   const HOST_KEYS = [
     "providers.antigravity.binary",
-    "providers.antigravity.image.collect",
-    "providers.claude.args",              // the whole list: arrays replace, and the host's carries --settings
+    "providers.claude.args_extra",        // what the host adds, never the repository's own command line
     "providers.claude.binary",
     "providers.codex.binary",
     "runner.sandbox_root",
@@ -867,12 +867,18 @@ describe("config/overlay.example.yaml", () => {
     expect(cfg.providers.claude.binary).toBe("/home/runner/.npm-global/bin/claude");
     expect(cfg.providers.codex.binary).toBe("/home/runner/.npm-global/bin/codex");
     expect(cfg.providers.antigravity.binary).toBe("/home/runner/.local/bin/agy");
+    // Not overridden any more: the repository names the same path the sudoers
+    // rule does, so repeating it in the overlay only invited the two to drift.
     expect(cfg.providers.antigravity.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
     // Access is filled in §9 of the runbook; both empty is the disabled pair.
     expect(cfg.server.access).toEqual({ team_domain: "", audience: "" });
-    // The replaced list is the repository's plus the host's token file, and it
-    // must still be a complete command line: nothing is appended for it.
-    const repo = loadConfig("config/capitoline.yaml").providers.claude.args;
-    expect(cfg.providers.claude.args).toEqual([...repo, "--settings", "/home/runner/.claude/capitoline.json"]);
+    // The host adds and never replaces: the repository's command line arrives
+    // with the pull that changes it, and the host names only its own argument.
+    // Copying the whole list into `args` to append to it was the drift the
+    // overlay exists to close, turned around.
+    const repo = loadConfig("config/capitoline.yaml").providers.claude;
+    expect(cfg.providers.claude.args).toEqual(repo.args);
+    expect(repo.args_extra).toEqual([]);
+    expect(cfg.providers.claude.args_extra).toEqual(["--settings", "/home/runner/.claude/capitoline.json"]);
   });
 });

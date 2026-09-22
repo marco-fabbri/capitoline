@@ -53,6 +53,25 @@ const ProviderSchema = z.object({
   // the CLI as `--effort ""` or as a model id ending in "-".
   effort: z.record(EffortSchema, z.string().min(1)),
   args: z.array(z.string()),
+  /**
+   * What this host adds to the command line, appended after `args`.
+   *
+   * `mergeConfig` replaces an array wholesale — a command line is one value,
+   * not a list to concatenate — so a host that needed one more flag had to
+   * copy the whole of `args` into its overlay to append to it. That is the
+   * drift the overlay exists to close, turned around: a pull that adds a flag
+   * upstream never reached such a host, and `check-config` stayed green
+   * because the schema was satisfied either way.
+   *
+   * With this key the host names only what is its own. Nothing in the
+   * repository ever sets it to anything but `[]`, so replacing rather than
+   * concatenating costs nothing here.
+   *
+   * Required and without a default, like the flag keys below and for the same
+   * reason: a hand-edited file written before it existed must fail loudly
+   * rather than inherit a default and change the command line in silence.
+   */
+  args_extra: z.array(z.string()),
   // The flag that names the model to the CLI: `<model_flag> <cli_model>`.
   // Required, with no default on purpose: a configuration file written before
   // these keys existed — the hand-edited copy in /etc on the host — would

@@ -29,7 +29,7 @@ function window(w: unknown): RateLimitWindow | undefined {
 export const claudeAdapter: Adapter = {
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
     const { system, rest } = splitSystem(req.messages);
-    const args = [...cfg.args, cfg.model_flag, model.cliModel];
+    const args = [...cfg.args, ...cfg.args_extra, cfg.model_flag, model.cliModel];
     args.push(...effortArgs(cfg, effortValue(cfg, model, req.effort)));
     let prompt = flatten(rest);
     if (system) {

@@ -50,6 +50,17 @@ describe("claude adapter", () => {
     const c = claudeAdapter.buildCommand(noEffort, opus, { model: "claude-opus", stream: false, effort: "high", messages: [{ role: "user", text: "hi" }] });
     expect(c.args.slice(cfg.args.length)).toEqual(["--model", "opus"]);
   });
+  it("appends what the host adds, after the repository's own command line", () => {
+    // `args_extra` is how a host adds an argument without copying the
+    // repository's list into its overlay to append to it: a list replaces and
+    // is never appended to, so the copy drifted at every pull.
+    const withExtra = { ...cfg, args_extra: ["--settings", "/home/runner/.claude/capitoline.json"] };
+    const c = claudeAdapter.buildCommand(withExtra, opus, { model: "claude-opus", stream: false, messages: [{ role: "user", text: "hi" }] });
+    expect(c.args.slice(0, cfg.args.length)).toEqual(cfg.args);
+    expect(c.args.slice(cfg.args.length, cfg.args.length + 2)).toEqual(["--settings", "/home/runner/.claude/capitoline.json"]);
+    // And the model still follows, so the extra arguments never displace it.
+    expect(c.args.slice(cfg.args.length + 2, cfg.args.length + 4)).toEqual(["--model", "opus"]);
+  });
   it("parses partial stream output into text deltas, rate limits and done with usage", async () => {
     const ev = await events("test/fixtures/claude/stream-json-partial.jsonl");
     expect(ev.filter((e) => e.type === "text").map((e) => (e as any).delta).join("")).toBe("ok ok");

@@ -16,7 +16,7 @@ export const antigravityAdapter: Adapter = {
     const eff = effortValue(cfg, model, req.effort);
     // The id comes from the shared resolver, which is also what Core keys a
     // model pause by: the id refused and the id recorded cannot drift apart.
-    const args = [...cfg.args, cfg.model_flag, cliId(cfg, model, req.effort)];
+    const args = [...cfg.args, ...cfg.args_extra, cfg.model_flag, cliId(cfg, model, req.effort)];
     // One carrier for the effort, never two: a model with effort_suffix already
     // has the level inside its id, so a flag would declare the same value a
     // second time and is not added. For every other model the configuration's
@@ -39,7 +39,7 @@ export const antigravityAdapter: Adapter = {
   },
 
   buildImageCommand(cfg: ProviderConfig, model: ModelSpec, req: ImageRequest): ImageCommand {
-    const args = [...cfg.args, ...cfg.image.args, cfg.model_flag, model.cliModel];
+    const args = [...cfg.args, ...cfg.args_extra, ...cfg.image.args, cfg.model_flag, model.cliModel];
     const stdin = JSON.stringify({ event: "user", message: { role: "user", content: IMAGE_PROMPT(req.prompt) } }) + "\n";
     return { args, stdin };
   },

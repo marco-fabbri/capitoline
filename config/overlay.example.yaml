@@ -34,28 +34,16 @@ server:
 providers:
   claude:
     binary: /home/runner/.npm-global/bin/claude
-    # The whole list, because a list replaces and is never appended to. It is
-    # the repository's command line plus the one host argument: --settings
-    # points at the file holding the OAuth token, which is readable by runner
-    # only and applies even with --setting-sources "". Re-check this list
-    # against config/capitoline.yaml after a pull that changes claude's args —
-    # it is the one place where the host still pins a repository value, and
-    # docs/deploy.md §7 has the command that compares the two.
-    args:
-      - -p
-      - --output-format
-      - stream-json
-      - --verbose
-      - --include-partial-messages
-      - --tools
-      - ""
-      - --strict-mcp-config
-      - --disable-slash-commands
-      - --setting-sources
-      - ""
-      - --no-session-persistence
-      - --permission-prompts
-      - none
+    # Only what this host adds. `args_extra` is appended to the repository's
+    # `args`, so a pull that changes the command line upstream reaches this
+    # host — which copying the whole list into `args` did not, since a list
+    # replaces and is never appended to.
+    #
+    # --settings points at the file holding the OAuth token, readable by
+    # runner only, and applies even with --setting-sources "". Needed only on
+    # a host authenticated with a setup token; a host where `claude /login`
+    # was run interactively leaves this out entirely.
+    args_extra:
       - --settings
       - /home/runner/.claude/capitoline.json
 
@@ -64,7 +52,7 @@ providers:
 
   antigravity:
     binary: /home/runner/.local/bin/agy
-    image:
-      # Must be the path the sudoers rule of §5 names: the gateway user runs
-      # this exact path as runner, and nothing else.
-      collect: [/usr/local/bin/capitoline-collect-image]
+    # No image.collect override: the repository already names
+    # /usr/local/bin/capitoline-collect-image, which is the path the sudoers
+    # rule of §5 names, so repeating it here only invites the two to drift.
+    # Set it only on a host that installs the helper somewhere else.

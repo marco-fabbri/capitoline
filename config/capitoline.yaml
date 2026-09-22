@@ -62,6 +62,7 @@ providers:
       - --no-session-persistence
       - --permission-prompts
       - none
+    args_extra: []            # what this host adds; only an overlay ever sets it
     system_prompt_flag: --system-prompt
     system_prompt_flag_prefix: null                  # none: the flag carries the text, not a key="value" override
     prompt_via: stdin
@@ -110,6 +111,7 @@ providers:
       - features.shell_tool=false
       - -c
       - web_search="disabled"
+    args_extra: []            # what this host adds; only an overlay ever sets it
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"
     system_prompt_flag_prefix: -c                    # the flag that carries key="value" configuration overrides
     prompt_via: stdin                                # codex exec -
@@ -192,6 +194,7 @@ providers:
       - --disable-slash-commands
       - --sandbox
       - -p=
+    args_extra: []            # what this host adds; only an overlay ever sets it
     system_prompt_flag: null                         # none: prepended to the prompt with a role marker
     system_prompt_flag_prefix: null
     prompt_via: stdin                                # {"event":"user","message":{"role":"user","content":...}}

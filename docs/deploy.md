@@ -339,7 +339,7 @@ Edit `/etc/capitoline/overlay.yaml`:
 | `runner.sandbox_root` | `/var/lib/capitoline/sandboxes` |
 | `usage.db_path` | `/var/lib/capitoline/usage.sqlite` — absolute, because the service's working directory is the clone |
 | `providers.claude.binary` | `/home/runner/.npm-global/bin/claude` |
-| `providers.claude.args` | the repository's list plus `--settings` and `/home/runner/.claude/capitoline.json` as two more items, written out in full because a list replaces. That file (owned by `runner`, mode `0600`) holds `{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}`, and `--settings` applies even with `--setting-sources ""`, so the gateway process never sees the token. It is the one value the overlay pins against the repository: re-read it after a pull that changes `providers.claude.args`, with the command below |
+| `providers.claude.args_extra` | what this host adds to `claude`'s command line, appended to the repository's `args` and never replacing them. On a host authenticated with a setup token that is `--settings /home/runner/.claude/capitoline.json`; that file (owned by `runner`, mode `0600`) holds `{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}`, and `--settings` applies even with `--setting-sources ""`, so the gateway process never sees the token. A host where `claude /login` was run interactively leaves the key at `[]` |
 | `providers.codex.binary` | `/home/runner/.npm-global/bin/codex` |
 | `providers.antigravity.binary` | `/home/runner/.local/bin/agy` |
 | `providers.antigravity.image.collect` | `[/usr/local/bin/capitoline-collect-image]` — must match the sudoers path of §5 (a developer machine sets `runner.user: null` and points it at `scripts/capitoline-collect-image`; the runner then spawns it directly, as the developer, so it reads that machine's own `$HOME`) |
@@ -447,31 +447,27 @@ file created now and filled in later, a write cut short — is refused by name
 (`the configuration overlay /etc/capitoline/overlay.yaml is empty`) rather
 than as a schema error with no key in it.
 
-One value in the overlay is a copy of a repository value and drifts silently:
-`providers.claude.args`, written out in full because a list replaces. After a
-pull that changes it the host keeps passing the old command line, and
-`check-config` stays green — the schema is satisfied either way. Re-read it
-with the same two files the service loads:
+Nothing in the overlay copies a repository value any more. A host that has to
+add an argument to a CLI's command line sets `args_extra`, which is appended
+to the repository's `args` rather than replacing it, so a pull that changes
+the command line upstream arrives here like any other change:
 
-```sh
-cd /var/lib/capitoline/app && sudo -Hu capitoline node -e "
-import('./dist/config.js').then(m => {
-  const repo = m.loadConfig('config/capitoline.yaml').providers.claude.args;
-  const host = m.loadConfig('config/capitoline.yaml', '/etc/capitoline/overlay.yaml').providers.claude.args;
-  const same = JSON.stringify(host.slice(0, repo.length)) === JSON.stringify(repo);
-  console.log(same ? 'args in step; the host adds: ' + host.slice(repo.length).join(' ')
-                   : 'DRIFT\nrepo: ' + repo.join(' ') + '\nhost: ' + host.join(' '));
-});"
+```yaml
+providers:
+  claude:
+    args_extra: [--settings, /home/runner/.claude/capitoline.json]
 ```
 
-It prints `args in step` and the host's own tail (`--settings
-/home/runner/.claude/capitoline.json`) when the overlay's list is still the
-repository's plus that tail, and the two command lines when it is not — in
-which case edit the overlay's `args` to the repository's list with the tail
-back at the end. Run it after every pull that touches `claude`'s flags
-(`docs/update-clis.md` step 3). The residue is recorded in `docs/backlog.md`
-§ Deployment: a dedicated key for the host's extra arguments would remove the
-duplication altogether.
+Until 2026-09-23 the overlay had to write out the whole of `providers.claude.args`
+to add those two items, because `mergeConfig` replaces a list and never
+appends to it. That was the drift the overlay exists to close, turned around:
+after a pull that added a flag the host kept passing the old command line and
+`check-config` stayed green, since the schema was satisfied either way. The
+runbook carried a command to compare the two lists by hand, which was only as
+reliable as whoever remembered to run it. `args_extra` removes the copy
+instead of reporting on it, and `providers.antigravity.image.collect` left the
+overlay at the same time: the repository already names the path the sudoers
+rule of §5 names, so repeating it only invited the two to drift.
 
 **A host that still runs a full copy keeps working.** Passing no overlay is
 still supported and behaves exactly as it did, so a deployment where
