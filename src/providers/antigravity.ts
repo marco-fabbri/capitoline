@@ -88,25 +88,23 @@ export const antigravityAdapter: Adapter = {
           yield { type: "error", kind: classifyError(detail), detail };
           return;
         }
-        // The run recorded in test/fixtures/antigravity/usage-reasoning.json
+        // Both halves below are measured, each by its own fixture. The cached
+        // reads: the run in test/fixtures/antigravity/usage-reasoning.json
         // (gemini-3.1-pro-high, the same prompt twice so the second one reads
-        // cache, both with non-zero thinking tokens) shows one identity and no
-        // more: the CLI's own total_tokens is input_tokens + output_tokens
-        // exactly. That settles the cached reads — the second run's 8092 sit
-        // outside the total, so they are input this turn was billed for and
-        // are added here, as claude.ts adds cache_read_input_tokens. It does
-        // not settle the thinking tokens: a total that already leaves one
-        // sibling field out is no proof that it folds another one in, and
-        // Google's own API reports thoughtsTokenCount outside
-        // candidatesTokenCount. So the output below is a choice and not a
-        // measurement: output_tokens alone counts the thinking tokens once if
-        // the CLI folds them in and misses them if it does not, where adding
-        // them would count them twice in the first case — and overstating the
-        // windows is the defect this replaces. The capture that would decide
-        // it is written down in docs/backlog.md. codex.ts stays the known
-        // exception: it adds neither cached_input_tokens nor
-        // reasoning_output_tokens, so the three providers' figures are not
-        // comparable with each other yet (same bullet).
+        // cache) shows the CLI's own total_tokens is input_tokens +
+        // output_tokens exactly, so the second run's 8092 cache_read_tokens
+        // sit outside that total — they are input this turn was billed for and
+        // are added here, as claude.ts adds cache_read_input_tokens. The
+        // thinking tokens: a one-word answer discriminates where arithmetic on
+        // the total cannot, and the run in usage-reasoning-oneword.json
+        // (answer `Paris`, output=203 thinking=202) puts them inside
+        // output_tokens, so output_tokens alone counts them exactly once
+        // (docs/spike-2026-09.md §10). codex.ts stays the known exception: it
+        // adds neither cached_input_tokens nor reasoning_output_tokens,
+        // because OpenAI already reports both inside the prompt and completion
+        // counts. Each adapter is therefore right for its own CLI, and the
+        // three providers' figures are not comparable with each other — said
+        // where the numbers are read, docs/deploy.md §9.
         const u = r.usage ?? {};
         yield { type: "done", usage: { input: (u.input_tokens ?? 0) + (u.cache_read_tokens ?? 0), output: u.output_tokens ?? 0 } };
         return;

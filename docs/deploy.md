@@ -624,17 +624,36 @@ existed (the database is upgraded in place, the history is kept). The
 gateway's own health probes are left out of the breakdown — on this host they
 are most of the table and would bury the rest under one `null` row.
 
-The token counts here and in `/health` follow each provider's own convention,
-and are therefore not comparable with each other. OpenAI reports cached and
-reasoning tokens *inside* the prompt and completion counts, so `codex.ts` adds
-neither; Anthropic reports cached reads *beside* the input, so `claude.ts` adds
-them; Antigravity leaves its cached reads out of its own total and keeps its
-thinking tokens inside the output (measured, `docs/spike-2026-09.md` §10), so
-`antigravity.ts` adds the first and not the second. Each adapter is right for
-the CLI it reads, and no single formula would make the three numbers mean the
-same thing. Read them against the same provider's history — that is what shows
-a prompt that has grown or a model change that costs more. For one figure
-across the three, count calls, not tokens: `calls` is the same unit everywhere.
+The `inputTokens` and `outputTokens` columns of that table are sums over
+whatever providers the caller used, and the three CLIs do not count the same
+way. OpenAI reports cached and reasoning tokens *inside* the prompt and
+completion counts, so `codex.ts` adds neither; Anthropic reports cached reads
+*beside* the input, so `claude.ts` adds them; Antigravity leaves its cached
+reads out of its own total and keeps its thinking tokens inside the output
+(measured, `docs/spike-2026-09.md` §10), so `antigravity.ts` adds the first and
+not the second. Each adapter is right for the CLI it reads, and no single
+formula would make the three mean the same thing. So a caller's token sum is an
+order of magnitude and not a measure, and it is not comparable with that same
+caller's earlier sums either: what it means moves whenever the caller's mix of
+providers moves. `calls` is the only homogeneous column here.
+
+No endpoint splits those tokens by provider — not this one, and not `/health`,
+which carries no token count at all: what it reports per provider is
+`overBudget`, a boolean the gateway computes against that same provider's
+`budget.window_5h_tokens` and `window_7d_tokens`, a comparison inside one
+provider and therefore one of the few that stay valid. A
+provider's tokens are read against its own history in the database, as the user
+that owns it (§11 says why never as root):
+
+```sh
+sudo -u capitoline sqlite3 -readonly /var/lib/capitoline/usage.sqlite \
+  "SELECT provider, COUNT(*), SUM(input_tokens), SUM(output_tokens) FROM calls
+   WHERE ts > strftime('%s', 'now', '-7 days') * 1000 GROUP BY provider"
+```
+
+That is what shows a prompt that has grown or a model change that costs more.
+For one figure across the three, count calls, not tokens: `calls` is the same
+unit everywhere.
 
 ## 10. Claude Code as MCP client (on the Mac)
 
