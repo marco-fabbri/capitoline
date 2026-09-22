@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { start } from "../src/main.js";
+import type { Deliberation } from "../src/council/council.js";
+import { STRATEGY_VERSION, answerPrompt, rankingPrompt, synthesisPrompt } from "../src/council/prompts.js";
 import { IMAGE_PROMPT } from "../src/providers/antigravity.js";
 
 // Resolved from this module, not from process.cwd(): vitest runs from wherever
@@ -156,4 +158,135 @@ describe("image generation end to end", () => {
     expect((await r.json()) as { error: { code: string; message: string } })
       .toMatchObject({ error: { code: "bad_request", message: expect.stringContaining("use the images endpoint") } });
   });
+});
+
+// --- The council, end to end over the fake CLIs ---------------------------
+//
+// Everything above this line answers with one model. This is the whole of
+// design §12 through the front door: one question in `model: capitoline`,
+// nine calls over three fake subscriptions, and an ordinary OpenAI completion
+// back. Nothing here knows the council exists — it is the same endpoint, the
+// same runner and the same usage table as `claude-opus` above, which is the
+// constraint the plan puts above the others: a member's call is a request
+// like any other.
+const COUNCIL_QUESTION = "Should a seat retry after a refusal?";
+// The judge's recording (test/fixtures/claude/council-synthesis.jsonl). It is
+// not "ok": the synthesis must be distinguishable from the members' answers,
+// or a body that returned one member's text would pass.
+const COUNCIL_SYNTHESIS = "Heard, weighed, and answered.";
+// What each fake subscription answers a *plain* prompt — the same text the
+// tests above read back from a direct request to the same models. That the
+// members' answers are these is the assertion that matters: stage 1 went down
+// the ordinary path, not one the council built for itself.
+const ANSWERS = { claude: "ok", codex: "OK", agy: "ok ok\n" };
+
+describe("a council end to end", () => {
+  // Every call of the deliberation is a row, under the real model that served
+  // it (§12.7). /v1/usage sums them per caller over 24 h and skips the health
+  // probes, so the count before and after is what the question cost — with
+  // nobody identified here, one bucket, `caller: null`.
+  const rows = async (): Promise<number> => {
+    const r = await fetch(`http://127.0.0.1:${app.port}/v1/usage`);
+    const { callers } = (await r.json()) as { callers: { calls: number }[] };
+    return callers.reduce((n, c) => n + c.calls, 0);
+  };
+
+  // 30 s: nine CLI spawns, each in its own sandbox directory, on a machine
+  // that is also running the rest of the suite.
+  it("seats four families, ranks blind, synthesizes, and writes nine usage rows", async () => {
+    const before = await rows();
+    const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "capitoline", messages: [{ role: "user", content: COUNCIL_QUESTION }] }),
+    });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      model: string; choices: { message: { content: string } }[]; usage: { total_tokens: number };
+      capitoline: { provider: string; council: Deliberation };
+    };
+    // The synthesis is the message content, and the model is the council: a
+    // client that ignores the `capitoline` field cannot tell this from any
+    // other completion (§12.6).
+    expect(body.model).toBe("capitoline");
+    expect(body.choices[0].message.content).toBe(COUNCIL_SYNTHESIS);
+    expect(body.capitoline.provider).toBe("capitoline");
+    expect(body.usage.total_tokens).toBeGreaterThan(0);
+
+    const d = body.capitoline.council;
+    // Four seats, four families, four different subscriptions — and each one
+    // answering exactly what it answers a direct request.
+    expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
+      ["anthropic", "claude-fable", ANSWERS.claude],
+      ["openai", "codex-gpt-6-astra", ANSWERS.codex],
+      ["google", "agy-gemini-pro", ANSWERS.agy],
+      ["open-weights", "agy-gpt-oss", ANSWERS.agy],
+    ]);
+    expect(d.members.every((m) => m.fellBackFrom === undefined)).toBe(true);
+    expect(d.lost).toEqual([]);
+    expect(d.members.map((m) => m.label).sort()).toEqual(["Response A", "Response B", "Response C", "Response D"]);
+    // Every member ranked, and every ranking parsed: the four fake panels
+    // answer stage 2 in JSON, so a reply the parser refused would show up
+    // here as a missing vote rather than as an error nobody sees.
+    expect(d.rankings.map((x) => x.by).sort()).toEqual(["agy-gemini-pro", "agy-gpt-oss", "claude-fable", "codex-gpt-6-astra"]);
+    // The aggregate of those four recorded ballots, best first. Exact, and it
+    // can be: the recordings are fixed and the averages follow from them,
+    // whichever seat each label fell to.
+    expect(d.aggregate).toEqual([
+      { label: "Response B", averageRank: 1.75, votes: 4 },
+      { label: "Response A", averageRank: 2.25, votes: 4 },
+      { label: "Response C", averageRank: 2.75, votes: 4 },
+      { label: "Response D", averageRank: 3.25, votes: 4 },
+    ]);
+    // The judge is seated apart from the panel: claude-fable took the
+    // Anthropic seat, so the judge's chain steps to claude-opus (§12.3).
+    expect(d.judge).toEqual({ model: "claude-opus", blind: true });
+    expect(d.strategyVersion).toBe(STRATEGY_VERSION);
+    expect(d.calls).toBe(9);
+    expect(d.deliberationId).toEqual(expect.any(String));
+    // Nine calls, nine rows: the accounting of §12.7 is the usage table's,
+    // not a number the council reports about itself.
+    expect((await rows()) - before).toBe(9);
+  }, 30_000);
+});
+
+// The three fakes replay one recording per stage, chosen from the prompt they
+// are handed — the same trick as the image run above, for the same reason:
+// one binary serves all three stages and only the text tells them apart. The
+// prompts here are the production ones, so rewording `src/council/prompts.ts`
+// breaks this instead of quietly sending stage 2 back to the chat recording,
+// where every ranking would fail to parse and the deliberation would degrade
+// to "nobody ranked" with nothing in the response saying so.
+describe("the fake CLIs pick their council recording from the prompt", () => {
+  const SHOWN = [{ label: "Response A", text: "a" }, { label: "Response B", text: "b" }, { label: "Response C", text: "c" }, { label: "Response D", text: "d" }];
+  const RANKING = rankingPrompt(COUNCIL_QUESTION, SHOWN, "Response A");
+  const SYNTHESIS = synthesisPrompt(COUNCIL_QUESTION, SHOWN, [], true);
+  const ANSWER = answerPrompt(COUNCIL_QUESTION);
+  const AGY = fileURLToPath(new URL("fake-cli/fake-agy.sh", import.meta.url));
+  const CLAUDE = fileURLToPath(new URL("fake-cli/fake-claude.sh", import.meta.url));
+  const CODEX = fileURLToPath(new URL("fake-cli/fake-codex.sh", import.meta.url));
+  // Each CLI is handed the prompt the way its own adapter sends it: bare on
+  // stdin for claude and codex, wrapped in a user event for agy.
+  const run = (bin: string, prompt: string) =>
+    spawnSync(bin, [], { input: bin === AGY ? JSON.stringify({ event: "user", message: { role: "user", content: prompt } }) + "\n" : prompt, encoding: "utf8" });
+
+  it.each([["claude", CLAUDE], ["codex", CODEX], ["agy", AGY]])("replays a ranking for the ranking prompt through %s", (_name, bin) => {
+    const r = run(bin, RANKING);
+    expect(r.status).toBe(0);
+    // A ranking covering the four labels it was shown, which is what
+    // parseRanking demands of a reply it accepts.
+    for (const label of ["Response A", "Response B", "Response C", "Response D"]) expect(r.stdout).toContain(label);
+    expect(r.stdout).toContain("rank");
+  });
+  it("replays the synthesis for the judge's prompt through claude, the only family seated as judge", () => {
+    const r = run(CLAUDE, SYNTHESIS);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(COUNCIL_SYNTHESIS);
+  });
+  it.each([["claude", CLAUDE, ANSWERS.claude], ["codex", CODEX, ANSWERS.codex], ["agy", AGY, ANSWERS.agy.trim()]])(
+    "replays the ordinary chat recording for a stage 1 answer through %s", (_name, bin, expected) => {
+      const r = run(bin, ANSWER);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain(expected);
+      expect(r.stdout).not.toContain("Response A");
+    });
 });

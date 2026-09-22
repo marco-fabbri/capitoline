@@ -362,6 +362,35 @@ though they are not host-specific, all under `providers.antigravity.image`:
 | `quota_per_window` | `12` — the short image quota, 12 generations per 5 hours (the window length is fixed in the code, `H5`), reported only: the gateway never blocks on it. `/health` (`providers[].imageQuota`) and `/v1/models` (`capitoline.quota`) show `used` against it, and `used` is a lower bound rather than an exact count: it counts the successful generations served by the images endpoint, while a text run that invokes `generate_image` spends quota without being counted, and so does a generation the client abandons. Leave the key out and the count is still reported, with `limit: null`. The second, much longer quota of the same model (days) cannot be counted: it appears only as the `resetAt` of a quota hit, in `/health` and in the MCP `list_models` tool — never in `/v1/models`, which by then no longer lists the paused model |
 | `allowed_tools` | `[generate_image]` — do not extend: any other tool call aborts the run, which is what keeps an image request from turning into an agent session |
 
+**The council block.** `council.capitoline` is in the repository file too, and
+it is the one block that changes what a request costs. A deliberation is
+**nine calls in three stages** — one per member in stage 1, one per member in
+stage 2, one for the judge — and they land on three different subscriptions at
+once: Anthropic, OpenAI and Antigravity answer in parallel in each of the two
+member stages, Antigravity twice over because the Google seat and the
+open-weights seat sit on that same subscription, and the ninth call spends the
+Anthropic window again for the judge. So one question costs about what nine
+direct requests cost, on windows this host does not replenish, and takes as
+long as the slowest member of each stage in turn. Nothing rations it but the
+per-provider `concurrency`: a client looping over councils empties three
+windows at the same time.
+
+| Key | Why it reads as it does |
+|---|---|
+| `seats` | four families, each a **chain** and never one model: the first model the health and quota state reports available takes the seat, and an unforeseen refusal steps down the chain once. `agy-claude-*` is deliberately not seated — it is the Anthropic seat's opinion through another channel, and a panel of four wants four judgments |
+| `judge` | `claude-haiku` closes the chain because it sits in no seat: with `judge_allow_member: false` the judge needs a model the panel cannot have taken, and on a day when Fable and Opus are both refused the Anthropic seat walks down to `claude-sonnet` and would otherwise leave the judge nothing after eight of the nine calls have been spent |
+| `judge_allow_member` | `false` — the judge is seated apart, so no synthesizer weighs an answer it wrote itself. `true` reproduces karpathy/llm-council's shape, where the chairman is also a member |
+| `judge_blind` | `true` — the judge sees the labels, never the real model names, so the deliberation is blind end to end. The transparency is not lost, it moves: the client's `capitoline.council` field carries the un-blinded record |
+| `min_members` | `2` — below two answers there is nothing to rank. With one the gateway returns that answer and says no council took place, rather than dressing a single opinion as a synthesis |
+| `stage_timeout_s` | `300` — per member and per stage, not for the whole deliberation. A council can therefore run for a quarter of an hour on paper, which is why it is asked for streaming through the tunnel (§9) and with a raised tool timeout over MCP (§10) |
+
+`providers.antigravity.concurrency` is `2` for this block's sake: the Google
+and open-weights seats run in parallel on one subscription, and with a single
+slot the second of them would sit on that provider's queue until
+`server.queue.max_wait_s` and lose its seat — in both parallel stages, every
+time. It is not a second subscription, only a second process against the same
+one, which is what `claude` already runs.
+
 Validate after every edit, and before restarting the service:
 
 ```sh
@@ -654,6 +683,17 @@ sudo -u capitoline sqlite3 -readonly /var/lib/capitoline/usage.sqlite \
 That is what shows a prompt that has grown or a model change that costs more.
 For one figure across the three, count calls, not tokens: `calls` is the same
 unit everywhere.
+
+A council is nine of those rows, under six different models, and they are tied
+together by the identifier the deliberation minted — the same one the client
+reads back in `capitoline.council.deliberationId`. That is what answers "what
+did that question cost", which no time window can:
+
+```sh
+sudo -u capitoline sqlite3 -readonly /var/lib/capitoline/usage.sqlite \
+  "SELECT deliberation, COUNT(*), SUM(input_tokens), SUM(output_tokens) FROM calls
+   WHERE deliberation IS NOT NULL GROUP BY deliberation ORDER BY MIN(ts) DESC LIMIT 5"
+```
 
 **The council, through the tunnel, is asked for streaming.** `capitoline` is
 not one call but nine, in three stages, and the first two produce no output at

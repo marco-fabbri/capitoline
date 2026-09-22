@@ -12,8 +12,8 @@ OpenAI-compatible HTTP API and an MCP server, and behind them it runs the
 official Claude Code, Codex and Gemini CLIs, authenticated with the
 subscriptions of whoever hosts it. Three voices, one endpoint.
 
-In phase 1 you can give the floor to a single member: `claude-opus`,
-`codex-gpt-5`, `gemini-pro`. In phase 2 the `capitoline` model convenes the
+You can give the floor to a single member: `claude-opus`,
+`codex-gpt-5`, `gemini-pro`. Or the `capitoline` model convenes the
 Triad: every member answers, every member judges the others without knowing
 who wrote what, and a judge synthesizes. As in the Temple, the value is not
 in the agreement but in hearing the dissent before deciding.
@@ -34,10 +34,14 @@ Production deployment on any Debian/Ubuntu host (a Nutanix AHV VM, a Proxmox LXC
       -d '{"model":"codex-gpt-5.5","reasoning_effort":"low","messages":[{"role":"user","content":"Reply with the single word: ok"}]}'
     curl http://127.0.0.1:8080/v1/images/generations -H 'content-type: application/json' \
       -d '{"prompt":"a red fox in the snow, 16:9"}' | jq -r '.data[0].b64_json' | base64 -d > fox.jpg
+    curl -N http://127.0.0.1:8080/v1/chat/completions -H 'content-type: application/json' \
+      -d '{"model":"capitoline","stream":true,"messages":[{"role":"user","content":"Is a retry after a refusal worth one more call?"}]}'
 
 Any OpenAI-compatible client works by setting its base URL to `/v1` (Open WebUI, the official SDKs, LiteLLM). Supported: `model`, `messages` (text and base64 image parts), `stream`, `reasoning_effort`. Rejected with 400: `tools`, `n>1`, `logprobs`, `response_format`. Ignored with the `X-Capitoline-Ignored` header: `temperature`, `top_p`, `max_tokens` and other sampling knobs. Responses carry an extra `capitoline` field.
 
 Images: `POST /v1/images/generations` serves the models declared with `kind: image` (the kind is reported by `/v1/models`); omit `model` and the first available image model answers. One image per call, returned inline as `b64_json`, with the real `mime`, `width`, `height` and `bytes` in the `capitoline` field. Rejected with 400: `n` other than 1, a `response_format` other than `b64_json`, an `output_format` other than `jpeg` (the gateway returns the format the CLI produced), a chat request against an image model and an image request against a text model. Ignored with the `X-Capitoline-Ignored` header: `size`, `quality`, `style` and the other style knobs — the CLI's image tool takes only a prompt, so there is nothing to map a size onto. A generation takes 11-45 s and the provider's quota is small: `docs/spike-2026-09.md` §8 has the two windows.
+
+Council: `model: capitoline` convenes the Triad instead of giving the floor to one member. One question is **nine calls in three stages** — four independent answers, four anonymous peer rankings of those answers, one synthesis written by a judge seated apart from the panel — spread over three subscriptions, so it costs about what nine direct requests cost and takes minutes rather than seconds. The synthesis is the message content, so a client that knows nothing of the council reads an ordinary completion; the rest is in the `capitoline.council` field: every member with its real model name, its label and its answer, which seats fell back and which were lost, each member's ranking and the panel's aggregate, the judge and whether it was blind, the strategy version, and a deliberation id — the same id that ties the nine rows in the usage table together. Below two answers no council takes place: with one, that answer is returned as its member wrote it and the field says plainly that nobody ranked it. Ask for it with `stream: true` through a tunnel or any other proxy (`docs/deploy.md` §9): the two silent stages then send a progress chunk per stage and per member (`{"stage":"rankings","done":2,"total":4}` in the chunk's own `capitoline` field, which an OpenAI client ignores) and the synthesis streams as ordinary content. The seats, the judge's chain, the quorum and the per-stage timeout are configuration (`council:` in `config/capitoline.yaml`); the three prompts are not — they are the strategy itself, they live in `src/council/prompts.ts`, and changing them changes the model's name.
 
 MCP: `POST /mcp` (streamable HTTP) with tools `list_models`, `ask_model`, `ask_council` and `generate_image` (the image comes back as an MCP image content block). Registration from Claude Code is in `docs/deploy.md` §10. Raise the tool timeout on the client side first — `export MCP_TOOL_TIMEOUT=1200000` in the shell that starts Claude Code: a CLI answer can take minutes, an image 11-45 s, and a deliberation has no deadline of its own beyond the 300 s each member of each stage gets, so it can run past 900 s — all well beyond the default. Capitoline sends a progress notification at every council stage and every 5 s while it draws, to clients that ask for one (a request with a progress token), but a notification postpones the deadline only in a client that sets `resetTimeoutOnProgress` (off by default in the MCP TypeScript SDK), so the raised timeout is what actually carries the call (spec §6.2).
 
