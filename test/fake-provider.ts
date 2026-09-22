@@ -13,6 +13,10 @@ export class FakeProvider implements Provider {
   healthCalls = 0;
   /** The model the probe runs, as a CLI provider reads it from health_model. */
   healthModel?: string;
+  /** What that model resolves to, so Core can key the probe's pause as it does a request's. */
+  get healthCliId(): string | undefined {
+    return this.healthModel === undefined ? undefined : (this.aliases[this.healthModel] ?? this.healthModel);
+  }
   delayMs = 0;
   // Present only when the fake declares an image model, like a real provider
   // whose adapter cannot generate images: Core's "provider without generateImage"
@@ -29,6 +33,10 @@ export class FakeProvider implements Provider {
       return { name, provider: this.id, cliModel: name, effortSuffix: false, kind };
     });
   }
+  // The fake declares no effort table, so a gateway name is its own CLI id —
+  // except where a test wants two names to collide, which `aliases` gives it.
+  aliases: Record<string, string> = {};
+  cliId(m: ModelSpec): string { return this.aliases[m.name] ?? m.cliModel; }
   async *execute(req: InternalRequest, _m: ModelSpec, signal?: AbortSignal): AsyncIterable<ProviderEvent> {
     this.calls.push(req);
     const events = typeof this.script === "function" ? this.script(req) : this.script;

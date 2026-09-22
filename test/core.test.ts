@@ -93,6 +93,62 @@ describe("Core", () => {
     expect(await drain(core.execute(req("a-1"), { source: "http" }))).toEqual(OK);
     expect(core.listModels().find((m) => m.name === "a-1")!.available).toBe(true);
   });
+  it("darkens every gateway name of a refused model, not the one that called", async () => {
+    // Since the ladder shipped, two names resolve to one CLI id:
+    // `agy-gemini-pro` at the default effort *is* `gemini-3.1-pro-high`, which
+    // `agy-gemini-pro-high` names outright. Keyed by the gateway name, the
+    // second alias spent a call rediscovering the same exhausted model.
+    let t = 1_000_000;
+    const p = new FakeProvider("agy", ["pro", "pro-high", "flash"], OK, 2);
+    p.aliases = { pro: "gemini-3.1-pro-high", "pro-high": "gemini-3.1-pro-high" };
+    const core = new Core([p], new UsageStore(":memory:"), { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
+    p.script = [{ type: "error", kind: "rate_limited", detail: "reached your limit", scope: "model", retryAfterS: 3600 }];
+    await drain(core.execute(req("pro"), { source: "http" }));
+    const calls = p.calls.length;
+
+    // The alias is refused from the state, with no second call spent on it.
+    await expect(drain(core.execute(req("pro-high"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited", retryAfterS: 3660 });
+    expect(p.calls.length).toBe(calls);
+    expect(core.listModels().map((m) => [m.name, m.available])).toEqual([["pro", false], ["pro-high", false], ["flash", true]]);
+    // A model of the same provider on another id is untouched, and so is the provider.
+    p.script = OK;
+    expect(await drain(core.execute(req("flash"), { source: "http" }))).toEqual(OK);
+    expect(core.providerStates()[0]).toMatchObject({ pausedUntil: null, strikes: 0 });
+
+    // And one success on either name clears it for both.
+    t += 3_661_000;
+    expect(await drain(core.execute(req("pro-high"), { source: "http" }))).toEqual(OK);
+    expect(core.pauseRemainingS("agy", "pro")).toBeUndefined();
+  });
+  it("keeps one provider's pause off another provider serving an id of the same name", async () => {
+    // `claude-sonnet-4-6` is served by Anthropic and by Antigravity, on two
+    // different subscriptions: the provider is part of the key for this reason.
+    const t = 1_000_000;
+    const anthropic = new FakeProvider("claude", ["sonnet"], OK, 1);
+    const google = new FakeProvider("agy", ["agy-sonnet"], OK, 1);
+    anthropic.aliases = { sonnet: "claude-sonnet-4-6" };
+    google.aliases = { "agy-sonnet": "claude-sonnet-4-6" };
+    const core = new Core([anthropic, google], new UsageStore(":memory:"), { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
+    anthropic.script = [{ type: "error", kind: "rate_limited", detail: "reached your limit", scope: "model" }];
+    await drain(core.execute(req("sonnet"), { source: "http" }));
+    expect(core.listModels().map((m) => [m.name, m.available])).toEqual([["sonnet", false], ["agy-sonnet", true]]);
+  });
+  it("drops a restored pause whose row names something the configuration no longer reaches", async () => {
+    // The column holds a CLI id since the key moved off the gateway name, so a
+    // row an older build wrote under the gateway name must not come back: it
+    // would sit in the map under a key nothing looks up, holding nothing back
+    // while /v1/models says the model is fine.
+    const t = 1_000_000;
+    const usage = new UsageStore(":memory:");
+    usage.setPause("agy", "pro", t + 3_600_000, 1, t);              // the old, gateway-name shape
+    usage.setPause("agy", "gemini-3.1-pro-high", t + 3_600_000, 1, t);
+    const p = new FakeProvider("agy", ["pro"], OK, 1);
+    p.aliases = { pro: "gemini-3.1-pro-high" };
+    const core = new Core([p], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
+    core.restorePauses();
+    expect(core.pauseRemainingS("agy", "pro")).toBe(3600);           // restored from the id row
+    expect(core.listModels()).toEqual([expect.objectContaining({ name: "pro", available: false })]);
+  });
   it("grows the model pause with its own strikes and honours a reported reset", async () => {
     let t = 1_000_000;
     const { core, a } = make({ now: () => t });

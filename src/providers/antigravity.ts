@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.js";
-import { effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
+import { cliId, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
 // The CLI is an agent: the prompt names the one tool it may use and forbids
@@ -13,10 +13,10 @@ export const IMAGE_PROMPT = (prompt: string): string =>
 export const antigravityAdapter: Adapter = {
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
     const { system, rest } = splitSystem(req.messages);
-    let id = model.cliModel;
     const eff = effortValue(cfg, model, req.effort);
-    if (model.effortSuffix && eff) id = `${id}-${eff.value}`;
-    const args = [...cfg.args, cfg.model_flag, id];
+    // The id comes from the shared resolver, which is also what Core keys a
+    // model pause by: the id refused and the id recorded cannot drift apart.
+    const args = [...cfg.args, cfg.model_flag, cliId(cfg, model, req.effort)];
     // One carrier for the effort, never two: a model with effort_suffix already
     // has the level inside its id, so a flag would declare the same value a
     // second time and is not added. For every other model the configuration's

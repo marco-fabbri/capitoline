@@ -1,8 +1,8 @@
-import type { ProviderConfig } from "../config.js";
+import type { Effort, ProviderConfig } from "../config.js";
 import type { Logger } from "../log.js";
 import type { ImageRequest, InternalRequest, ProviderEvent, Usage } from "../core/types.js";
 import type { Runner, RunHandle } from "../runner/runner.js";
-import { modelSpecs, type Adapter, type HealthStatus, type ModelSpec, type Provider } from "./adapter.js";
+import { cliId as resolveCliId, modelSpecs, type Adapter, type HealthStatus, type ModelSpec, type Provider } from "./adapter.js";
 import { classifyError, detectQuotaExhausted, type QuotaHit } from "./errors.js";
 import { inspectImage } from "./image-check.js";
 
@@ -29,6 +29,11 @@ export interface CliProviderOptions {
 // reads one file, so anything beyond these is a fault, not a bigger picture.
 const COLLECT_TIMEOUT_MS = 30_000;
 const COLLECT_MAX_BYTES = 20 * 1024 * 1024;
+// The probe runs at the cheapest level the configuration prices: it asks for
+// one word and only needs to learn whether the CLI answers at all. Named
+// because the id the model resolves to depends on it, and that id is the key
+// a refusal during a probe is filed under.
+const HEALTH_EFFORT = "low" as const;
 // Exit code of the collect helper when the conversation exists but holds no image.
 const COLLECT_NO_IMAGE = 4;
 const DEFAULTS: Required<CliProviderOptions> = { exitGraceMs: 1000, healthDeadlineMs: 60_000, now: Date.now, collectTimeoutMs: COLLECT_TIMEOUT_MS };
@@ -50,6 +55,8 @@ export class CliProvider implements Provider {
   readonly concurrencyLimit: number;
   /** The model health() runs, so Core can skip the probe while that model is paused. */
   readonly healthModel: string;
+  /** What that model resolves to at HEALTH_EFFORT: the key its pause is filed under. */
+  readonly healthCliId: string;
   private readonly opts: Required<CliProviderOptions>;
   constructor(
     id: string,
@@ -62,10 +69,14 @@ export class CliProvider implements Provider {
     this.id = id;
     this.concurrencyLimit = cfg.concurrency;
     this.healthModel = cfg.health_model;
+    const probed = modelSpecs(id, cfg).find((m) => m.name === cfg.health_model);
+    this.healthCliId = probed ? resolveCliId(cfg, probed, HEALTH_EFFORT) : cfg.health_model;
     this.opts = { ...DEFAULTS, ...opts };
   }
 
   models(): ModelSpec[] { return modelSpecs(this.id, this.cfg); }
+
+  cliId(model: ModelSpec, effort?: Effort): string { return resolveCliId(this.cfg, model, effort); }
 
   private async start(args: string[], stdin: string, timeoutMs: number, signal: AbortSignal | undefined, files?: { name: string; bytes: Buffer }[]): Promise<Run> {
     // The run gets an internal controller: it follows the caller's signal, and
@@ -285,14 +296,14 @@ export class CliProvider implements Provider {
     try {
       // No early return here: execute() ends by itself right after the terminal
       // event and winds the CLI down with its grace period.
-      for await (const ev of this.execute({ model: model.name, stream: false, effort: "low", messages: [{ role: "user", text: "Reply with the single word: ok" }] }, model, ac.signal)) {
+      for await (const ev of this.execute({ model: model.name, stream: false, effort: HEALTH_EFFORT, messages: [{ role: "user", text: "Reply with the single word: ok" }] }, model, ac.signal)) {
         if (ev.type === "done") status = { ok: true, checkedAt: Date.now() };
         // The attribution travels with the verdict: the probe runs one model
         // (health_model), so a refusal the CLI blamed on that model must pause
         // that model alone, exactly as it would coming from a client request.
         // Marking the provider here would take down every other model of it
         // until this one's limit expires, and the loop would renew it.
-        else if (ev.type === "error") status = { ok: false, kind: ev.kind, detail: ev.detail, model: model.name, ...(ev.scope ? { scope: ev.scope } : {}), checkedAt: Date.now() };
+        else if (ev.type === "error") status = { ok: false, kind: ev.kind, detail: ev.detail, model: model.name, cliId: this.cliId(model, HEALTH_EFFORT), ...(ev.scope ? { scope: ev.scope } : {}), checkedAt: Date.now() };
       }
     } finally {
       clearTimeout(timer);

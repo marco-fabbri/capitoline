@@ -33,6 +33,12 @@ export interface HealthStatus {
   scope?: "model";
   /** The model the probe ran; set on a failure, so a model-scoped one can be attributed. */
   model?: string;
+  /**
+   * The id the probe actually sent to the CLI, which is what a pause is keyed
+   * by. The probe picks its own effort, so this is not derivable from `model`
+   * by a caller that does not know which one: the provider states it.
+   */
+  cliId?: string;
 }
 
 export interface Provider {
@@ -45,7 +51,18 @@ export interface Provider {
    * refusal it has written down.
    */
   readonly healthModel?: string;
+  /** The id `healthModel` resolves to at the effort the probe runs, so Core can key its pause the same way. */
+  readonly healthCliId?: string;
   models(): ModelSpec[];
+  /**
+   * The id this provider will send to its CLI for `model` at `effort`, which
+   * is the thing a quota refusal is actually about. Two gateway names can
+   * resolve to one id — `agy-gemini-pro` at the default effort is
+   * `gemini-3.1-pro-high`, which `agy-gemini-pro-high` names outright — and
+   * before this the pause was keyed by the name that made the call, so the
+   * other alias spent a call rediscovering the same exhausted model.
+   */
+  cliId(model: ModelSpec, effort?: Effort): string;
   execute(req: InternalRequest, model: ModelSpec, signal?: AbortSignal): AsyncIterable<ProviderEvent>;
   /** Present only for providers with an image-capable adapter; yields `image` then `done`, or `error`. */
   generateImage?(req: ImageRequest, model: ModelSpec, signal?: AbortSignal): AsyncIterable<ProviderEvent>;
@@ -88,6 +105,22 @@ export function effortValue(cfg: ProviderConfig, model: ModelSpec, wanted: Effor
   const value = cfg.effort[effort];
   if (value === undefined) return null;
   return { effort, value };
+}
+
+/**
+ * The id the CLI is given for this model at this effort: the model's own
+ * `cli_model`, with the effort's value appended when the provider carries the
+ * level inside the id rather than in a flag (`effort_suffix`).
+ *
+ * The one place that rule lives. `antigravity.ts` builds its command line from
+ * this and `Core` keys its model pauses by it, so the id a refusal is recorded
+ * against is by construction the id that was sent — which it was not while
+ * `Core` used the gateway name and the suffix was applied in the adapter.
+ */
+export function cliId(cfg: ProviderConfig, model: ModelSpec, wanted: Effort | undefined): string {
+  if (!model.effortSuffix) return model.cliModel;
+  const eff = effortValue(cfg, model, wanted);
+  return eff ? `${model.cliModel}-${eff.value}` : model.cliModel;
 }
 
 /**
