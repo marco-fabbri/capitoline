@@ -320,7 +320,7 @@ Design settled 2026-09-22. The council is a virtual model, `capitoline`, served 
 The strategy is karpathy/llm-council's, with the changes noted below:
 
 1. **Independent answers.** Every seated member answers the same question, in parallel.
-2. **Anonymous peer ranking.** Each member receives the others' answers labelled `Response A`, `B`, … and ranks them. The reply is JSON against a schema, not prose parsed by a regex.
+2. **Anonymous peer ranking.** Each member receives every answer labelled `Response A`, `B`, …, its own among them and named as its own, and ranks them all. The members are anonymous to each other, never to themselves: a model recognises its own prose anyway, and one that is not told which answer is its own rates it highly while believing it is impartial. The reply is JSON against a schema, not prose parsed by a regex.
 3. **Synthesis.** A judge, seated separately, writes the final answer from the labelled answers and the aggregate ranking.
 
 Four seats is the default: nine calls, one per answer, one per ranking, one for the synthesis. The members run in parallel only if every provider offers one concurrency slot per seat it serves: one seat per family buys independent judgment (§12.2), not a free queue, and a family is not a provider. The default seats put Google and open weights on the same Antigravity subscription, so `providers.antigravity.concurrency` is two; with one, the second of those members would sit on that provider's queue until `server.queue.max_wait_s` and lose its seat, in both parallel stages.

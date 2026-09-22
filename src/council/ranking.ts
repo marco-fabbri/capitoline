@@ -92,6 +92,12 @@ function resolve(raw: string, labels: string[]): string | null {
  * its own, and a partial reply is either a model that stopped reading or one
  * that quietly dropped the answer it liked least, which is a vote against it
  * that would not be counted as one.
+ *
+ * Invariant: `labels` is the same list the member was shown, its own label
+ * included, exactly as `rankingPrompt()` received it. Parsing against a
+ * shorter list refuses every reply that obeys the prompt; parsing against a
+ * longer one refuses every reply as incomplete. Either way the member counts
+ * as one that did not rank, which is silent.
  */
 export function parseRanking(text: string, labels: string[]): Ranking[] {
   if (labels.length === 0) throw new Error("parseRanking() needs at least one label");
@@ -130,7 +136,8 @@ const round = (n: number): number => Math.round(n * 1000) / 1000;
  * is not hypothetical: when every ranking fails to parse the aggregate would
  * otherwise be empty and the judge would be told nothing about answers that do
  * exist, and the client's `capitoline` field would list a member whose label
- * appears nowhere in the aggregate.
+ * appears nowhere in the aggregate. Given, it is also the whole list: a vote
+ * on a label outside it is refused rather than added.
  *
  * The order is: ranked labels by average, better first; a tie broken by the
  * number of votes, because an average over three votes says more than the same
@@ -143,7 +150,14 @@ export function aggregate(rankings: Ranking[][], labels?: string[]): Aggregate[]
   for (const label of labels ?? []) totals.set(label, { sum: 0, votes: 0 });
   for (const ranking of rankings) {
     for (const { label, rank } of ranking) {
-      const t = totals.get(label) ?? { sum: 0, votes: 0 };
+      const known = totals.get(label);
+      // With `labels` given, the list is the panel's and a vote outside it is
+      // a bug in the caller, not a new candidate: silently creating the entry
+      // would put a phantom label in the aggregate the judge is shown and in
+      // the `capitoline` field the client receives. Without `labels` there is
+      // no list to contradict, and the old behaviour stands.
+      if (known === undefined && labels !== undefined) throw new Error(`aggregate(): ${label} was not offered`);
+      const t = known ?? { sum: 0, votes: 0 };
       t.sum += rank;
       t.votes += 1;
       totals.set(label, t);

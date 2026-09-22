@@ -37,8 +37,21 @@ export const RANKING_SCHEMA = {
   },
 } as const;
 
-/** A block of text that came from a model, kept away from the instructions around it. */
-const quote = (text: string): string => `<<<\n${text}\n>>>`;
+/**
+ * A block of text that came from a model, kept away from the instructions
+ * around it.
+ *
+ * The closing delimiter is neutralised inside the text, because the text is
+ * not ours: a member's answer that contained a line `>>>` followed by
+ * instructions would close the block early and have the rest read as
+ * instructions — in the ranking prompt of every other member, and in the
+ * judge's prompt, which is the text that produces the answer the client
+ * receives. The threat model is mild (the models are the owner's own
+ * subscriptions) but the defence costs one call: a zero-width space between
+ * the angle brackets leaves the text readable and makes the delimiter
+ * impossible to reproduce from the content.
+ */
+const quote = (text: string): string => `<<<\n${text.replaceAll(">>>", ">\u200b>\u200b>")}\n>>>`;
 
 /**
  * Stage 1. The question, and nothing else about the machinery.
@@ -74,9 +87,21 @@ export function answerPrompt(question: string): string {
  * correct for, and it is the only part of the mapping the member ever sees —
  * the other labels stay unattributed, which is the mechanism §12.3 refuses to
  * make configurable.
+ *
+ * Invariant: the engine passes the same label list to `rankingPrompt()` and to
+ * `parseRanking()`, the member's own label included. The two ends of the stage
+ * are one contract — the prompt asks for every label shown, the parser refuses
+ * a reply that leaves one out — so a caller that shows the others' answers here
+ * and then parses against a different list gets every ranking thrown away as
+ * unparseable, and a deliberation that degrades to "no ranking" without a
+ * single error. The guard below catches the readable half of that mistake
+ * (`own` not among the answers) at the first call rather than in the output.
  */
 export function rankingPrompt(question: string, answers: { label: string; text: string }[], own: string): string {
   const labels = answers.map((a) => a.label);
+  if (!labels.includes(own)) {
+    throw new Error(`rankingPrompt(): the member's own label ${own} is not among the answers shown (${labels.join(", ") || "none"})`);
+  }
   return [
     `Several assistants answered the same question independently. Below are their answers, labelled. One of them, ${own}, is your own answer from earlier in this deliberation.`,
     "",
@@ -124,6 +149,15 @@ export function synthesisPrompt(
   blind: boolean,
   identities?: Map<string, string>,
 ): string {
+  if (!blind && identities !== undefined && identities.size > 0 && answers.length > 0 && !answers.some((a) => identities.has(a.label))) {
+    // The map that `labels()` builds runs model -> label, and this one runs
+    // label -> model: same TypeScript type, opposite direction, so a caller
+    // that forgets to invert it compiles, resolves nothing, and serves a judge
+    // configured as un-blinded a blind prompt while the `Deliberation` says
+    // `blind: false`. The fallback below is meant for "no identities at all",
+    // not for that, so a map that resolves none of the labels is an error.
+    throw new Error("synthesisPrompt(): identities are keyed by model, not by label");
+  }
   const name = (label: string): string => {
     const model = blind ? undefined : identities?.get(label);
     return model === undefined ? label : `${label} (${model})`;
