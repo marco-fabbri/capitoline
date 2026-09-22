@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
+import { loadConfig } from "../src/config.js";
 
 // The three adapters each count cached input the way their own CLI reports it,
 // and each is right for that CLI (docs/spike-2026-09.md §10). Nothing in the
@@ -52,5 +53,126 @@ describe("the note on what the token numbers mean", () => {
   it("is in the README, where the endpoints are shown", () => {
     const s = section(readFileSync("README.md", "utf8"), "## Use it");
     pinsTheConventions(s);
+  });
+});
+
+// The three councils of 2026-09-22 are a configuration change and nothing
+// else: a fourth one is six lines of YAML, and nothing in the code would
+// notice that it never reached the README, the runbook or the spec. What each
+// council costs is the number a reader decides on, and it is derivable from
+// the file — one call per seat, one more per seat when the ranking stage runs,
+// one for the judge — so the documentation is checked against the file rather
+// than against a number somebody typed once.
+const CONFIG = loadConfig("config/capitoline.yaml");
+const COUNCILS = Object.entries(CONFIG.council);
+
+const price = (c: (typeof COUNCILS)[number][1]): number => c.seats.length * (c.ranking ? 2 : 1) + 1;
+
+// How many seats of one council a provider serves, counted as src/config.ts
+// counts them for the concurrency rule: a chain spanning two providers needs
+// the slot in both, and the judge is not a seat.
+const seatsOn = (provider: string, c: (typeof COUNCILS)[number][1]): number =>
+  c.seats.filter((s) => s.models.some((m) => CONFIG.providers[provider]?.models[m] !== undefined)).length;
+
+// A markdown table of councils: the rows keyed by the model name in the first
+// cell, with the `Calls` column read off the header rather than by position,
+// so the table can gain a column without the test moving.
+const councilTable = (text: string, where: string): Map<string, string> => {
+  const lines = text.split("\n");
+  const head = lines.findIndex((l) => l.startsWith("|") && /\bCalls\b/.test(l));
+  expect(head, `no council table with a Calls column in ${where}`).toBeGreaterThanOrEqual(0);
+  const cells = (l: string): string[] => l.split("|").slice(1, -1).map((c) => c.trim());
+  const calls = cells(lines[head]).findIndex((c) => /\bCalls\b/.test(c));
+  const rows = new Map<string, string>();
+  for (const line of lines.slice(head + 2)) {
+    if (!line.startsWith("|")) break;
+    const row = cells(line);
+    rows.set(row[0].replaceAll("`", ""), row[calls]);
+  }
+  return rows;
+};
+
+describe("the three councils, as documented", () => {
+  it("are all in the README with their price in calls", () => {
+    const rows = councilTable(section(readFileSync("README.md", "utf8"), "## Use it"), "the README");
+    expect([...rows.keys()].sort()).toEqual(COUNCILS.map(([n]) => n).sort());
+    for (const [name, c] of COUNCILS) expect(rows.get(name), `${name}: calls`).toBe(String(price(c)));
+  });
+
+  it("are all in the runbook with their price in calls, docs/deploy.md §7", () => {
+    const rows = councilTable(section(readFileSync("docs/deploy.md", "utf8"), "## 7. "), "docs/deploy.md §7");
+    expect([...rows.keys()].sort()).toEqual(COUNCILS.map(([n]) => n).sort());
+    for (const [name, c] of COUNCILS) expect(rows.get(name), `${name}: calls`).toBe(String(price(c)));
+  });
+
+  // The line that went stale the moment capitoline-gemini was configured: it
+  // read `2` while the file said `3`, and a runbook that contradicts the file
+  // it documents is worse than one that says nothing. The value and the
+  // council that justifies it are both read out of the configuration here.
+  it("say why the Antigravity subscription runs the number of processes it runs", () => {
+    const s = section(readFileSync("docs/deploy.md", "utf8"), "## 7. ");
+    const slots = /`providers\.antigravity\.concurrency` is `(\d+)`/.exec(s);
+    expect(slots, "the runbook no longer states the Antigravity concurrency").not.toBeNull();
+    expect(Number(slots![1])).toBe(CONFIG.providers.antigravity.concurrency);
+    // The rule is per council, over the largest council the provider sits in,
+    // so the paragraph has to name that council and not another.
+    const largest = COUNCILS.reduce((a, b) => (seatsOn("antigravity", b[1]) > seatsOn("antigravity", a[1]) ? b : a));
+    const paragraph = s.slice(slots!.index, s.indexOf("\n\n", slots!.index));
+    expect(paragraph, "the largest Antigravity council is not the one named").toMatch(largest[0]);
+    expect(paragraph).toMatch(/largest/);
+  });
+
+  // Adding a council is the one configuration change that can make a provider
+  // short of slots, and the check that says so runs before the restart.
+  it("tell the runbook's reader to re-read the concurrency check when a council is added", () => {
+    const s = section(readFileSync("docs/deploy.md", "utf8"), "## 7. ");
+    const added = s.indexOf("Adding a council");
+    expect(added, "the runbook does not say what adding a council costs").toBeGreaterThanOrEqual(0);
+    const check = s.indexOf("npm run check-config", added);
+    expect(check - added, "the check is not named where a council is added").toBeLessThan(900);
+  });
+});
+
+describe("the spec, §12", () => {
+  const s = section(readFileSync("docs/superpowers/specs/2026-09-19-capitoline-design.md", "utf8"), "## 12. ");
+
+  it("carries the naming rule the three model names follow", () => {
+    expect(s).toMatch(/shape word/);
+    expect(s).toMatch(/family name/);
+    expect(s).toMatch(/capitoline-2/);
+  });
+
+  it("carries the ranking flag and what turning it off costs", () => {
+    expect(s).toMatch(/`ranking`/);
+    expect(s).toMatch(/five calls/);
+    expect(s).toMatch(/no aggregate|empty aggregate/);
+  });
+
+  // The two shapes that were considered and dropped. Their reasons are the
+  // part that does not survive a conversation, and without them the next
+  // reader proposes them again — both look cheap on paper.
+  it("says why the two dropped variants were dropped", () => {
+    expect(s).toMatch(/cannot break a tie/);
+    expect(s).toMatch(/one pair in three|deadlock/);
+    expect(s).toMatch(/spare its quota|sparing its quota|spare the Anthropic/);
+    expect(s).toMatch(/degrades to three/);
+  });
+});
+
+describe("the backlog", () => {
+  const backlog = readFileSync("docs/backlog.md", "utf8");
+
+  it("has moved the fast council out of what is still to come", () => {
+    expect(section(backlog, "## Shipped")).toMatch(/capitoline-fast/);
+    expect(section(backlog, "## Shipped")).toMatch(/capitoline-gemini/);
+    // The price it was guessed at before it was built.
+    expect(backlog).not.toMatch(/three calls instead of nine/);
+  });
+
+  it("records the two ladders left and the shape that would justify a strategy object", () => {
+    const later = section(backlog, "## Phase 2 and beyond");
+    expect(later).toMatch(/capitoline-claude/);
+    expect(later).toMatch(/capitoline-openai/);
+    expect(later).toMatch(/strategy object/);
   });
 });
