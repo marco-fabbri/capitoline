@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Logger } from "../log.js";
 import { CapitolineError, type FailureKind, type InternalRequest, type Usage } from "../core/types.js";
 import type { ProviderEvent } from "../core/types.js";
@@ -22,7 +23,8 @@ export type CouncilStage = "answers" | "rankings" | "synthesis";
  * iteration, unless the request was cancelled, which ends it silently.
  *
  * `kind` is a `FailureKind` and not the narrower `ErrorKind`: what ends a
- * council is the first failure of a member, and a member is refused through
+ * council is a member's failure (`RANK` below picks which one speaks for the
+ * panel), and a member is refused through
  * `Core.execute()` exactly as an HTTP request is — with `queue_full` when the
  * provider's queue is full and `model_unavailable` when its health went down
  * between the seating and the call. Narrowing those to a provider error would
@@ -34,10 +36,20 @@ export type CouncilEvent =
   | { type: "done"; usage: Usage; detail: Deliberation }
   | { type: "error"; kind: FailureKind; detail: string };
 
-/** How a deliberation is asked for, which is how an ordinary request is asked for: the council adds nothing of its own. */
+/**
+ * How a deliberation is asked for, which is how an ordinary request is asked
+ * for: the council adds nothing of its own.
+ *
+ * `caller` is carried for the same reason `Core` carries it on a direct
+ * request — it is what `/v1/usage` groups by. A council that dropped it would
+ * write the nine most expensive rows of the gateway into the "not attributed"
+ * bucket, on the very gateway where several applications share one tunnel and
+ * that breakdown is the only thing that says which one spent the quota.
+ */
 export interface CouncilContext {
   signal?: AbortSignal;
   source: "http" | "mcp";
+  caller?: string | null;
 }
 
 /**
@@ -51,7 +63,7 @@ export interface CouncilContext {
  */
 export interface CouncilCore {
   listModels(): { name: string; available: boolean; reason?: string }[];
-  execute(req: InternalRequest, ctx: { signal?: AbortSignal; source: "http" | "mcp" }): AsyncIterable<ProviderEvent>;
+  execute(req: InternalRequest, ctx: { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null; deliberation?: string }): AsyncIterable<ProviderEvent>;
 }
 
 /**
@@ -67,6 +79,25 @@ const STEP_DOWN = new Set<FailureKind>(["rate_limited", "auth_expired"]);
 const KNOWN_REASONS = new Set<string>(["rate_limited", "auth_expired", "timeout", "cli_crashed", "bad_output", "unknown_model"]);
 const kindOfReason = (reason: string | undefined): FailureKind =>
   reason !== undefined && KNOWN_REASONS.has(reason) ? (reason as FailureKind) : "model_unavailable";
+
+/**
+ * Which failure speaks for a deliberation that produced nothing.
+ *
+ * The failures are collected in the order the configuration declares the
+ * seats, so taking the first would let a seat the state had already emptied
+ * (`model_unavailable`, a 404 the client can do nothing with) speak for a
+ * panel whose other seat was refused with `rate_limited` (a 429 with a
+ * Retry-After). The client would be sent to retry the wrong thing, which is
+ * the very reason the event carries a `FailureKind` and not a provider error.
+ * Lowest number wins: what the client can act on first, what is definitive
+ * last. A `Record` rather than a list, so a new `FailureKind` does not compile
+ * until it has been placed.
+ */
+const RANK: Record<FailureKind, number> = {
+  rate_limited: 0, auth_expired: 1, queue_full: 2, timeout: 3,
+  cli_crashed: 4, bad_output: 5, model_unavailable: 6, unknown_model: 7, bad_request: 8, unauthorized: 9,
+};
+const worstOf = (failures: FailureKind[]): FailureKind | undefined => [...failures].sort((a, b) => RANK[a] - RANK[b])[0];
 
 /** A member of a deliberation in flight. Its label is empty until stage 2 assigns one. */
 interface RunningMember {
@@ -104,6 +135,8 @@ const ABANDONED: CallResult = { ok: false, kind: "timeout", detail: "the deliber
  * would notice.
  */
 interface Run {
+  /** The deliberation identifier of §12.7, written to every usage row the run causes, so nine rows under six models can be summed as one question. */
+  id: string;
   calls: number;
   usage: Usage;
 }
@@ -163,7 +196,7 @@ export class Council {
    * call it made as aborted.
    */
   async *deliberate(question: string, ctx: CouncilContext): AsyncIterable<CouncilEvent> {
-    const run: Run = { calls: 0, usage: { input: 0, output: 0 } };
+    const run: Run = { id: randomUUID(), calls: 0, usage: { input: 0, output: 0 } };
     const state = this.core.listModels();
     const seated = seat(this.cfg.seats, state);
 
@@ -171,6 +204,11 @@ export class Council {
     // knowing nothing of the panel.
     const total = seated.members.length;
     yield { type: "progress", stage: "answers", done: 0, total };
+    // A generator is suspended at its yields, so this is where a cancellation
+    // that arrives between the seating and the first call lands. Without the
+    // check the four member calls would be started for a client that has
+    // already gone, and each one would run to its stage timeout.
+    if (ctx.signal?.aborted) return;
     const outcomes = new Map<Seat, MemberOutcome>();
     const tasks = seated.members.map(({ seat: s, model }) =>
       this.ask(run, s, model, question, ctx, seated.skipped.filter((k) => k.seat === s).map((k) => `${k.model} (${k.reason})`)));
@@ -202,10 +240,11 @@ export class Council {
 
     // §12.5: below the quorum there is nothing to rank. One answer is returned
     // as the member wrote it and declared as no council at all, rather than
-    // dressed as a synthesis; none is the first failure, reported as it is.
+    // dressed as a synthesis; none is reported as the failure that speaks for
+    // the panel, which is the one the client can act on (RANK).
     if (members.length < this.cfg.minMembers) {
       if (members.length === 0) {
-        const kind = failures[0] ?? "model_unavailable";
+        const kind = worstOf(failures) ?? "model_unavailable";
         yield { type: "error", kind, detail: `no member answered: ${lost.map((l) => `${l.family} ${l.reason}`).join("; ") || "no seat could be filled"}` };
         return;
       }
@@ -235,9 +274,22 @@ export class Council {
 
     // Stage 3: the judge, seated apart from the members and blind by default.
     yield { type: "progress", stage: "synthesis", done: 0, total: 1 };
+    // The same window as above, on the other side of a yield: an abort that
+    // landed here must not buy the ninth call.
+    if (ctx.signal?.aborted) return;
     const judge = this.seatJudge(members);
     if (judge === null) {
-      yield { type: "error", kind: "model_unavailable", detail: `no model of the judge's chain is available (${this.cfg.judge.models.join(", ")})` };
+      // Eight calls are spent and every one of the answers is real. Failing
+      // here would throw the whole deliberation away because the ninth model
+      // is missing, which is the opposite of what §12.5 does for the members.
+      // So the panel's own best-ranked answer is returned as its member wrote
+      // it, and `judge.model: ""` says plainly that nobody synthesised — the
+      // client reads the whole council in the `capitoline` field. No
+      // `synthesis 1/1` follows: the stage did not happen.
+      this.log.warn({ council: this.name, chain: this.cfg.judge.models }, "no judge could be seated: the best-ranked answer is returned unsynthesised");
+      const top = members.find((m) => m.label === verdict[0]?.label) ?? members[0];
+      yield { type: "text", delta: top.answer };
+      yield this.finish(run, members, lost, rankings, verdict, "");
       return;
     }
     const identities = new Map(members.map((m) => [m.label, m.model]));
@@ -265,8 +317,11 @@ export class Council {
       // second judge would write a different one after it.
       const next = !spoken && attempt === 0 && STEP_DOWN.has(result.kind) ? nextInChain(judge.seat, model, this.core.listModels()) : null;
       if (next === null) {
-        this.log.error({ council: this.name, model, kind: result.kind }, "the judge failed and the deliberation has no synthesis");
-        yield { type: "error", kind: result.kind, detail: `the judge failed: ${result.detail}` };
+        this.log.error({ council: this.name, model, kind: result.kind, detail: result.detail }, "the judge failed and the deliberation has no synthesis");
+        // The kind, never the provider's own words: this event becomes the
+        // client's error, and `result.detail` is up to two thousand characters
+        // of a CLI's stderr. The line above is where it is kept.
+        yield { type: "error", kind: result.kind, detail: `the judge failed: ${result.kind}` };
         return;
       }
       this.log.warn({ council: this.name, from: model, to: next, kind: result.kind }, "the judge steps down its chain");
@@ -298,6 +353,7 @@ export class Council {
   /** The terminal event, with the usage of every call the deliberation spent and the un-blinded record of it (§12.6, §12.7). */
   private finish(run: Run, members: RunningMember[], lost: LostSeat[], rankings: MemberRanking[], verdict: Deliberation["aggregate"], judgeModel: string): Extract<CouncilEvent, { type: "done" }> {
     const detail: Deliberation = {
+      deliberationId: run.id,
       strategyVersion: STRATEGY_VERSION,
       members: members.map((m): DeliberationMember => ({
         family: m.seat.family, model: m.model, label: m.label, answer: m.answer,
@@ -331,7 +387,13 @@ export class Council {
       const next = attempt === 0 && STEP_DOWN.has(result.kind) && ctx.signal?.aborted !== true
         ? nextInChain(s, model, this.core.listModels())
         : null;
-      if (next === null) return { ok: false, kind: result.kind, lost: { family: s.family, model, reason: `${result.kind}: ${result.detail}` } };
+      if (next === null) {
+        // The classification travels, the detail stays: the `LostSeat` below
+        // is serialised into the client's response (§12.6), and what a
+        // provider puts in `detail` is its CLI's stderr.
+        this.log.warn({ council: this.name, family: s.family, model, kind: result.kind, detail: result.detail }, "a seat was lost");
+        return { ok: false, kind: result.kind, lost: { family: s.family, model, reason: result.kind, ...(fellBackFrom.length > 0 ? { fellBackFrom } : {}) } };
+      }
       this.log.warn({ council: this.name, family: s.family, from: model, to: next, kind: result.kind }, "a seat steps down its chain");
       fellBackFrom.push(`${model} (${result.kind})`);
       model = next;
@@ -389,6 +451,11 @@ export class Council {
     run.calls++;
     const usage: Usage = { input: 0, output: 0 };
     const controller = new AbortController();
+    // A listener added to a signal that is already aborted never fires, so
+    // relaying alone would let a cancelled request take a concurrency slot and
+    // run to the stage timeout on a real subscription. The state is read once,
+    // here, and the listener covers only what arrives afterwards.
+    if (ctx.signal?.aborted === true) controller.abort();
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, this.cfg.stageTimeoutS * 1000);
     timer.unref?.();
@@ -399,7 +466,7 @@ export class Council {
     let terminal = false;
     try {
       const req: InternalRequest = { model, messages: [{ role: "user", text: prompt }], stream: streamed };
-      for await (const ev of this.core.execute(req, { signal: controller.signal, source: ctx.source })) {
+      for await (const ev of this.core.execute(req, { signal: controller.signal, source: ctx.source, caller: ctx.caller, deliberation: run.id })) {
         if (ev.type === "text") { text += ev.delta; if (streamed) yield ev.delta; }
         else if (ev.type === "done") { terminal = true; usage.input += ev.usage?.input ?? 0; usage.output += ev.usage?.output ?? 0; }
         else if (ev.type === "error") { terminal = true; failure = { kind: ev.kind, detail: ev.detail }; }

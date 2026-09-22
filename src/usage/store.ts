@@ -11,6 +11,13 @@ export interface CallRecord {
   kind?: ModelKind;
   /** Who asked, as the Access identity names them; null when nothing identified them. */
   caller?: string | null;
+  /**
+   * The council deliberation this call belongs to, null for a request a client
+   * made directly. One question is nine calls under six different models
+   * (spec 12.7), and this is what sums them back into one question instead of
+   * a guess over a time window.
+   */
+  deliberation?: string | null;
 }
 export interface Totals { calls: number; inputTokens: number; outputTokens: number }
 /** What one caller spent in a window. `caller` is null for the calls nothing identified. */
@@ -33,6 +40,7 @@ export class UsageStore {
   private readonly stmts: {
     record: StatementSync; imageWindow: StatementSync; totals: StatementSync; setWindow: StatementSync; windows: StatementSync;
     callers: StatementSync; setPause: StatementSync; clearPause: StatementSync; prunePauses: StatementSync; pauses: StatementSync;
+    deliberation: StatementSync;
   };
   private closed = false;
   constructor(path: string) {
@@ -47,7 +55,7 @@ export class UsageStore {
       CREATE TABLE IF NOT EXISTS calls (
         id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
         input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
-        outcome TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', caller TEXT);
+        outcome TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', caller TEXT, deliberation TEXT);
       CREATE INDEX IF NOT EXISTS calls_provider_ts ON calls(provider, ts);
       -- The per-caller breakdown filters on ts alone, which the composite
       -- index above cannot serve: without this one it is a full scan of a
@@ -84,9 +92,14 @@ export class UsageStore {
     // and every call served with Access verification disabled — and NULL is
     // its name, distinct from any string a token could carry.
     if (!columns.has("caller")) this.db.exec(`ALTER TABLE calls ADD COLUMN caller TEXT`);
+    // And the same for the deliberation a call belonged to, added with the
+    // council. Nullable for the same reason: every row written before the
+    // council existed, and every direct request after it, belongs to no
+    // deliberation, and NULL is that state's name.
+    if (!columns.has("deliberation")) this.db.exec(`ALTER TABLE calls ADD COLUMN deliberation TEXT`);
 
     this.stmts = {
-      record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind, caller) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind, caller, deliberation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
       imageWindow: this.db.prepare(`SELECT COUNT(*) AS used, MIN(ts) AS started FROM calls WHERE provider = ? AND kind = 'image' AND outcome = 'ok' AND ts > ?`),
       totals: this.db.prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o FROM calls WHERE provider = ? AND ts > ?`),
       setWindow: this.db.prepare(`INSERT INTO rate_windows (provider, window, utilization, resets_at, updated_at) VALUES (?, ?, ?, ?, ?)
@@ -111,10 +124,22 @@ export class UsageStore {
       clearPause: this.db.prepare(`DELETE FROM pauses WHERE provider = ? AND model IS ?`),
       prunePauses: this.db.prepare(`DELETE FROM pauses WHERE until <= ?`),
       pauses: this.db.prepare(`SELECT provider, model, until, strikes FROM pauses WHERE until > ? ORDER BY provider, model`),
+      // No index and no time bound: an identifier is asked about right after
+      // the deliberation that minted it, one question at a time, and an index
+      // on a column that is NULL for almost every row would cost every insert
+      // for a read nothing does in a loop.
+      deliberation: this.db.prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o FROM calls WHERE deliberation = ?`),
     };
   }
   record(c: CallRecord): void {
-    this.stmts.record.run(c.ts ?? Date.now(), c.provider, c.model, c.inputTokens, c.outputTokens, c.durationMs, c.outcome, c.source, c.kind ?? "text", c.caller ?? null);
+    this.stmts.record.run(c.ts ?? Date.now(), c.provider, c.model, c.inputTokens, c.outputTokens, c.durationMs, c.outcome, c.source, c.kind ?? "text", c.caller ?? null, c.deliberation ?? null);
+  }
+
+  // What one deliberation spent, across every model that served it: the other
+  // half of spec 12.7, and the only reading the identifier exists for.
+  deliberationTotals(id: string): Totals {
+    const row = this.stmts.deliberation.get(id) as { calls: number; i: number; o: number };
+    return { calls: Number(row.calls), inputTokens: Number(row.i), outputTokens: Number(row.o) };
   }
 
   // Who spent the window, busiest first. One row per distinct caller, with the

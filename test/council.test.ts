@@ -68,6 +68,15 @@ const CFG: CouncilConfig = { seats: SEATS, judge: JUDGE, judgeAllowMember: false
 const fail = (kind: "rate_limited" | "cli_crashed" | "auth_expired", scope?: "model"): ProviderEvent[] =>
   [{ type: "error", kind, detail: `${kind} from the fake`, ...(scope ? { scope } : {}) }];
 
+// A provider detail as a real one is: `cli-provider` puts the last two
+// thousand characters of the CLI's stderr in it. Nothing carrying this string
+// may appear in anything the council hands a client — the `Deliberation` goes
+// into the `capitoline` field of an ordinary response, and the error event
+// becomes the client's error.
+const SENTINEL = "SECRET-STDERR";
+const leaky = (kind: "rate_limited" | "cli_crashed"): ProviderEvent[] =>
+  [{ type: "error", kind, detail: `${SENTINEL}: Traceback (most recent call last) ...` }];
+
 interface PanelOptions {
   /** Per model: what the fake answers instead of the default, at every stage. */
   overrides?: Record<string, ProviderEvent[]>;
@@ -203,7 +212,9 @@ describe("Council", () => {
     // refusal just paused, which is the state doing its work.
     expect(d.judge.model).toBe("claude-sonnet");
     expect(d.members.map((m) => m.family)).toEqual(["openai", "google", "open-weights"]);
-    expect(d.lost).toEqual([{ family: "anthropic", model: "claude-opus", reason: "rate_limited: rate_limited from the fake" }]);
+    // The kind alone, never the provider's words — and both models the seat
+    // walked, so the operator reads two falls and not one.
+    expect(d.lost).toEqual([{ family: "anthropic", model: "claude-opus", reason: "rate_limited", fellBackFrom: ["claude-fable (rate_limited)"] }]);
     expect(textOf(events)).toBe(SYNTHESIS);
   });
 
@@ -246,7 +257,7 @@ describe("Council", () => {
     expect(p.promptsOf("synthesis")).toEqual([]);
   });
 
-  it("errors with the kind of the first failure when nobody answered", async () => {
+  it("errors with the kind of the failure that speaks for the panel when nobody answered", async () => {
     const p = panel({ overrides: {
       "claude-fable": fail("auth_expired"), "claude-opus": fail("cli_crashed"),
       "codex-astra": fail("cli_crashed"), "agy-pro": fail("cli_crashed"), "agy-oss": fail("cli_crashed"),
@@ -254,7 +265,7 @@ describe("Council", () => {
     const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
     expect(events.find((e) => e.type === "done")).toBeUndefined();
     const err = events.find((e) => e.type === "error");
-    expect(err?.kind).toBe("auth_expired");                    // the anthropic seat is the first
+    expect(err?.kind).toBe("auth_expired");                    // the only kind the client can do anything about
     expect(err?.detail).toContain("no member answered");
   });
 
@@ -287,6 +298,96 @@ describe("Council", () => {
     expect(d.aggregate.every((a) => a.votes === 3)).toBe(true);        // three votes, four labels
     expect(d.aggregate).toHaveLength(4);
     expect(textOf(events)).toBe(SYNTHESIS);
+  });
+
+  it("keeps the provider's own detail out of the deliberation and out of every error", async () => {
+    // A seat lost mid-flight: the detail is the CLI's stderr, the reason is the kind.
+    const one = panel({ overrides: { "claude-fable": leaky("cli_crashed") } });
+    const d = detailOf(await run(one.council.deliberate(QUESTION, { source: "http" })));
+    expect(d.lost).toEqual([{ family: "anthropic", model: "claude-fable", reason: "cli_crashed" }]);
+    expect(JSON.stringify(d)).not.toContain(SENTINEL);
+
+    // Nobody answered: the error is built from the same reasons.
+    const none = panel({ overrides: Object.fromEntries(
+      ["claude-fable", "codex-astra", "agy-pro", "agy-oss"].map((m) => [m, leaky("cli_crashed")])) });
+    const err = (await run(none.council.deliberate(QUESTION, { source: "http" }))).find((e) => e.type === "error");
+    expect(err?.detail).toContain("no member answered");
+    expect(err?.detail).not.toContain(SENTINEL);
+
+    // And the judge, which is the one failure that reaches a client after the
+    // answer was promised.
+    const judge = panel({ overrides: { "claude-opus": leaky("cli_crashed") } });
+    const judgeErr = (await run(judge.council.deliberate(QUESTION, { source: "http" }))).find((e) => e.type === "error");
+    expect(judgeErr).toEqual({ type: "error", kind: "cli_crashed", detail: "the judge failed: cli_crashed" });
+  });
+
+  it("reports the failure a client can act on, not the one whose seat comes first", async () => {
+    const p = panel({ overrides: {
+      "codex-astra": fail("rate_limited", "model"), "codex-sol": fail("rate_limited", "model"),
+      "agy-pro": fail("cli_crashed"), "agy-oss": fail("cli_crashed"),
+    } });
+    // The anthropic seat is the first declared and is empty by state, which
+    // would speak as model_unavailable: a 404 with no Retry-After, for a panel
+    // whose openai seat was refused on quota.
+    p.claude.healthResult = { ok: false, checkedAt: 0 };
+    await p.core.checkHealth("claude");
+    const err = (await run(p.council.deliberate(QUESTION, { source: "http" }))).find((e) => e.type === "error");
+    expect(err?.kind).toBe("rate_limited");
+  });
+
+  it("attributes every call of a deliberation to the caller that asked for it", async () => {
+    const p = panel();
+    const d = detailOf(await run(p.council.deliberate(QUESTION, { source: "http", caller: "tester@example" })));
+    expect(d.calls).toBe(9);
+    expect(p.store.callers(3600_000).find((c) => c.caller === "tester@example")?.calls).toBe(9);
+    expect(p.store.callers(3600_000).find((c) => c.caller === null)).toBeUndefined();
+  });
+
+  it("ties the nine usage rows together with a deliberation identifier", async () => {
+    const p = panel();
+    const first = detailOf(await run(p.council.deliberate(QUESTION, { source: "http" })));
+    expect(first.deliberationId).toMatch(/^[0-9a-f-]{36}$/);
+    // §12.7: the cost of one question, summed across the six models that served it.
+    expect(p.store.deliberationTotals(first.deliberationId)).toEqual({ calls: 9, inputTokens: 90, outputTokens: 18 });
+    const second = detailOf(await run(p.council.deliberate(QUESTION, { source: "http" })));
+    expect(second.deliberationId).not.toBe(first.deliberationId);
+    expect(p.store.deliberationTotals(first.deliberationId).calls).toBe(9);
+  });
+
+  it("tells each member which answer is its own, and tells no other member that label", async () => {
+    const p = panel();
+    const d = detailOf(await run(p.council.deliberate(QUESTION, { source: "http" })));
+    const rankings = p.calls().filter((c) => stageOf(c.messages[0].text) === "rankings");
+    expect(rankings).toHaveLength(4);
+    for (const m of d.members) {
+      const own = `One of them, ${m.label}, is your own answer`;
+      const mine = rankings.filter((c) => c.model === m.model);
+      expect(mine).toHaveLength(1);
+      expect(mine[0].messages[0].text).toContain(own);
+      for (const other of rankings.filter((c) => c.model !== m.model)) expect(other.messages[0].text).not.toContain(own);
+    }
+  });
+
+  it("returns the best-ranked answer when no judge can be seated, instead of losing eight calls", async () => {
+    // The judge's whole chain sits in a seat, and the judge may not be a member.
+    const p = panel({ cfg: { judge: { family: "anthropic", models: ["claude-fable"] } } });
+    const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
+    const d = detailOf(events);
+    expect(d.judge).toEqual({ model: "", blind: true });
+    const top = d.members.find((m) => m.label === d.aggregate[0].label)!;
+    expect(textOf(events)).toBe(ANSWERS[top.model]);
+    expect(p.promptsOf("synthesis")).toEqual([]);
+    expect(d.calls).toBe(8);
+  });
+
+  it("starts no call at all when the request was cancelled before the first stage", async () => {
+    const p = panel();
+    const ac = new AbortController();
+    ac.abort();                                            // a listener added later would never fire
+    const events = await run(p.council.deliberate(QUESTION, { source: "http", signal: ac.signal }));
+    expect(p.calls()).toEqual([]);
+    expect(events.find((e) => e.type === "done")).toBeUndefined();
+    expect(events.find((e) => e.type === "error")).toBeUndefined();
   });
 
   it("stops at the end of the stage a cancelled request was in", async () => {

@@ -39,7 +39,11 @@ interface ModelPause { pausedUntil: number; strikes: number }
 interface Entry { provider: Provider; model: ModelSpec }
 // caller: who the Access identity says is asking, null when nothing
 // identified them (verification disabled, or a token with nothing in it).
-interface Context { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null }
+// deliberation: the council run this call belongs to, absent for a request a
+// client made directly. It is what ties the nine rows of one question
+// together in the usage table (spec 12.7); the rows stay under the real
+// models that served them, because quotas belong to those models.
+interface Context { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null; deliberation?: string }
 
 export class Core {
   private readonly states = new Map<string, State>();
@@ -226,7 +230,8 @@ export class Core {
       // through its signal or by stopping the iteration (client disconnected).
       const aborted = !sawTerminal && phase !== "threw" && (phase === "running" || ctx.signal?.aborted === true);
       this.usage.record({ provider: id, model: modelName, kind, inputTokens: usage.input, outputTokens: usage.output,
-        durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, caller: ctx.caller ?? null, ts: this.now() });
+        durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, caller: ctx.caller ?? null,
+        deliberation: ctx.deliberation ?? null, ts: this.now() });
     }
   }
 

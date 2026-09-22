@@ -99,11 +99,24 @@ export interface DeliberationMember {
  * is the last model the seat tried and is absent when it never called one,
  * which is the case of a seat whose whole chain the state already reported
  * unavailable.
+ *
+ * `reason` is a classification and never a provider's own words: the
+ * `FailureKind` the last call ended with, or — for a seat nothing could be
+ * seated in — what the state said about each model of its chain. The CLI's
+ * `detail` (up to two thousand characters of stderr) stays in the log, because
+ * this object travels to the client inside the `capitoline` field of an
+ * ordinary response, and provider detail never reaches a client.
+ *
+ * `fellBackFrom` is the same list a surviving member carries, in the same
+ * format, for a seat that walked part of its chain and died anyway: without it
+ * a seat that stepped down and was then lost would report the last model
+ * alone, and the operator would read one model down where two fell (§12.6).
  */
 export interface LostSeat {
   family: string;
   model?: string;
   reason: string;
+  fellBackFrom?: string[];
 }
 
 /** One member's vote, under the model that cast it. The deliberation reaches the client un-blinded, so the voter is named by model; its label is in `members`. */
@@ -118,12 +131,24 @@ export interface MemberRanking {
  * deliberation: the labels the members ranked under sit next to the real model
  * names, after the fact, where no prompt can reach them.
  *
- * `judge.model` is the empty string when no judge was seated — the one case of
- * §12.5, where a single surviving answer is returned as it is and nothing is
- * synthesised. `calls` counts every call the deliberation spent, retries
- * included, which is what §12.7 ties to the usage rows.
+ * `deliberationId` is what §12.7 asks for: the nine calls are nine rows under
+ * the real models that served them, and this is the only thing that ties them
+ * back together, so the cost of one question can be summed instead of guessed
+ * from a time window. It is minted per run and written to every usage row the
+ * deliberation causes.
+ *
+ * `judge.model` is the empty string when nothing was synthesised: the case of
+ * §12.5, where a single surviving answer is returned as it is, and the case of
+ * a judge chain with no model left, where the best-ranked answer is returned
+ * instead of throwing away eight calls that already answered.
+ *
+ * `calls` counts every call the deliberation attempted, retries included. A
+ * call the gateway refuses at its own gates — a standing pause, a model the
+ * state has already taken down — spends no provider call and writes no usage
+ * row, so `calls` is an upper bound on the rows of §12.7 and not an identity.
  */
 export interface Deliberation {
+  deliberationId: string;
   strategyVersion: number;
   members: DeliberationMember[];
   lost: LostSeat[];
