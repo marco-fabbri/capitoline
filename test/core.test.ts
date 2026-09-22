@@ -148,21 +148,37 @@ describe("Core", () => {
     await drain(core.execute(req("sonnet"), { source: "http" }));
     expect(core.listModels().map((m) => [m.name, m.available])).toEqual([["sonnet", false], ["agy-sonnet", true]]);
   });
-  it("drops a restored pause whose row names something the configuration no longer reaches", async () => {
-    // The column holds a CLI id since the key moved off the gateway name, so a
-    // row an older build wrote under the gateway name must not come back: it
-    // would sit in the map under a key nothing looks up, holding nothing back
-    // while /v1/models says the model is fine.
+  it("translates a pause row an older build wrote under the gateway name", async () => {
+    // The column holds a CLI id since the key moved off the gateway name
+    // (2026-09-22). Dropping the older shape instead of translating it lost a
+    // real five-day image pause on the first restart after that change, and
+    // the next image request would have spent one generation of a weekly
+    // quota of 58 to rediscover a refusal that was written in the table.
     const t = 1_000_000;
     const usage = new UsageStore(":memory:");
-    usage.setPause("agy", "pro", t + 3_600_000, 1, t);              // the old, gateway-name shape
-    usage.setPause("agy", "gemini-3.1-pro-high", t + 3_600_000, 1, t);
+    usage.setPause("agy", "pro", t + 3_600_000, 2, t);              // the old, gateway-name shape
+    const p = new FakeProvider("agy", ["pro", "flash"], OK, 1);
+    p.aliases = { pro: "gemini-3.1-pro-high" };
+    const core = new Core([p], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
+    core.restorePauses();
+    expect(core.pauseRemainingS("agy", "pro")).toBe(3600);
+    expect(core.listModels()).toEqual([
+      expect.objectContaining({ name: "pro", available: false, reason: "rate_limited" }),
+      expect.objectContaining({ name: "flash", available: true }),
+    ]);
+    // Rewritten in the store under the id, with its strikes, so the next start
+    // finds the new shape and the translation runs once.
+    expect(usage.pauses(t)).toEqual([{ provider: "agy", model: "gemini-3.1-pro-high", until: t + 3_600_000, strikes: 2 }]);
+  });
+  it("drops a restored pause whose row names neither a CLI id nor a model still declared", async () => {
+    const t = 1_000_000;
+    const usage = new UsageStore(":memory:");
+    usage.setPause("agy", "a-model-that-was-removed", t + 3_600_000, 1, t);
     const p = new FakeProvider("agy", ["pro"], OK, 1);
     p.aliases = { pro: "gemini-3.1-pro-high" };
     const core = new Core([p], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
     core.restorePauses();
-    expect(core.pauseRemainingS("agy", "pro")).toBe(3600);           // restored from the id row
-    expect(core.listModels()).toEqual([expect.objectContaining({ name: "pro", available: false })]);
+    expect(core.listModels()).toEqual([expect.objectContaining({ name: "pro", available: true })]);
   });
   it("grows the model pause with its own strikes and honours a reported reset", async () => {
     let t = 1_000_000;

@@ -568,12 +568,35 @@ export class Core {
         s.strikes = row.strikes;
       } else {
         // The column holds a CLI id since the key moved off the gateway name.
-        // A row naming anything else is either a model the configuration no
-        // longer declares or one written by an older build under a gateway
-        // name: skipped either way rather than restored under a key nothing
-        // will ever look up, and pruned once it expires.
-        if (!this.knownCliIds.get(row.provider)?.has(row.model)) continue;
-        this.modelPauses.set(this.pauseKey(row.provider, row.model), { pausedUntil: row.until, strikes: row.strikes });
+        // Three cases, and only the last is a skip.
+        //
+        // A row already naming a CLI id is restored as it is. A row naming a
+        // **gateway name this configuration still declares** was written by a
+        // build from before 2026-09-22 and is translated: restored under the
+        // id that name resolves to, and rewritten in the store so the next
+        // start finds the new shape and this branch stops being reached.
+        // Dropping it instead was a real loss — the five-day image pause of
+        // 2026-09-22, the very case the doc comment above names, went with the
+        // first restart after the key changed, and the next image request
+        // would have spent one generation of a weekly quota of 58 to
+        // rediscover a refusal written in the table.
+        //
+        // A row that is neither is a model the configuration no longer
+        // declares: skipped rather than restored under a key nothing will ever
+        // look up, and pruned once it expires.
+        //
+        // The translation is a one-transition step and can be deleted once no
+        // deployed database can still hold a legacy row.
+        let cliId = row.model;
+        if (!this.knownCliIds.get(row.provider)?.has(cliId)) {
+          const entry = this.modelIndex.get(row.model);
+          if (entry === undefined || entry.provider.id !== row.provider) continue;
+          cliId = this.cliIdOf(entry);
+          this.usage.clearPause(row.provider, row.model);
+          this.usage.setPause(row.provider, cliId, row.until, row.strikes, this.now());
+          this.opts.log.info({ provider: row.provider, from: row.model, to: cliId }, "pause row translated from a gateway name");
+        }
+        this.modelPauses.set(this.pauseKey(row.provider, cliId), { pausedUntil: row.until, strikes: row.strikes });
       }
       this.opts.log.info({ provider: row.provider, model: row.model, seconds: Math.round((row.until - this.now()) / 1000), strikes: row.strikes }, "pause restored");
     }
