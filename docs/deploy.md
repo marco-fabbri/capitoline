@@ -678,6 +678,18 @@ curl -N -s https://api.example.com/v1/chat/completions \
   -d '{"model":"capitoline","stream":true,"messages":[{"role":"user","content":"why?"}]}'
 ```
 
+Opening the response early is only half of the answer, and the smaller half:
+the silence that matters is *inside* a stage. Between `answers 0/4` and the
+first member coming back, and above all between `synthesis 0/1` — written
+before the judge is even chosen — and the judge's first token, nothing is
+written for as long as that one call takes, which is the same 300 s as before.
+So while a stage runs the gateway keeps the stream alive by itself, with an SSE
+comment (`: keep-alive`) every 20 s. A comment frame carries no field, so it is
+not a chunk: every conforming client drops it without seeing anything, the
+OpenAI SDKs included, and the edge sees a byte four times inside its 100 s
+budget. In a `curl -N` the line is visible, and it is the only thing there that
+does not start with `data:`.
+
 The non-streaming shape (`"stream": false`, the default) builds the whole body
 before sending a byte, so nothing can keep the edge from timing it out: it is
 for a client on the host itself (`http://127.0.0.1:8080`, inside the tunnel's

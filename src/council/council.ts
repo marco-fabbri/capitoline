@@ -34,7 +34,7 @@ export type CouncilEvent =
   | { type: "progress"; stage: CouncilStage; done: number; total: number }
   | { type: "text"; delta: string }
   | { type: "done"; usage: Usage; detail: Deliberation }
-  | { type: "error"; kind: FailureKind; detail: string };
+  | { type: "error"; kind: FailureKind; detail: string; retryAfterS?: number };
 
 /**
  * How a deliberation is asked for, which is how an ordinary request is asked
@@ -97,7 +97,13 @@ const RANK: Record<FailureKind, number> = {
   rate_limited: 0, auth_expired: 1, queue_full: 2, timeout: 3,
   cli_crashed: 4, bad_output: 5, model_unavailable: 6, unknown_model: 7, bad_request: 8, unauthorized: 9,
 };
-const worstOf = (failures: FailureKind[]): FailureKind | undefined => [...failures].sort((a, b) => RANK[a] - RANK[b])[0];
+/**
+ * A failure and, when the refusal named one, how long the client must wait.
+ * It travels with the kind because it is the only thing the client can act on:
+ * a 429 without it is answered with the fixed default of `httpStatus`.
+ */
+interface Failure { kind: FailureKind; retryAfterS?: number }
+const worstOf = (failures: Failure[]): Failure | undefined => [...failures].sort((a, b) => RANK[a.kind] - RANK[b.kind])[0];
 
 /** A member of a deliberation in flight. Its label is empty until stage 2 assigns one. */
 interface RunningMember {
@@ -110,12 +116,12 @@ interface RunningMember {
 
 type MemberOutcome =
   | { ok: true; member: RunningMember }
-  | { ok: false; lost: LostSeat; kind: FailureKind };
+  | { ok: false; lost: LostSeat; kind: FailureKind; retryAfterS?: number };
 
 /** One call's outcome. The usage is counted either way: a refused call can still have spent tokens. */
 type CallResult =
   | { ok: true; text: string; usage: Usage }
-  | { ok: false; kind: FailureKind; detail: string; usage: Usage };
+  | { ok: false; kind: FailureKind; detail: string; usage: Usage; retryAfterS?: number };
 
 /**
  * What `callStream()` is closed with when the synthesis is abandoned mid-flight
@@ -223,18 +229,21 @@ export class Council {
     // came back in: a deliberation is read next to another one.
     const members: RunningMember[] = [];
     const lost: LostSeat[] = [];
-    const failures: FailureKind[] = [];
+    const failures: Failure[] = [];
     for (const s of this.cfg.seats) {
       if (seated.empty.includes(s)) {
         const skips = seated.skipped.filter((k) => k.seat === s);
         lost.push({ family: s.family, reason: `no model of the chain is available: ${skips.map((k) => `${k.model} ${k.reason}`).join(", ")}` });
-        failures.push(kindOfReason(skips.at(-1)?.reason));
+        // The state knew this seat was empty before the call, so there is no
+        // refusal to read a wait from: `listModels()` reports the reason and
+        // not the remainder of the pause behind it.
+        failures.push({ kind: kindOfReason(skips.at(-1)?.reason) });
         continue;
       }
       const outcome = outcomes.get(s);
       if (outcome === undefined) continue;
       if (outcome.ok) members.push(outcome.member);
-      else { lost.push(outcome.lost); failures.push(outcome.kind); }
+      else { lost.push(outcome.lost); failures.push({ kind: outcome.kind, retryAfterS: outcome.retryAfterS }); }
     }
     if (lost.length > 0) this.log.warn({ council: this.name, lost }, "seats lost before the ranking");
 
@@ -244,8 +253,8 @@ export class Council {
     // the panel, which is the one the client can act on (RANK).
     if (members.length < this.cfg.minMembers) {
       if (members.length === 0) {
-        const kind = worstOf(failures) ?? "model_unavailable";
-        yield { type: "error", kind, detail: `no member answered: ${lost.map((l) => `${l.family} ${l.reason}`).join("; ") || "no seat could be filled"}` };
+        const worst = worstOf(failures) ?? { kind: "model_unavailable" as FailureKind };
+        yield { type: "error", kind: worst.kind, retryAfterS: worst.retryAfterS, detail: `no member answered: ${lost.map((l) => `${l.family} ${l.reason}`).join("; ") || "no seat could be filled"}` };
         return;
       }
       this.log.warn({ council: this.name, answers: members.length, quorum: this.cfg.minMembers }, "below the quorum: the answer is returned without a council");
@@ -321,7 +330,7 @@ export class Council {
         // The kind, never the provider's own words: this event becomes the
         // client's error, and `result.detail` is up to two thousand characters
         // of a CLI's stderr. The line above is where it is kept.
-        yield { type: "error", kind: result.kind, detail: `the judge failed: ${result.kind}` };
+        yield { type: "error", kind: result.kind, retryAfterS: result.retryAfterS, detail: `the judge failed: ${result.kind}` };
         return;
       }
       this.log.warn({ council: this.name, from: model, to: next, kind: result.kind }, "the judge steps down its chain");
@@ -414,7 +423,7 @@ export class Council {
         // is serialised into the client's response (§12.6), and what a
         // provider puts in `detail` is its CLI's stderr.
         this.log.warn({ council: this.name, family: s.family, model, kind: result.kind, detail: result.detail }, "a seat was lost");
-        return { ok: false, kind: result.kind, lost: { family: s.family, model, reason: result.kind, ...(fellBackFrom.length > 0 ? { fellBackFrom } : {}) } };
+        return { ok: false, kind: result.kind, retryAfterS: result.retryAfterS, lost: { family: s.family, model, reason: result.kind, ...(fellBackFrom.length > 0 ? { fellBackFrom } : {}) } };
       }
       this.log.warn({ council: this.name, family: s.family, from: model, to: next, kind: result.kind }, "a seat steps down its chain");
       fellBackFrom.push(`${model} (${result.kind})`);
@@ -484,20 +493,23 @@ export class Council {
     const relay = (): void => controller.abort();
     ctx.signal?.addEventListener("abort", relay, { once: true });
     let text = "";
-    let failure: { kind: FailureKind; detail: string } | undefined;
+    let failure: { kind: FailureKind; detail: string; retryAfterS?: number } | undefined;
     let terminal = false;
     try {
       const req: InternalRequest = { model, messages: [{ role: "user", text: prompt }], stream: streamed };
       for await (const ev of this.core.execute(req, { signal: controller.signal, source: ctx.source, caller: ctx.caller, deliberation: run.id })) {
         if (ev.type === "text") { text += ev.delta; if (streamed) yield ev.delta; }
         else if (ev.type === "done") { terminal = true; usage.input += ev.usage?.input ?? 0; usage.output += ev.usage?.output ?? 0; }
-        else if (ev.type === "error") { terminal = true; failure = { kind: ev.kind, detail: ev.detail }; }
+        // `retryAfterS` is the provider's own figure, kept so that a council
+        // ended by a rate limit can still tell the client when to come back
+        // (app.ts says what it is worth next to the pause Core installs).
+        else if (ev.type === "error") { terminal = true; failure = { kind: ev.kind, detail: ev.detail, retryAfterS: ev.retryAfterS }; }
         // rate_limit windows and images are Core's business, not the council's.
       }
     } catch (e) {
       // Core throws before the first event for everything it decides itself: an
       // unknown model, a pause already standing, a queue that never opened.
-      failure = e instanceof CapitolineError ? { kind: e.kind, detail: e.message } : { kind: "cli_crashed", detail: e instanceof Error ? e.message : String(e) };
+      failure = e instanceof CapitolineError ? { kind: e.kind, detail: e.message, retryAfterS: e.retryAfterS } : { kind: "cli_crashed", detail: e instanceof Error ? e.message : String(e) };
     } finally {
       clearTimeout(timer);
       ctx.signal?.removeEventListener("abort", relay);

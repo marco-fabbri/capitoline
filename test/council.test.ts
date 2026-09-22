@@ -65,8 +65,8 @@ const SEATS: Seat[] = [
 const JUDGE: Seat = { family: "anthropic", models: ["claude-opus", "claude-sonnet", "claude-haiku"] };
 const CFG: CouncilConfig = { seats: SEATS, judge: JUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, stageTimeoutS: 5 };
 
-const fail = (kind: "rate_limited" | "cli_crashed" | "auth_expired", scope?: "model"): ProviderEvent[] =>
-  [{ type: "error", kind, detail: `${kind} from the fake`, ...(scope ? { scope } : {}) }];
+const fail = (kind: "rate_limited" | "cli_crashed" | "auth_expired", scope?: "model", retryAfterS?: number): ProviderEvent[] =>
+  [{ type: "error", kind, detail: `${kind} from the fake`, ...(scope ? { scope } : {}), ...(retryAfterS !== undefined ? { retryAfterS } : {}) }];
 
 // A provider detail as a real one is: `cli-provider` puts the last two
 // thousand characters of the CLI's stderr in it. Nothing carrying this string
@@ -323,7 +323,7 @@ describe("Council", () => {
 
   it("reports the failure a client can act on, not the one whose seat comes first", async () => {
     const p = panel({ overrides: {
-      "codex-astra": fail("rate_limited", "model"), "codex-sol": fail("rate_limited", "model"),
+      "codex-astra": fail("rate_limited", "model", 1200), "codex-sol": fail("rate_limited", "model", 1200),
       "agy-pro": fail("cli_crashed"), "agy-oss": fail("cli_crashed"),
     } });
     // The anthropic seat is the first declared and is empty by state, which
@@ -333,6 +333,11 @@ describe("Council", () => {
     await p.core.checkHealth("claude");
     const err = (await run(p.council.deliberate(QUESTION, { source: "http" }))).find((e) => e.type === "error");
     expect(err?.kind).toBe("rate_limited");
+    // With the kind travels the wait the refusal named: a council has no
+    // provider of its own for the server to ask `pauseRemainingS` about, so
+    // without this the 429 would carry the fixed default of `httpStatus`
+    // whatever the subscription said (app.ts).
+    expect(err?.retryAfterS).toBe(1200);
   });
 
   it("attributes every call of a deliberation to the caller that asked for it", async () => {

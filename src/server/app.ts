@@ -12,6 +12,20 @@ function beginSse(res: Response) {
   res.flushHeaders?.();
 }
 
+// A comment line: the SSE grammar says a frame whose field name is empty is
+// ignored, so every conforming parser — the OpenAI SDKs included — drops it
+// without seeing a chunk, and the protocol gains no field. What it does is put
+// a byte on the wire. Opening the stream before stage 1 only moves the silence:
+// between `answers 0/n` and `answers 1/n`, and above all between
+// `synthesis 0/1` and the judge's first token, nothing is written for as long
+// as a member takes (up to `stage_timeout_s`, 300 s as shipped), and the edge
+// in front of the gateway gives up on an origin silent for 100 s
+// (docs/deploy.md §9) — now with a 200 and half a stream already delivered,
+// which is worse than the error it would have read before. Twenty seconds
+// leaves four ticks inside that budget, so a missed one is not a lost client.
+const KEEP_ALIVE = ": keep-alive\n\n";
+const KEEP_ALIVE_MS = 20_000;
+
 function sendError(res: Response, e: unknown, log: Logger) {
   const err = e instanceof CapitolineError ? e : new CapitolineError("bad_output", "internal error");
   if (!(e instanceof CapitolineError)) log.error({ err: e }, "unhandled error");
@@ -81,7 +95,9 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
    * Two stages produce no token at all, up to `stage_timeout_s` each, and
    * Cloudflare's edge answers the client 524 after 100 s of silence from the
    * origin while the nine calls carry on being spent for nobody
-   * (docs/deploy.md §9).
+   * (docs/deploy.md §9). Opening early is half of it: a keep-alive comment
+   * every `KEEP_ALIVE_MS` covers the silence *inside* a stage, which is where
+   * a deliberation spends nearly all of its minutes.
    */
   const council = async (res: Response, conv: Converted, id: string, ac: AbortController, provider: string) => {
     const model = conv.req.model;
@@ -90,8 +106,16 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     let text = "";
     let usage: Usage | undefined;
     let detail: Deliberation | undefined;
+    // Cleared in the `finally` below, which every exit passes through: an
+    // interval left behind would write into a finished response.
+    let keepAlive: ReturnType<typeof setInterval> | undefined;
     try {
-      if (conv.req.stream) { beginSse(res); res.write(sseChunk(model, id, { role: "assistant", content: "" }, null)); }
+      if (conv.req.stream) {
+        beginSse(res);
+        res.write(sseChunk(model, id, { role: "assistant", content: "" }, null));
+        keepAlive = setInterval(() => res.write(KEEP_ALIVE), KEEP_ALIVE_MS);
+        keepAlive.unref?.();
+      }
       for (; step.done !== true; step = await events.next()) {
         const ev = step.value;
         if (ev.type === "progress") {
@@ -100,12 +124,26 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
           if (conv.req.stream) res.write(sseChunk(model, id, { content: ev.delta }, null));
           else text += ev.delta;
         } else if (ev.type === "done") { usage = ev.usage; detail = ev.detail; }
-        // The kind, never the council's own account of which seats it lost:
-        // that is a log line (spec 8.3), and a deliberation that did finish
-        // hands the client the whole of it in the `capitoline` field instead.
-        else throw new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind]);
+        // The kind and the wait, never the council's own account of which
+        // seats it lost: that is a log line (spec 8.3), and a deliberation
+        // that did finish hands the client the whole of it in the
+        // `capitoline` field instead.
+        //
+        // The wait is the refused member's own. `pauseRemainingS` cannot
+        // answer for a council — it has no provider of its own, and its calls
+        // were spread over three — so what travels on the event is the figure
+        // that member was given: the remaining pause when Core refused the
+        // call outright, the provider's raw retry-after when the call reached
+        // the CLI and came back 429. The raw figure is the shorter of the two
+        // (Core.onError adds a minute of slack when it installs the pause), so
+        // a client that obeys it may come back once while the pause still
+        // stands; that refusal costs no call and carries the full remainder.
+        // Without it every council 429 would say 60 s, the fixed default of
+        // `httpStatus`, whatever the subscription said.
+        else throw new CapitolineError(ev.kind, CLIENT_MESSAGE[ev.kind], ev.retryAfterS);
       }
     } finally {
+      if (keepAlive !== undefined) clearInterval(keepAlive);
       // A deliberation left mid-stage — an error event, a client that went
       // away — is a generator suspended at a yield, and the stage it is in
       // would run to its timeout for nobody.

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 import type { AddressInfo } from "node:net";
 import { createApp } from "../src/server/app.js";
@@ -28,7 +28,13 @@ const asCaller = (who: Identity): RequestHandler => (_req, res, next) => { res.l
 // Stand-in for the Access middleware: any request without the header is refused.
 const deny: RequestHandler = (req, res, next) => (req.header("Cf-Access-Jwt-Assertion") ? next() : res.status(401).json({ error: { code: "unauthorized" } }));
 const body = (extra: object = {}) => ({ model: "claude-opus", messages: [{ role: "user", content: "hi" }], ...extra });
-const sseLines = (text: string) => text.split("\n\n").filter(Boolean).map((l) => l.replace(/^data: /, ""));
+// The frames as they went over the wire, comments included: a keep-alive is
+// one of those, and the test that is about it is the only one that looks.
+const sseFrames = (text: string) => text.split("\n\n").filter(Boolean);
+// What a client's parser sees: a frame whose field name is empty — the
+// keep-alive of app.ts — is not a chunk and is dropped here as the SSE
+// grammar drops it.
+const sseLines = (text: string) => sseFrames(text).filter((f) => !f.startsWith(":")).map((l) => l.replace(/^data: /, ""));
 
 describe("GET /v1/models", () => {
   it("lists available models with owned_by", async () => {
@@ -450,8 +456,9 @@ const COUNCIL_JUDGE: Seat = { family: "anthropic", models: ["claude-haiku"] };
 const COUNCIL_CFG: CouncilConfig = { seats: COUNCIL_SEATS, judge: COUNCIL_JUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, stageTimeoutS: 5 };
 
 // The panel's answers, one per model and none of them naming a model: they are
-// pasted into the ranking and synthesis prompts, and this file asserts that
-// what the client is shown is un-blinded while the prompts are not.
+// pasted into the ranking and synthesis prompts, and the first test below
+// reads both ends of the same request — the deliberation the client is shown,
+// which names the models, and the prompts the panel was sent, which must not.
 const COUNCIL_ANSWERS: Record<string, string> = {
   "claude-opus": "Retry once, and only on a refusal nobody predicted.",
   "codex-astra": "Retrying twice turns one question into four calls.",
@@ -560,7 +567,7 @@ describe("a council over HTTP", () => {
   });
 
   it("returns the synthesis as the message content, with the whole deliberation in the capitoline field", async () => {
-    const { app } = makeCouncil();
+    const { app, claude, codex } = makeCouncil();
     const r = await request(app).post("/v1/chat/completions").send({ model: "capitoline", messages: [{ role: "user", content: "retry?" }] });
     expect(r.status).toBe(200);
     expect(r.body.model).toBe("capitoline");
@@ -583,6 +590,17 @@ describe("a council over HTTP", () => {
     expect(d.judge).toEqual({ model: "claude-haiku", blind: true });
     expect(d.calls).toBe(5);
     expect(d.deliberationId).toEqual(expect.any(String));
+    // And the other end of the same request: the five prompts the panel was
+    // actually sent. The rankings and the blind judge see the answers under
+    // their labels only, so no prompt may carry a real model name — the
+    // un-blinding of §12.4 happens after the fact, in the field read above.
+    const prompts = [...claude.calls, ...codex.calls].map((c) => c.messages[0].text);
+    expect(prompts.length).toBe(5);
+    for (const p of prompts) {
+      expect(p).not.toContain("claude-opus");
+      expect(p).not.toContain("codex-astra");
+      expect(p).not.toContain("claude-haiku");
+    }
   });
 
   it("declares a lost seat in the deliberation, with the kind and never the provider's words", async () => {
@@ -671,6 +689,55 @@ describe("a council over HTTP", () => {
     }
   });
 
+  // Opening the stream early only moves the silence: between `answers 0/n` and
+  // `answers 1/n`, and above all between `synthesis 0/1` — written before the
+  // judge is even seated — and the judge's first token, nothing is written for
+  // as long as a member takes. That is the same 100 s the early open exists to
+  // survive, and it would now break a stream the client has already been given
+  // a 200 for. Only setInterval is faked: the socket, the fetch and the
+  // deliberation stay real, and this test would otherwise wait 20 s.
+  it("keeps the stream alive while a stage runs, with a frame no client reads as a chunk", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const { app } = makeVirtualRun(async function* () {
+      yield { type: "progress", stage: "synthesis", done: 0, total: 1 };
+      await held;                     // the judge is reading four long answers
+      yield* SYNTHESIS;
+    });
+    const server = app.listen(0);
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "capitoline", stream: true, messages: [{ role: "user", content: "retry?" }] }),
+        signal: AbortSignal.timeout(3000),
+      });
+      expect(res.status).toBe(200);
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      const read = async () => decoder.decode((await reader.read()).value, { stream: true });
+      let head = "";
+      while (sseFrames(head).length < 2) head += await read();
+      // Twenty seconds into a stage that writes nothing. Without the tick the
+      // next byte is the judge's first token, minutes away.
+      await vi.advanceTimersByTimeAsync(20_000);
+      let beat = "";
+      while (beat === "") beat += await read();
+      expect(sseFrames(beat)).toEqual([": keep-alive"]);
+      expect(sseLines(beat)).toEqual([]);     // no field, so no chunk: a parser drops it
+      release();
+      let rest = "";
+      for (let step = await reader.read(); step.done !== true; step = await reader.read()) rest += decoder.decode(step.value, { stream: true });
+      expect(sseLines(rest).at(-1)).toBe("[DONE]");
+      expect(rest).toContain("the synthesis");
+    } finally {
+      release();
+      vi.useRealTimers();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("refuses a council that produced no answer with the kind of the failure that ended it", async () => {
     const { app } = makeVirtual([{ type: "error", kind: "rate_limited", detail: "every seat was refused" }]);
     const r = await request(app).post("/v1/chat/completions").send({ model: "capitoline", messages: [{ role: "user", content: "retry?" }] });
@@ -678,6 +745,17 @@ describe("a council over HTTP", () => {
     expect(r.body.error.code).toBe("rate_limited");
     expect(r.body.error.message).toBe("provider rate limit reached");
     expect(r.text).not.toContain("every seat was refused");   // the council's own account stays in the log
+    expect(r.headers["retry-after"]).toBe("60");               // nothing named a wait: the default of httpStatus
+  });
+
+  it("answers a rate-limited council with the wait the refused member was given", async () => {
+    const { app } = makeVirtual([{ type: "error", kind: "rate_limited", detail: "every seat was refused", retryAfterS: 1200 }]);
+    const r = await request(app).post("/v1/chat/completions").send({ model: "capitoline", messages: [{ role: "user", content: "retry?" }] });
+    expect(r.status).toBe(429);
+    // Twenty minutes, not the minute the default would have sent the client
+    // back in — into a refusal the gateway would answer from the standing
+    // pause, which is the one thing Retry-After exists to avoid.
+    expect(r.headers["retry-after"]).toBe("1200");
   });
 
   it("ends a stream that already started with an error chunk and no [DONE]", async () => {
