@@ -7,6 +7,7 @@ import { createMcpHandler } from "../src/mcp/server.js";
 import { Core } from "../src/core/core.js";
 import { UsageStore } from "../src/usage/store.js";
 import type { ProviderEvent } from "../src/core/types.js";
+import type { CouncilEvent, Deliberation } from "../src/council/council.js";
 import pino from "pino";
 import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
@@ -57,10 +58,10 @@ async function client() {
 type Block = { type: string; text?: string; data?: string; mimeType?: string };
 
 describe("MCP", () => {
-  it("lists the three tools", async () => {
+  it("lists the four tools", async () => {
     const c = await client();
     const tools = (await c.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(["ask_model", "generate_image", "list_models"]);
+    expect(tools).toEqual(["ask_council", "ask_model", "generate_image", "list_models"]);
     await c.close();
   });
   it("list_models returns the registry with each model's kind", async () => {
@@ -133,6 +134,230 @@ describe("MCP", () => {
     const models = JSON.parse((r.content as Block[])[0].text!) as { name: string; kind: string }[];
     expect(models.find((m) => m.name === "capitoline")!.kind).toBe("council");
     await c.close();
+  });
+
+  describe("ask_council", () => {
+    // A deliberation the transport has nothing to do with: the MCP layer's job
+    // is to render these events, and a real Council is exercised by
+    // test/council.test.ts and end to end by test/e2e.test.ts. What is scripted
+    // here is one of every event the council can emit, in the order §12.1 emits
+    // them, plus the un-blinded record §12.6 puts in front of the client.
+    const DETAIL: Deliberation = {
+      deliberationId: "d-1",
+      strategyVersion: 1,
+      members: [
+        { family: "anthropic", model: "claude-opus", label: "Response A", answer: "the first answer" },
+        { family: "openai", model: "codex-gpt-5.5", label: "Response B", answer: "the second answer", fellBackFrom: ["codex-gpt-6-astra (rate_limited)"] },
+      ],
+      lost: [{ family: "google", model: "agy-gemini-pro", reason: "timeout" }],
+      rankings: [{ by: "claude-opus", ranking: [{ label: "Response B", rank: 1, reason: "clearer" }, { label: "Response A", rank: 2, reason: "mine" }] }],
+      aggregate: [{ label: "Response B", averageRank: 1, votes: 1 }, { label: "Response A", averageRank: 2, votes: 1 }],
+      judge: { model: "claude-haiku", blind: true },
+      calls: 5,
+    };
+    const RUN: CouncilEvent[] = [
+      { type: "progress", stage: "answers", done: 0, total: 2 },
+      { type: "progress", stage: "answers", done: 1, total: 2 },
+      { type: "progress", stage: "answers", done: 2, total: 2 },
+      { type: "progress", stage: "rankings", done: 0, total: 2 },
+      { type: "progress", stage: "rankings", done: 2, total: 2 },
+      { type: "progress", stage: "synthesis", done: 0, total: 1 },
+      { type: "text", delta: "the " }, { type: "text", delta: "synthesis" },
+      { type: "progress", stage: "synthesis", done: 1, total: 1 },
+      { type: "done", usage: { input: 30, output: 12 }, detail: DETAIL },
+    ];
+    // What the council was asked and under whose identity: a member call is an
+    // ordinary request, so the caller /v1/usage groups by has to survive the
+    // tool call (see "records the caller of a tool call" above).
+    let asked: { question: string; source: string; caller?: string | null }[];
+    const register = (events: CouncilEvent[] = RUN, name = "capitoline") => {
+      core.registerVirtual(name, async function* (question, ctx) {
+        asked.push({ question, source: ctx.source, caller: ctx.caller });
+        for (const ev of events) { await new Promise((r) => setTimeout(r, 1)); yield ev; }
+      });
+    };
+    beforeEach(() => { asked = []; });
+
+    it("is listed with a description that says what a deliberation costs", async () => {
+      const c = await client();
+      const tool = (await c.listTools()).tools.find((t) => t.name === "ask_council")!;
+      expect(tool.description).toMatch(/council/i);
+      // The agent decides between this tool and ask_model on the description
+      // alone: nine calls over several minutes is the whole difference.
+      expect(tool.description).toMatch(/nine/);
+      expect(Object.keys(tool.inputSchema.properties!).sort()).toEqual(["council", "question"]);
+      await c.close();
+    });
+
+    it("returns the synthesis as text and the deliberation as structured content", async () => {
+      register();
+      const c = await client();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      expect(r.isError).toBeFalsy();
+      expect((r.content as Block[])[0].text).toBe("the synthesis");
+      expect(r.structuredContent).toEqual({
+        council: "capitoline",
+        deliberation_id: "d-1",
+        strategy_version: 1,
+        members: DETAIL.members,
+        // §12.5: a member that was dropped is declared, here as everywhere else.
+        lost: DETAIL.lost,
+        aggregate: DETAIL.aggregate,
+        judge: { model: "claude-haiku", blind: true },
+        usage: { prompt_tokens: 30, completion_tokens: 12 },
+        calls: 5,
+      });
+      expect(asked).toEqual([{ question: "why?", source: "mcp", caller: "claude-code" }]);
+      await c.close();
+    });
+
+    it("defaults to the only configured council when the name is omitted", async () => {
+      register(RUN, "capitoline");
+      const c = await client();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      expect(r.structuredContent).toMatchObject({ council: "capitoline" });
+      await c.close();
+    });
+
+    it("refuses a real model, and says which tool takes one", async () => {
+      const c = await client();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?", council: "claude-opus" } });
+      expect(r.isError).toBe(true);
+      expect((r.content as Block[])[0].text).toMatch(/bad_request.*not a council.*ask_model/);
+      expect(provider.calls).toHaveLength(0);
+      await c.close();
+    });
+
+    it("reports nothing to deliberate with when no council is configured", async () => {
+      const c = await client();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      expect(r.isError).toBe(true);
+      expect((r.content as Block[])[0].text).toMatch(/bad_request.*no council/);
+      await c.close();
+    });
+
+    // §12.6: the two silent stages are what the progress exists for, and in
+    // Claude Code a client that asked for progress also extends its own tool
+    // timeout on every notification — which is what keeps a multi-minute
+    // deliberation from being abandoned halfway.
+    it("turns every stage event into a progress notification, with values that always increase", async () => {
+      register();
+      const c = await client();
+      const seen: { progress: number; message?: string }[] = [];
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } }, undefined, { onprogress: (p) => { seen.push({ progress: p.progress, message: p.message }); } });
+      expect(r.isError).toBeFalsy();
+      // One per stage event, plus the completion. The stage counters restart at
+      // every stage (answers 2/2 then rankings 0/2), so the notification value
+      // cannot be one of them: it is a sequence of its own.
+      expect(seen.map((p) => p.message)).toEqual([
+        "answers 0/2", "answers 1/2", "answers 2/2",
+        "rankings 0/2", "rankings 2/2",
+        "synthesis 0/1", "synthesis 1/1", "done",
+      ]);
+      expect(seen.every((p, i) => i === 0 || p.progress > seen[i - 1].progress)).toBe(true);
+      await c.close();
+    });
+
+    it("sends no progress notification when the client did not ask for one", async () => {
+      register();
+      const c = await client();
+      const seen: unknown[] = [];
+      c.fallbackNotificationHandler = async (n) => { seen.push(n); };
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      expect(r.isError).toBeFalsy();
+      expect(seen).toHaveLength(0);
+      await c.close();
+    });
+
+    // A synthesis is the one stage that streams, and it can run for minutes
+    // with no stage event of its own: the character count is the sign of life
+    // in between, exactly as ask_model does it.
+    it("marks the synthesis as it is written, so a long one is not silent", async () => {
+      const long: CouncilEvent[] = [
+        { type: "progress", stage: "synthesis", done: 0, total: 1 },
+        ...Array.from({ length: 40 }, (): CouncilEvent => ({ type: "text", delta: "x" })),
+        { type: "done", usage: { input: 1, output: 1 }, detail: DETAIL },
+      ];
+      register(long);
+      const c = await client();
+      const seen: { progress: number; message?: string }[] = [];
+      await c.callTool({ name: "ask_council", arguments: { question: "why?" } }, undefined, { onprogress: (p) => { seen.push({ progress: p.progress, message: p.message }); } });
+      expect(seen.map((p) => p.message)).toEqual(["synthesis 0/1", "writing, 20 chars", "writing, 40 chars", "done"]);
+      expect(seen.every((p, i) => i === 0 || p.progress > seen[i - 1].progress)).toBe(true);
+      await c.close();
+    });
+
+    // The kind and the wait, never the council's own account of which seats it
+    // lost: that account names providers and carries their words (spec 8.3),
+    // and the Council has already written it to the log with the seats.
+    it("returns a failed council as a tool error carrying the kind alone", async () => {
+      register([
+        { type: "progress", stage: "answers", done: 0, total: 2 },
+        { type: "error", kind: "rate_limited", detail: "no member answered: anthropic 429 upstream body", retryAfterS: 90 },
+      ]);
+      const c = await client();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      expect(r.isError).toBe(true);
+      const text = (r.content as Block[])[0].text!;
+      expect(text).toMatch(/rate_limited/);
+      expect(Number(/retry after (\d+)s/.exec(text)![1])).toBe(90);
+      expect(text).not.toContain("upstream body");
+      expect(text).not.toContain("anthropic");
+      await c.close();
+    });
+
+    // queue_full and model_unavailable are not provider errors: a council
+    // refused by the gateway must reach the caller as itself, which is why the
+    // event carries a FailureKind and the tool passes it through untouched.
+    it("passes a gateway refusal through under its own kind", async () => {
+      register([{ type: "error", kind: "queue_full", detail: "the provider queue did not open" }]);
+      const c = await client();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      expect(r.isError).toBe(true);
+      expect((r.content as Block[])[0].text).toMatch(/queue_full/);
+      await c.close();
+    });
+
+    // The gate Core puts in front of a council (§12.5, spec 6.1): the quorum is
+    // decided before the tool spends the one call it could still make.
+    it("refuses a council whose quorum cannot be filled, before any call", async () => {
+      let started = false;
+      core.registerVirtual("capitoline", async function* () { started = true; yield { type: "text", delta: "x" }; },
+        () => ({ available: false, reason: "only 1 of 4 seats can be filled: the quorum is 2" }));
+      const c = await client();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      expect(r.isError).toBe(true);
+      expect((r.content as Block[])[0].text).toMatch(/model_unavailable/);
+      expect(started).toBe(false);
+      await c.close();
+    });
+
+    it("refuses a question that is only whitespace", async () => {
+      register();
+      const c = await client();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "   " } });
+      expect(r.isError).toBe(true);
+      expect((r.content as Block[])[0].text).toMatch(/bad_request/);
+      expect(asked).toHaveLength(0);
+      await c.close();
+    });
+
+    // A client that hangs up mid-deliberation is not a broken council: Core has
+    // already recorded every call it made as aborted, and the operator must not
+    // read a warn line hunting for a council that never finished.
+    it("answers a cancelled call as cancelled, and logs nothing", async () => {
+      core.registerVirtual("capitoline", async function* () {
+        yield { type: "progress", stage: "answers", done: 0, total: 2 };
+        await new Promise((r) => setTimeout(r, 200));
+        yield { type: "done", usage: { input: 1, output: 1 }, detail: DETAIL };
+      });
+      const c = await client();
+      const call = c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      setTimeout(() => { void c.close(); }, 50);
+      await expect(call).rejects.toThrow();
+      await new Promise((r) => setTimeout(r, 300));
+      expect(warnings).toHaveLength(0);
+    });
   });
 
   // B5: the MCP spec requires the progress value of every notification to be

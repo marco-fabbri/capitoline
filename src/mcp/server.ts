@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import type { Core } from "../core/core.js";
 import { CapitolineError, type Message, type ProviderEvent, type Usage } from "../core/types.js";
+import type { Deliberation } from "../council/council.js";
 import type { Logger } from "../log.js";
 import { callerOf } from "../server/access.js";
 
@@ -18,6 +19,10 @@ export interface McpOptions {
 }
 
 const PROGRESS_INTERVAL_MS = 5_000;
+// How many text events a streaming answer takes before it says so again. It is
+// a sign of life and an extension of the client's own tool timeout, not a
+// measurement, so the exact figure matters less than sending it steadily.
+const TEXT_PROGRESS_EVERY = 20;
 
 // `caller` is who the Access identity behind this request names, null when
 // nothing identified them: the server is built per request, so it is fixed for
@@ -106,7 +111,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     const progress = (done: boolean) => token !== undefined && extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: ++sent, message: done ? "done" : `${text.length} chars` } });
     try {
       for await (const ev of core.execute({ model, messages, effort, stream: true }, { signal: extra.signal, source: "mcp", caller })) {
-        if (ev.type === "text") { text += ev.delta; if (++n % 20 === 0) await progress(false); }
+        if (ev.type === "text") { text += ev.delta; if (++n % TEXT_PROGRESS_EVERY === 0) await progress(false); }
         else if (ev.type === "done") usage = ev.usage;
         else if (ev.type === "error") throw providerError(ev, providerOf(model), model);
       }
@@ -115,6 +120,104 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       return { content: [{ type: "text", text }], structuredContent: structured };
     } catch (e) {
       return toolError(e, "ask_model", model);
+    }
+  });
+
+  server.registerTool("ask_council", {
+    description: "Put one question to a council: several models of different families answer it independently, rank each other's answers without knowing whose is whose, and a judge writes the final answer from the ranking. One deliberation is nine model calls over several minutes on three different subscriptions, so ask_model is the right tool for anything a single model can answer. Use list_models for council names (kind council); omit council for the first available one.",
+    inputSchema: {
+      question: z.string().min(1).describe("The question the council deliberates on"),
+      council: z.string().min(1).optional().describe("Council name from list_models (kind council); default: the first available council"),
+    },
+    // The un-blinded record of a blind deliberation (§12.6), minus the
+    // individual rankings: the aggregate is the panel's verdict, and every
+    // member's reasons for every label would be four times the bulk of the
+    // answers for a caller that already has the synthesis. `lost` stays,
+    // because a dropped seat is declared and not hidden (§12.5), and
+    // `deliberation_id` stays because it is what ties the nine usage rows of
+    // this question together (§12.7).
+    outputSchema: {
+      council: z.string(),
+      deliberation_id: z.string(),
+      strategy_version: z.number(),
+      members: z.array(z.object({ family: z.string(), model: z.string(), label: z.string(), answer: z.string(), fellBackFrom: z.array(z.string()).optional() })),
+      lost: z.array(z.object({ family: z.string(), model: z.string().optional(), reason: z.string(), fellBackFrom: z.array(z.string()).optional() })),
+      aggregate: z.array(z.object({ label: z.string(), averageRank: z.number(), votes: z.number() })),
+      judge: z.object({ model: z.string(), blind: z.boolean() }),
+      usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }),
+      calls: z.number(),
+    },
+  }, async ({ question, council: requested }, extra) => {
+    // Everything inside the try, listModels() included, for the reason
+    // generate_image gives: an exception escaping the handler is turned by the
+    // SDK into a tool error carrying the raw message, with no log line and no
+    // spec 8.3 sanitising.
+    let name: string | undefined;
+    try {
+      // One listing per call, and the same default rule as generate_image: the
+      // first council a client would see as available, else the first declared
+      // one, so a panel that cannot reach its quorum answers with its own
+      // refusal — the count of seats it could fill — instead of "no council".
+      const models = core.listModels();
+      name = requested ?? (models.find((m) => m.kind === "council" && m.available) ?? models.find((m) => m.kind === "council"))?.name;
+      if (!name) throw new CapitolineError("bad_request", "no council is configured: nothing to deliberate with");
+      // The mirror of ask_model's refusal: one tool per kind of call, and each
+      // names the other, so an agent that guessed wrong is one message away
+      // from the right tool rather than from a 404.
+      if (!core.isVirtual(name)) throw new CapitolineError("bad_request", `model "${name}" is not a council: use ask_model`);
+      const token = extra._meta?.progressToken;
+      // One sequence for every notification this call sends, for the reason
+      // ask_model explains: the MCP spec requires each progress value to be
+      // larger than the last, and the council's own counters restart at every
+      // stage (`answers 2/2`, then `rankings 0/2`). The stage and its counters
+      // travel in the message, where they say something a bare number cannot.
+      let sent = 0;
+      const progress = (message: string) => token !== undefined
+        ? extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: ++sent, message } })
+        : undefined;
+      let text = "";
+      let n = 0;
+      let usage: Usage | undefined;
+      let detail: Deliberation | undefined;
+      // deliberate() and not execute(): the progress of the two silent stages
+      // and the un-blinded account of what the panel did are the whole point of
+      // §12.6, and the flattened form has nowhere to put either. It is also
+      // where a council is refused — the empty question, a quorum that cannot
+      // be filled — before a single member call is spent.
+      for await (const ev of core.deliberate({ model: name, messages: [{ role: "user", text: question }], stream: true }, { signal: extra.signal, source: "mcp", caller })) {
+        if (ev.type === "progress") await progress(`${ev.stage} ${ev.done}/${ev.total}`);
+        // The synthesis is the one stage that streams, and it emits no stage
+        // event while it is written: without this mark a client whose timeout
+        // resets on progress would abandon a long one (§12.6).
+        else if (ev.type === "text") { text += ev.delta; if (++n % TEXT_PROGRESS_EVERY === 0) await progress(`writing, ${text.length} chars`); }
+        else if (ev.type === "done") { usage = ev.usage; detail = ev.detail; }
+        // The kind and the wait, never the council's own account of which seats
+        // it lost: that names providers and carries their words (spec 8.3), and
+        // the Council has already written it to the log with the seats. The
+        // wait is the refused member's own, carried on the event —
+        // pauseRemainingS cannot answer for a council, which has no provider of
+        // its own and spread its calls over three.
+        else throw new CapitolineError(ev.kind, ev.kind, ev.retryAfterS);
+        // Throwing out of a for-await closes the generator, which is what stops
+        // the stage the deliberation is in from running on to its timeout.
+      }
+      // A cancelled call ends the same way as a council that produced nothing:
+      // no done event, no error event. It is not bad_output — Core has recorded
+      // every call it made as aborted and the client is gone — so it must not
+      // raise the warn line an operator uses to hunt a broken council.
+      if (!detail) {
+        if (extra.signal.aborted) return { isError: true as const, content: [{ type: "text" as const, text: "Capitoline error: cancelled" }] };
+        throw new CapitolineError("bad_output", "the council finished without a result");
+      }
+      await progress("done");
+      const structured = {
+        council: name, deliberation_id: detail.deliberationId, strategy_version: detail.strategyVersion,
+        members: detail.members, lost: detail.lost, aggregate: detail.aggregate, judge: detail.judge,
+        usage: { prompt_tokens: usage?.input ?? 0, completion_tokens: usage?.output ?? 0 }, calls: detail.calls,
+      };
+      return { content: [{ type: "text", text }], structuredContent: structured };
+    } catch (e) {
+      return toolError(e, "ask_council", name);
     }
   });
 
