@@ -588,9 +588,14 @@ export class Core {
     const known = this.knownScopes.get(providerId);
     if (known === undefined) return null;
     if (known.has(stored)) return stored;
-    // A bare CLI id, written on 2026-09-22: text, which is the only kind that
-    // shape was ever used for — the image pause of that day still carried the
-    // gateway name below.
+    // A bare CLI id, written on 2026-09-22. That shape carries no kind and
+    // none can be recovered from it, so it is read as text — right for every
+    // row but one. The exception is worth naming because it was a live row:
+    // the deploy that first translated a gateway name wrote the image pause of
+    // the 22nd in this shape, and the next deploy read it back as text, which
+    // freed the image model and darkened the text one. It was repaired by hand
+    // on the host (2026-09-23) and the shape existed for about an hour, so
+    // nothing else can be holding one.
     if (known.has(scopeOf("text", stored))) return scopeOf("text", stored);
     // A gateway name, written before that: resolved through this
     // configuration, which is also where the kind comes from.
