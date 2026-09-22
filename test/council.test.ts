@@ -27,9 +27,9 @@ const ANSWERS: Record<string, string> = {
   "claude-haiku": "Retry on quota, give up on a crash.",
   "codex-astra": "Retry on quota; a crash is not a quota.",
   "codex-sol": "One step down the chain, then give up the seat.",
-  "agy-pro": "It depends whether the refusal is about the model or the subscription.",
-  "agy-flash": "Retry, but bound the whole thing by a deadline.",
-  "agy-oss": "No: a failed call is evidence the seat is gone.",
+  "antigravity-pro": "It depends whether the refusal is about the model or the subscription.",
+  "antigravity-flash": "Retry, but bound the whole thing by a deadline.",
+  "antigravity-oss": "No: a failed call is evidence the seat is gone.",
 };
 const SYNTHESIS = "Retry exactly once, and only when the refusal was not already known.";
 
@@ -57,8 +57,8 @@ function rankingReply(prompt: string): string {
 const SEATS: Seat[] = [
   { family: "anthropic", models: ["claude-fable", "claude-opus", "claude-sonnet"] },
   { family: "openai", models: ["codex-astra", "codex-sol"] },
-  { family: "google", models: ["agy-pro", "agy-flash"] },
-  { family: "open-weights", models: ["agy-oss"] },
+  { family: "google", models: ["antigravity-pro", "antigravity-flash"] },
+  { family: "open-weights", models: ["antigravity-oss"] },
 ];
 // The repository's own judge chain: claude-haiku closes it because it sits in
 // no seat, so a blind judge always has a model of its own left.
@@ -108,20 +108,20 @@ function panel(opts: PanelOptions = {}) {
   const claude = new FakeProvider("claude", ["claude-fable", "claude-opus", "claude-sonnet", "claude-haiku"], reply, 1);
   const codex = new FakeProvider("codex", ["codex-astra", "codex-sol"], reply, 1);
   // Two slots, as config/capitoline.yaml gives Antigravity: it serves two seats.
-  const agy = new FakeProvider("agy", ["agy-pro", "agy-flash", "agy-oss"], reply, 2);
+  const antigravity = new FakeProvider("antigravity", ["antigravity-pro", "antigravity-flash", "antigravity-oss"], reply, 2);
   const store = new UsageStore(":memory:");
-  const core = new Core([claude, codex, agy], store, { maxWaitMs: 500, budgets: {}, log: createLogger("t") });
+  const core = new Core([claude, codex, antigravity], store, { maxWaitMs: 500, budgets: {}, log: createLogger("t") });
   // A millisecond of busy backoff, not five seconds: the wait is a real timer
   // and every test that never meets a busy provider would otherwise pay for it.
   const council = new Council("capitoline", { ...CFG, ...opts.cfg }, core, createLogger("t"), opts.busyRetryMs ?? 1);
-  const calls = () => [...claude.calls, ...codex.calls, ...agy.calls];
+  const calls = () => [...claude.calls, ...codex.calls, ...antigravity.calls];
   return {
-    claude, codex, agy, store, core, council, calls,
+    claude, codex, antigravity, store, core, council, calls,
     prompts: () => calls().map((c) => c.messages[0].text),
     promptsOf: (stage: Stage) => calls().map((c) => c.messages[0].text).filter((p) => stageOf(p) === stage),
     /** The models called, optionally only in one stage: the same model can serve a seat in stage 1 and the judge in stage 3. */
     modelsAsked: (stage?: Stage) => calls().filter((c) => stage === undefined || stageOf(c.messages[0].text) === stage).map((c) => c.model),
-    rows: () => ["claude", "codex", "agy"].reduce((n, id) => n + store.totals(id, 3600_000).calls, 0),
+    rows: () => ["claude", "codex", "antigravity"].reduce((n, id) => n + store.totals(id, 3600_000).calls, 0),
   };
 }
 
@@ -145,12 +145,12 @@ describe("Council", () => {
     expect(textOf(events)).toBe(SYNTHESIS);
     const d = detailOf(events);
     expect(d.members.map((m) => [m.family, m.model])).toEqual([
-      ["anthropic", "claude-fable"], ["openai", "codex-astra"], ["google", "agy-pro"], ["open-weights", "agy-oss"],
+      ["anthropic", "claude-fable"], ["openai", "codex-astra"], ["google", "antigravity-pro"], ["open-weights", "antigravity-oss"],
     ]);
     expect(d.members.map((m) => m.answer)).toEqual(d.members.map((m) => ANSWERS[m.model]));
     expect([...d.members.map((m) => m.label)].sort()).toEqual(["Response A", "Response B", "Response C", "Response D"]);
     expect(d.lost).toEqual([]);
-    expect(d.rankings.map((r) => r.by)).toEqual(["claude-fable", "codex-astra", "agy-pro", "agy-oss"]);
+    expect(d.rankings.map((r) => r.by)).toEqual(["claude-fable", "codex-astra", "antigravity-pro", "antigravity-oss"]);
     // Every member ranked the labels worst first, so the last one shown wins.
     expect(d.aggregate).toEqual([
       { label: "Response D", averageRank: 1, votes: 4 },
@@ -188,7 +188,7 @@ describe("Council", () => {
     const d = detailOf(events);
 
     expect(textOf(events)).toBe(SYNTHESIS);
-    expect(d.members.map((m) => m.model)).toEqual(["claude-fable", "codex-astra", "agy-pro", "agy-oss"]);
+    expect(d.members.map((m) => m.model)).toEqual(["claude-fable", "codex-astra", "antigravity-pro", "antigravity-oss"]);
     // Four answers and the synthesis: five calls, five rows. The accounting of
     // §12.7 is the whole point of the shape.
     expect(d.calls).toBe(5);
@@ -220,7 +220,7 @@ describe("Council", () => {
     // difference this test pins: an empty `aggregate` is never a degraded
     // panel that ranked, so `shape` is not there to rescue an ambiguity but to
     // state the council's shape instead of leaving it to be read off votes.
-    const broken = panel({ badRanking: ["claude-fable", "codex-astra", "agy-pro", "agy-oss"] });
+    const broken = panel({ badRanking: ["claude-fable", "codex-astra", "antigravity-pro", "antigravity-oss"] });
     const d = detailOf(await run(broken.council.deliberate(QUESTION, { source: "http" })));
     expect(d.shape).toBe("ranked");
     expect(d.rankings).toEqual([]);
@@ -251,7 +251,7 @@ describe("Council", () => {
     // wrote it and no judge is called.
     const p = panel({ cfg: { ranking: false }, overrides: {
       "codex-astra": fail("cli_crashed"), "codex-sol": fail("cli_crashed"),
-      "agy-pro": fail("cli_crashed"), "agy-oss": fail("cli_crashed"),
+      "antigravity-pro": fail("cli_crashed"), "antigravity-oss": fail("cli_crashed"),
     } });
     const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
     const d = detailOf(events);
@@ -298,7 +298,7 @@ describe("Council", () => {
     const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
     const d = detailOf(events);
 
-    expect([...p.modelsAsked("answers")].sort()).toEqual(["agy-oss", "agy-pro", "claude-fable", "claude-opus", "codex-astra"]);
+    expect([...p.modelsAsked("answers")].sort()).toEqual(["antigravity-oss", "antigravity-pro", "claude-fable", "claude-opus", "codex-astra"]);
     expect(p.modelsAsked("answers")).not.toContain("claude-sonnet");   // the one retry is spent, not the chain
     // The seat is gone, but the judge's own chain steps around the model the
     // refusal just paused, which is the state doing its work.
@@ -321,12 +321,12 @@ describe("Council", () => {
 
   it("loses a seat that times out, declares it, and deliberates with the rest", async () => {
     const p = panel({ cfg: { stageTimeoutS: 0.1 } });
-    p.agy.delayMs = 300;                                       // both Antigravity seats overrun
+    p.antigravity.delayMs = 300;                                       // both Antigravity seats overrun
     const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
     const d = detailOf(events);
     expect(d.members.map((m) => m.family)).toEqual(["anthropic", "openai"]);
     expect(d.lost.map((l) => [l.family, l.model, l.reason.split(":")[0]])).toEqual([
-      ["google", "agy-pro", "timeout"], ["open-weights", "agy-oss", "timeout"],
+      ["google", "antigravity-pro", "timeout"], ["open-weights", "antigravity-oss", "timeout"],
     ]);
     expect(textOf(events)).toBe(SYNTHESIS);
     expect(d.aggregate.map((a) => a.votes)).toEqual([2, 2]);
@@ -335,7 +335,7 @@ describe("Council", () => {
   it("returns the single answer as it is when the panel falls below the quorum", async () => {
     const p = panel({ overrides: {
       "codex-astra": fail("cli_crashed"), "codex-sol": fail("cli_crashed"),
-      "agy-pro": fail("cli_crashed"), "agy-oss": fail("cli_crashed"),
+      "antigravity-pro": fail("cli_crashed"), "antigravity-oss": fail("cli_crashed"),
     } });
     const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
     expect(textOf(events)).toBe(ANSWERS["claude-fable"]);
@@ -352,7 +352,7 @@ describe("Council", () => {
   it("errors with the kind of the failure that speaks for the panel when nobody answered", async () => {
     const p = panel({ overrides: {
       "claude-fable": fail("auth_expired"), "claude-opus": fail("cli_crashed"),
-      "codex-astra": fail("cli_crashed"), "agy-pro": fail("cli_crashed"), "agy-oss": fail("cli_crashed"),
+      "codex-astra": fail("cli_crashed"), "antigravity-pro": fail("cli_crashed"), "antigravity-oss": fail("cli_crashed"),
     } });
     const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
     expect(events.find((e) => e.type === "done")).toBeUndefined();
@@ -382,11 +382,11 @@ describe("Council", () => {
   });
 
   it("keeps a member's answer when its ranking cannot be parsed, and counts the rest", async () => {
-    const p = panel({ badRanking: ["agy-oss"] });
+    const p = panel({ badRanking: ["antigravity-oss"] });
     const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
     const d = detailOf(events);
-    expect(d.members.map((m) => m.model)).toContain("agy-oss");        // the answer stays
-    expect(d.rankings.map((r) => r.by)).toEqual(["claude-fable", "codex-astra", "agy-pro"]);
+    expect(d.members.map((m) => m.model)).toContain("antigravity-oss");        // the answer stays
+    expect(d.rankings.map((r) => r.by)).toEqual(["claude-fable", "codex-astra", "antigravity-pro"]);
     expect(d.aggregate.every((a) => a.votes === 3)).toBe(true);        // three votes, four labels
     expect(d.aggregate).toHaveLength(4);
     expect(textOf(events)).toBe(SYNTHESIS);
@@ -401,7 +401,7 @@ describe("Council", () => {
 
     // Nobody answered: the error is built from the same reasons.
     const none = panel({ overrides: Object.fromEntries(
-      ["claude-fable", "codex-astra", "agy-pro", "agy-oss"].map((m) => [m, leaky("cli_crashed")])) });
+      ["claude-fable", "codex-astra", "antigravity-pro", "antigravity-oss"].map((m) => [m, leaky("cli_crashed")])) });
     const err = (await run(none.council.deliberate(QUESTION, { source: "http" }))).find((e) => e.type === "error");
     expect(err?.detail).toContain("no member answered");
     expect(err?.detail).not.toContain(SENTINEL);
@@ -416,7 +416,7 @@ describe("Council", () => {
   it("reports the failure a client can act on, not the one whose seat comes first", async () => {
     const p = panel({ overrides: {
       "codex-astra": fail("rate_limited", "model", 1200), "codex-sol": fail("rate_limited", "model", 1200),
-      "agy-pro": fail("cli_crashed"), "agy-oss": fail("cli_crashed"),
+      "antigravity-pro": fail("cli_crashed"), "antigravity-oss": fail("cli_crashed"),
     } });
     // The anthropic seat is the first declared and is empty by state, which
     // would speak as model_unavailable: a 404 with no Retry-After, for a panel
@@ -491,7 +491,7 @@ describe("Council", () => {
     const p = panel();
     p.claude.delayMs = 40;
     p.codex.delayMs = 40;
-    p.agy.delayMs = 40;
+    p.antigravity.delayMs = 40;
     const ac = new AbortController();
     const events: CouncilEvent[] = [];
     for await (const ev of p.council.deliberate(QUESTION, { source: "http", signal: ac.signal })) {
@@ -509,29 +509,29 @@ describe("a busy provider", () => {
   const BUSY: ProviderEvent[] = [{ type: "error", kind: "busy", detail: "UNAVAILABLE (code 503): No capacity available for model gpt-oss-120b-medium on the server" }];
 
   it("is waited out in place, and the seat keeps the model it was given", async () => {
-    // The capture that named the kind: `agy-oss` answered 503 during the first
+    // The capture that named the kind: `antigravity-oss` answered 503 during the first
     // real deliberation. The model was not refused, the provider's server was
     // full, so stepping down the chain would move to another model of the same
     // provider and buy nothing.
     let asked = 0;
-    const p = panel({ overrides: { "agy-oss": () => (++asked === 1 ? BUSY : [{ type: "text", delta: ANSWERS["agy-oss"] }, { type: "done", usage: { input: 10, output: 2 } }]) } });
+    const p = panel({ overrides: { "antigravity-oss": () => (++asked === 1 ? BUSY : [{ type: "text", delta: ANSWERS["antigravity-oss"] }, { type: "done", usage: { input: 10, output: 2 } }]) } });
     const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
     const done = events.find((e) => e.type === "done")!;
     expect(done.detail.lost).toEqual([]);
-    expect(done.detail.members.map((m) => m.model)).toContain("agy-oss");
+    expect(done.detail.members.map((m) => m.model)).toContain("antigravity-oss");
     // Asked twice, and the second time the same model: no fallback recorded.
     expect(asked).toBeGreaterThanOrEqual(2);
-    expect(done.detail.members.find((m) => m.model === "agy-oss")!.fellBackFrom).toBeUndefined();
+    expect(done.detail.members.find((m) => m.model === "antigravity-oss")!.fellBackFrom).toBeUndefined();
   });
 
   it("loses the seat when the wait does not help, without stepping down", async () => {
-    const p = panel({ overrides: { "agy-oss": BUSY } });
+    const p = panel({ overrides: { "antigravity-oss": BUSY } });
     const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
     const done = events.find((e) => e.type === "done")!;
-    expect(done.detail.lost).toEqual([{ family: "open-weights", model: "agy-oss", reason: "busy" }]);
+    expect(done.detail.lost).toEqual([{ family: "open-weights", model: "antigravity-oss", reason: "busy" }]);
     // The provider is untouched: a full server says nothing about the quota,
     // so its other seat keeps answering and no pause was installed.
-    expect(p.core.providerStates().find((x) => x.id === "agy")).toMatchObject({ pausedUntil: null, strikes: 0 });
-    expect(done.detail.members.map((m) => m.model)).toContain("agy-pro");
+    expect(p.core.providerStates().find((x) => x.id === "antigravity")).toMatchObject({ pausedUntil: null, strikes: 0 });
+    expect(done.detail.members.map((m) => m.model)).toContain("antigravity-pro");
   });
 });

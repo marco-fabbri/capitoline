@@ -287,13 +287,13 @@ describe("prompts", () => {
   });
 
   it("keeps the judge blind by default: no model name reaches it even when the identities are known", () => {
-    const identities = new Map([["Response A", "claude-opus"], ["Response B", "codex-gpt-6-astra"], ["Response C", "agy-gemini-pro"]]);
+    const identities = new Map([["Response A", "claude-opus"], ["Response B", "codex-gpt-6-astra"], ["Response C", "antigravity-gemini-pro"]]);
     const blind = synthesisPrompt(QUESTION, ANSWERS, AGG, true, identities);
     for (const model of identities.values()) expect(blind).not.toContain(model);
   });
 
   it("names the models to an un-blinded judge", () => {
-    const identities = new Map([["Response A", "claude-opus"], ["Response B", "codex-gpt-6-astra"], ["Response C", "agy-gemini-pro"]]);
+    const identities = new Map([["Response A", "claude-opus"], ["Response B", "codex-gpt-6-astra"], ["Response C", "antigravity-gemini-pro"]]);
     const open = synthesisPrompt(QUESTION, ANSWERS, AGG, false, identities);
     for (const model of identities.values()) expect(open).toContain(model);
     expect(open).toContain("Response A");

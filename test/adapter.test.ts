@@ -78,18 +78,18 @@ describe("modelSpecs", () => {
     const agy = loadConfig("config/capitoline.yaml").providers.antigravity;
     const specs = modelSpecs("antigravity", agy);
     expect(specs.map((s) => s.name)).toEqual(Object.keys(agy.models));
-    expect(specs.find((s) => s.name === "agy-gemini-flash")).toEqual({
-      name: "agy-gemini-flash", provider: "antigravity", cliModel: "gemini-3.8-flash",
+    expect(specs.find((s) => s.name === "antigravity-gemini-flash")).toEqual({
+      name: "antigravity-gemini-flash", provider: "antigravity", cliModel: "gemini-3.8-flash",
       effortSuffix: true, efforts: undefined, kind: "text", timeoutS: undefined,
     });
     // The two per-model overrides with consequences: `kind` decides which
     // endpoint may route to the model at all, and `timeout_s` is the only
     // thing keeping an image run from inheriting the provider's 600 s.
-    expect(specs.find((s) => s.name === "agy-image")).toEqual({
-      name: "agy-image", provider: "antigravity", cliModel: "gemini-3.8-flash-low",
+    expect(specs.find((s) => s.name === "antigravity-image")).toEqual({
+      name: "antigravity-image", provider: "antigravity", cliModel: "gemini-3.8-flash-low",
       effortSuffix: false, efforts: undefined, kind: "image", timeoutS: 240,
     });
-    expect(specs.find((s) => s.name === "agy-gemini-pro")!.efforts).toEqual(["low", "high"]);
+    expect(specs.find((s) => s.name === "antigravity-gemini-pro")!.efforts).toEqual(["low", "high"]);
   });
   it("stamps the provider id it was given, not one read from the file", () => {
     // The id is the registry key, and it is what Core pauses and what the

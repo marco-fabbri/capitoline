@@ -91,8 +91,8 @@ interface Virtual { run: VirtualRun; availability?: VirtualAvailability }
  * The kind is part of it because the two quotas are different pools, measured
  * so (`docs/spike-2026-09.md` §8): Antigravity's image generation has its own
  * 12-per-5-hours and 58-per-7-days windows, and its text models answer from
- * another allowance entirely. One id sits in both — `agy-image` and
- * `agy-gemini-flash-low` are both `gemini-3.8-flash-low` — so a pause keyed by
+ * another allowance entirely. One id sits in both — `antigravity-image` and
+ * `antigravity-gemini-flash-low` are both `gemini-3.8-flash-low` — so a pause keyed by
  * the id alone let an exhausted image quota take a working text model down
  * with it, and with it the third rung of `capitoline-gemini` (observed in
  * production 2026-09-23, the first restart after the pause key moved onto the
@@ -631,7 +631,7 @@ export class Core {
         // scope they mean, and rewritten in the store, so the translation
         // happens once and the next start finds the current shape.
         //
-        //   before 2026-09-22  the gateway name        `agy-image`
+        //   before 2026-09-22  the gateway name        `antigravity-image`
         //   2026-09-22         the bare CLI id         `gemini-3.8-flash-low`
         //   since 2026-09-23   the scope               `image:gemini-3.8-flash-low`
         //

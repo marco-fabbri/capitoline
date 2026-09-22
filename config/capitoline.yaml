@@ -133,54 +133,54 @@ providers:
     concurrency: 3
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
-    health_model: agy-gemini-flash
+    health_model: antigravity-gemini-flash
     models:
       # effort is part of the model id: <base>-<effort>
-      agy-gemini-flash:     { cli_model: gemini-3.8-flash, effort_suffix: true }
-      agy-gemini-3.7-flash: { cli_model: gemini-3.7-flash, effort_suffix: true }
-      agy-gemini-3.6-flash: { cli_model: gemini-3.6-flash, effort_suffix: true }
-      agy-gemini-pro:       { cli_model: gemini-3.1-pro,   effort_suffix: true, efforts: [low, high] }
+      antigravity-gemini-flash:     { cli_model: gemini-3.8-flash, effort_suffix: true }
+      antigravity-gemini-3.7-flash: { cli_model: gemini-3.7-flash, effort_suffix: true }
+      antigravity-gemini-3.6-flash: { cli_model: gemini-3.6-flash, effort_suffix: true }
+      antigravity-gemini-pro:       { cli_model: gemini-3.1-pro,   effort_suffix: true, efforts: [low, high] }
       # The three rungs of capitoline-gemini. The reasoning level is part of
       # the id here and not a request-time choice (effort_suffix: false), which
-      # is what makes a seat a rung: `agy-gemini-pro` above answers at whatever
-      # effort the request asks for, while `agy-gemini-pro-high` is one fixed
+      # is what makes a seat a rung: `antigravity-gemini-pro` above answers at whatever
+      # effort the request asks for, while `antigravity-gemini-pro-high` is one fixed
       # point on the ladder. Every id is one `agy models` lists.
       #
       # These three are aliases: every one of their CLI ids is already
-      # reachable under another name in this table. `agy-gemini-pro`
+      # reachable under another name in this table. `antigravity-gemini-pro`
       # at the default effort resolves to gemini-3.1-pro-high (efforts
-      # [low, high], and the medium tie breaks upward), `agy-gemini-flash` at
-      # high to gemini-3.8-flash-high, and `agy-image` already carries
+      # [low, high], and the medium tie breaks upward), `antigravity-gemini-flash` at
+      # high to gemini-3.8-flash-high, and `antigravity-image` already carries
       # gemini-3.8-flash-low. That costs nothing: a model pause is keyed by
       # the id the CLI was actually given, so a refusal on any one of these
       # names darkens every other name that resolves to the same model.
-      agy-gemini-pro-high:   { cli_model: gemini-3.1-pro-high,   effort_suffix: false }
-      agy-gemini-flash-high: { cli_model: gemini-3.8-flash-high, effort_suffix: false }
-      agy-gemini-flash-low:  { cli_model: gemini-3.8-flash-low,  effort_suffix: false }
+      antigravity-gemini-pro-high:   { cli_model: gemini-3.1-pro-high,   effort_suffix: false }
+      antigravity-gemini-flash-high: { cli_model: gemini-3.8-flash-high, effort_suffix: false }
+      antigravity-gemini-flash-low:  { cli_model: gemini-3.8-flash-low,  effort_suffix: false }
       # The council's open-weights seat. `agy models` lists this family at one
       # effort only (gpt-oss-120b-medium), so `efforts` pins it: with the
       # provider's whole table open, a request asking for `high` would build
       # the model id `gpt-oss-120b-high`, which the CLI does not know.
-      agy-gpt-oss:          { cli_model: gpt-oss-120b,     effort_suffix: true, efforts: [medium] }
-      agy-claude-sonnet:    { cli_model: claude-sonnet-4-6 }
-      agy-claude-opus:      { cli_model: claude-opus-4-6-thinking }
+      antigravity-gpt-oss:          { cli_model: gpt-oss-120b,     effort_suffix: true, efforts: [medium] }
+      antigravity-claude-sonnet:    { cli_model: claude-sonnet-4-6 }
+      antigravity-claude-opus:      { cli_model: claude-opus-4-6-thinking }
       # kind: image → served by /v1/images/generations and the generate_image MCP tool
-      agy-image:            { cli_model: gemini-3.8-flash-low, kind: image, timeout_s: 240 }
+      antigravity-image:            { cli_model: gemini-3.8-flash-low, kind: image, timeout_s: 240 }
       # The remaining fixed ids of `agy models`, each under a name of its own.
       # Every one is an alias: the effort-driven entries above already reach
       # them, at whatever level a request asks for. Naming them outright is
       # what lets a caller pin a rung instead of trusting the resolution — and
       # it costs nothing now that a model pause is keyed by the id the CLI was
       # given rather than by the gateway name (docs/backlog.md, Shipped).
-      agy-gemini-flash-medium:  { cli_model: gemini-3.8-flash-medium, effort_suffix: false }
-      agy-gemini-3.7-flash-high:   { cli_model: gemini-3.7-flash-high,   effort_suffix: false }
-      agy-gemini-3.7-flash-medium: { cli_model: gemini-3.7-flash-medium, effort_suffix: false }
-      agy-gemini-3.7-flash-low:    { cli_model: gemini-3.7-flash-low,    effort_suffix: false }
-      agy-gemini-3.6-flash-high:   { cli_model: gemini-3.6-flash-high,   effort_suffix: false }
-      agy-gemini-3.6-flash-medium: { cli_model: gemini-3.6-flash-medium, effort_suffix: false }
-      agy-gemini-3.6-flash-low:    { cli_model: gemini-3.6-flash-low,    effort_suffix: false }
-      agy-gemini-pro-low:          { cli_model: gemini-3.1-pro-low,      effort_suffix: false }
-      # gpt-oss-120b-medium is not repeated here: `agy-gpt-oss` above is pinned
+      antigravity-gemini-flash-medium:  { cli_model: gemini-3.8-flash-medium, effort_suffix: false }
+      antigravity-gemini-3.7-flash-high:   { cli_model: gemini-3.7-flash-high,   effort_suffix: false }
+      antigravity-gemini-3.7-flash-medium: { cli_model: gemini-3.7-flash-medium, effort_suffix: false }
+      antigravity-gemini-3.7-flash-low:    { cli_model: gemini-3.7-flash-low,    effort_suffix: false }
+      antigravity-gemini-3.6-flash-high:   { cli_model: gemini-3.6-flash-high,   effort_suffix: false }
+      antigravity-gemini-3.6-flash-medium: { cli_model: gemini-3.6-flash-medium, effort_suffix: false }
+      antigravity-gemini-3.6-flash-low:    { cli_model: gemini-3.6-flash-low,    effort_suffix: false }
+      antigravity-gemini-pro-low:          { cli_model: gemini-3.1-pro-low,      effort_suffix: false }
+      # gpt-oss-120b-medium is not repeated here: `antigravity-gpt-oss` above is pinned
       # to the one level the family serves, so it is already the fixed rung.
     effort: { low: low, medium: medium, high: high }
     model_flag: --model
@@ -217,7 +217,7 @@ providers:
 # one model at a time (on 2026-09-21 Fable was refused while the same
 # subscription answered on Opus), and one seat per family is what buys
 # independent judgment, because models of one lineage share their blind spots
-# and rank each other's failures highly. `agy-claude-*` is deliberately not
+# and rank each other's failures highly. `antigravity-claude-*` is deliberately not
 # seated: it is the same opinion as the Anthropic seat, through another channel.
 #
 # The three prompts are not here. They are the strategy itself, not a CLI
@@ -228,8 +228,8 @@ council:
     seats:
       - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-5.5] }
-      - { family: google,       models: [agy-gemini-pro, agy-gemini-flash] }
-      - { family: open-weights, models: [agy-gpt-oss] }
+      - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
+      - { family: open-weights, models: [antigravity-gpt-oss] }
     # Every model here but the first sits in no seat of this council, and that
     # is the whole design of the chain. Measured 2026-09-23: the previous one
     # named the top model of each family, and *every* one of its five entries
@@ -245,7 +245,7 @@ council:
     # the anthropic seat takes claude-fable, as it does whenever Fable has
     # quota, this is free and it is the strongest model on the table. When
     # Fable is out the seat takes it instead, and the chain falls to
-    # agy-claude-opus — Claude Opus 4.6 through the Google subscription, in no
+    # antigravity-claude-opus — Claude Opus 4.6 through the Google subscription, in no
     # seat of any council, spending neither the Anthropic weekly window nor the
     # Codex allowance that becomes a Plus allowance in October. So the good day
     # is judged by the best model and the bad day by a strong one, which is the
@@ -255,7 +255,7 @@ council:
     # are the same model as a seated one with a wider context, so a judge
     # seated there would be weighing its own answer, which is exactly what
     # judge_allow_member: false exists to prevent.
-    judge: { family: best-available, models: [claude-opus, agy-claude-opus, codex-gpt-6-sol, codex-gpt-5.6-terra] }
+    judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6-sol, codex-gpt-5.6-terra] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to rank
@@ -279,9 +279,9 @@ council:
     seats:
       - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-5.5] }
-      - { family: google,       models: [agy-gemini-pro, agy-gemini-flash] }
-      - { family: open-weights, models: [agy-gpt-oss] }
-    judge: { family: best-available, models: [claude-opus, agy-claude-opus, codex-gpt-6-sol, codex-gpt-5.6-terra] }
+      - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
+      - { family: open-weights, models: [antigravity-gpt-oss] }
+    judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6-sol, codex-gpt-5.6-terra] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to synthesize
@@ -316,9 +316,9 @@ council:
       # stops being the rung whose capability was being measured, and the
       # deliberation would report a ladder it never ran. A rung the state
       # refuses is a lost seat and is declared as one (design §12.5).
-      - { family: pro-high,   models: [agy-gemini-pro-high] }
-      - { family: flash-high, models: [agy-gemini-flash-high] }
-      - { family: flash-low,  models: [agy-gemini-flash-low] }
+      - { family: pro-high,   models: [antigravity-gemini-pro-high] }
+      - { family: flash-high, models: [antigravity-gemini-flash-high] }
+      - { family: flash-low,  models: [antigravity-gemini-flash-low] }
     # The judge is no rung, and no Gemini at all: the ladder under test must
     # not synthesize its own measurement. With judge_allow_member: false it must be one no
     # member can take, which these Gemini seats never could.

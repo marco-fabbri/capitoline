@@ -135,7 +135,7 @@ the path moves to free-tier or self-hosted inference instead.
 
 ## Rule for this project
 
-1. **Subscription providers (`claude-*`, `codex-*`, `agy-*`) serve the owner
+1. **Subscription providers (`claude-*`, `codex-*`, `antigravity-*`) serve the owner
    and the owner's own software**: Claude Code via MCP, Open WebUI, the
    owner's scripts, the council the owner asks, and the applications listed in
    `docs/clients.md`. Volumes stay "ordinary, individual".

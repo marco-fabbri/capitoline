@@ -163,7 +163,7 @@ describe("CliProvider.generateImage", () => {
   // The 429 fixture was captured on 2026-09-21; with a fixed clock the wait is the
   // captured delay, not whatever is left until the reset at the time the test runs.
   const NOW = Date.parse("2026-09-21T12:00:00Z");
-  const imageReq: ImageRequest = { model: "agy-image", prompt: "a lighthouse on a cliff at dawn, watercolour" };
+  const imageReq: ImageRequest = { model: "antigravity-image", prompt: "a lighthouse on a cliff at dawn, watercolour" };
 
   function imageProvider(fixture: string, extra: Partial<typeof agy> = {}, r: Runner = runner, opts = {}, mode = "replay", adapter: Adapter = antigravityAdapter) {
     const cfg = { ...agy, binary: FAKE, args: ["--mode", mode, "--file", fixture], timeout_s: 1, image: { ...agy.image, collect: [COLLECT] }, ...extra };
@@ -171,7 +171,7 @@ describe("CliProvider.generateImage", () => {
   }
   async function generate(p: CliProvider, signal?: AbortSignal, timeoutS?: number) {
     const out: ProviderEvent[] = [];
-    const m = { ...p.models().find((x) => x.name === "agy-image")!, timeoutS };
+    const m = { ...p.models().find((x) => x.name === "antigravity-image")!, timeoutS };
     for await (const e of p.generateImage!(imageReq, m, signal)) out.push(e);
     return out;
   }
@@ -378,7 +378,7 @@ describe("buildProviders", () => {
   it("copies kind and timeoutS into the model specs", () => {
     const ps = buildProviders(config, runner, createLogger("t"));
     const agy = ps.find((p) => p.id === "antigravity")!;
-    expect(agy.models().find((m) => m.name === "agy-image")).toMatchObject({ kind: "image", timeoutS: 240 });
-    expect(agy.models().find((m) => m.name === "agy-gemini-flash")).toMatchObject({ kind: "text", timeoutS: undefined });
+    expect(agy.models().find((m) => m.name === "antigravity-image")).toMatchObject({ kind: "image", timeoutS: 240 });
+    expect(agy.models().find((m) => m.name === "antigravity-gemini-flash")).toMatchObject({ kind: "text", timeoutS: undefined });
   });
 });

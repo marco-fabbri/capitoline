@@ -13,7 +13,7 @@ official Claude Code, Codex and Gemini CLIs, authenticated with the
 subscriptions of whoever hosts it. Three voices, one endpoint.
 
 You can give the floor to a single member: `claude-opus`,
-`codex-gpt-6-astra`, `agy-gemini-pro`, or any other model the three CLIs
+`codex-gpt-6-astra`, `antigravity-gemini-pro`, or any other model the three CLIs
 serve, since every one of them is exposed by name. Or the `capitoline` model convenes the
 Triad: every member answers, every member judges the others without knowing
 who wrote what, and a judge synthesizes. As in the Temple, the value is not
@@ -53,6 +53,8 @@ Three councils are configured, and a client asks for any of them the same way: i
 | `capitoline` | the reference panel: four families — Anthropic, OpenAI, Google, open weights — answer, rank each other blind, and a judge seated apart synthesizes. The shape to ask when the panel's own verdict on its answers is worth its price | 9 |
 | `capitoline-fast` | the same four families and the same judge, without the ranking stage (`ranking: false`): four independent perspectives and a synthesis for half the price, and no panel verdict on them. The everyday shape. The response carries an empty `rankings` and `aggregate` and says which shape ran, so a fast deliberation is never read as one whose rankings all failed | 5 |
 | `capitoline-gemini` | one capability ladder rather than a panel: a single family at three reasoning levels — `gemini-3.1-pro-high`, `gemini-3.8-flash-high`, `gemini-3.8-flash-low`, the big model, the small one trying and the small one not trying — ranking each other blind and judged from another family. It answers "how far down can I go", not "which answer is best": if the three rungs agree, the cheapest of them would have sufficed. A measuring instrument to run over a sample of real questions, not a daily mode, and it refuses rather than run with a rung missing | 7 |
+
+A single model is named `<door>-<model>`: the door is the CLI the request goes through (`claude`, `codex`, `antigravity`), the model is what that door calls it. `antigravity-claude-opus` is Claude Opus through Antigravity and `claude-opus` is the same lineage through Claude Code, on a different subscription with a different quota, which is the distinction the prefix exists to draw.
 
 After the `capitoline-` prefix a **shape word** says how the council deliberates (`-fast`), a **family name** says who sits (`-gemini`, later `-claude`, `-openai`), and a **number** is a new version of the same shape (`-2`); `capitoline` alone stays the reference panel. A fourth council is configuration and a restart — other seats, another judge, a different quorum or deadline — and only a change to the *sequence* of stages needs the engine (spec §12.9).
 

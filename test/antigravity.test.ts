@@ -8,33 +8,33 @@ import type { AdapterEvent } from "../src/core/types.js";
 
 const cfg = loadConfig("config/capitoline.yaml").providers.antigravity;
 const models = modelSpecs("antigravity", cfg);
-const flash = models.find((m) => m.name === "agy-gemini-flash")!;
-const pro = models.find((m) => m.name === "agy-gemini-pro")!;
-const opus = models.find((m) => m.name === "agy-claude-opus")!;
+const flash = models.find((m) => m.name === "antigravity-gemini-flash")!;
+const pro = models.find((m) => m.name === "antigravity-gemini-pro")!;
+const opus = models.find((m) => m.name === "antigravity-claude-opus")!;
 async function* linesOf(path: string) { for (const l of readFileSync(path, "utf8").split("\n")) yield l; }
 async function events(src: AsyncIterable<string>) { const out: AdapterEvent[] = []; for await (const e of antigravityAdapter.parse(src)) out.push(e); return out; }
 
 describe("antigravity adapter", () => {
   it("encodes effort in the model id and sends the prompt as an NDJSON user event", () => {
-    const c = antigravityAdapter.buildCommand(cfg, flash, { model: "agy-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
+    const c = antigravityAdapter.buildCommand(cfg, flash, { model: "antigravity-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
     expect(c.args[c.args.indexOf("--model") + 1]).toBe("gemini-3.8-flash-high");
     expect(JSON.parse(c.stdin.trim())).toEqual({ event: "user", message: { role: "user", content: "q" } });
     expect(c.stdin.endsWith("\n")).toBe(true);
   });
   it("approximates a missing effort level to the nearest allowed one", () => {
-    const c = antigravityAdapter.buildCommand(cfg, pro, { model: "agy-gemini-pro", stream: true, effort: "medium", messages: [{ role: "user", text: "q" }] });
+    const c = antigravityAdapter.buildCommand(cfg, pro, { model: "antigravity-gemini-pro", stream: true, effort: "medium", messages: [{ role: "user", text: "q" }] });
     expect(c.args[c.args.indexOf("--model") + 1]).toBe("gemini-3.1-pro-high");
   });
   it("leaves the id alone for models without an effort suffix and prepends the system prompt", () => {
-    const c = antigravityAdapter.buildCommand(cfg, opus, { model: "agy-claude-opus", stream: true, messages: [{ role: "system", text: "S" }, { role: "user", text: "q" }] });
+    const c = antigravityAdapter.buildCommand(cfg, opus, { model: "antigravity-claude-opus", stream: true, messages: [{ role: "system", text: "S" }, { role: "user", text: "q" }] });
     expect(c.args[c.args.indexOf("--model") + 1]).toBe("claude-opus-4-6-thinking");
     expect(JSON.parse(c.stdin).message.content).toBe("System instructions:\nS\n\nq");
   });
   it("builds an image command with the image args, no effort suffix and a fixed tool prompt", () => {
-    const image = models.find((m) => m.name === "agy-image")!;
+    const image = models.find((m) => m.name === "antigravity-image")!;
     // The repo config declares no image.args: give some, so their absence would be noticed.
     const withArgs = { ...cfg, image: { ...cfg.image, args: ["--image-flag"] } };
-    const c = antigravityAdapter.buildImageCommand!(withArgs, image, { model: "agy-image", prompt: "a red bicycle" });
+    const c = antigravityAdapter.buildImageCommand!(withArgs, image, { model: "antigravity-image", prompt: "a red bicycle" });
     expect(c.args).toEqual([...cfg.args, "--image-flag", "--model", "gemini-3.8-flash-low"]);
     expect(c.args).not.toContain("gemini-3.8-flash-low-low"); // image models never get the effort suffix
     const msg = JSON.parse(c.stdin.trim());
@@ -53,22 +53,22 @@ describe("antigravity adapter", () => {
     // config declares no effort flag: the adapter must then add none.
     expect([cfg.model_flag, cfg.effort_flag, cfg.effort_key]).toEqual(["--model", null, null]);
     const renamed = { ...cfg, model_flag: "--model-id" };
-    const c = antigravityAdapter.buildCommand(renamed, flash, { model: "agy-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
+    const c = antigravityAdapter.buildCommand(renamed, flash, { model: "antigravity-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
     expect(c.args.slice(cfg.args.length)).toEqual(["--model-id", "gemini-3.8-flash-high"]);
-    const image = models.find((m) => m.name === "agy-image")!;
-    const ci = antigravityAdapter.buildImageCommand!(renamed, image, { model: "agy-image", prompt: "a red bicycle" });
+    const image = models.find((m) => m.name === "antigravity-image")!;
+    const ci = antigravityAdapter.buildImageCommand!(renamed, image, { model: "antigravity-image", prompt: "a red bicycle" });
     expect(ci.args.slice(cfg.args.length)).toEqual(["--model-id", "gemini-3.8-flash-low"]);
   });
   it("adds the effort flag as well when the provider declares one", () => {
     const withFlag = { ...cfg, effort_flag: "--effort" };
-    const c = antigravityAdapter.buildCommand(withFlag, opus, { model: "agy-claude-opus", stream: true, effort: "low", messages: [{ role: "user", text: "q" }] });
+    const c = antigravityAdapter.buildCommand(withFlag, opus, { model: "antigravity-claude-opus", stream: true, effort: "low", messages: [{ role: "user", text: "q" }] });
     expect(c.args.slice(cfg.args.length)).toEqual(["--model", "claude-opus-4-6-thinking", "--effort", "low"]);
   });
   it("leaves a suffixed model with one carrier of the effort even when a flag is declared", () => {
     // The level is already inside the model id, so the flag added to the file
     // must not repeat it: the id keeps "-high" and nothing else is appended.
     const withFlag = { ...cfg, effort_flag: "--effort" };
-    const c = antigravityAdapter.buildCommand(withFlag, flash, { model: "agy-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
+    const c = antigravityAdapter.buildCommand(withFlag, flash, { model: "antigravity-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
     expect(c.args.slice(cfg.args.length)).toEqual(["--model", "gemini-3.8-flash-high"]);
   });
   it("parses stream-json into text deltas and done with usage", async () => {
@@ -229,12 +229,12 @@ describe("antigravity adapter", () => {
     // stream-json or --sandbox from the adapter would have left every other
     // test here green while the real CLI stopped reading the NDJSON prompt and
     // lost its sandbox. The count is asserted too, so a stray argument fails.
-    const c = antigravityAdapter.buildCommand(cfg, flash, { model: "agy-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
+    const c = antigravityAdapter.buildCommand(cfg, flash, { model: "antigravity-gemini-flash", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
     expect(c.args.slice(0, cfg.args.length)).toEqual(cfg.args);
     expect(c.args).toHaveLength(cfg.args.length + 2);   // <model_flag> <id>; this provider declares no effort flag
-    const image = models.find((m) => m.name === "agy-image")!;
+    const image = models.find((m) => m.name === "antigravity-image")!;
     const withArgs = { ...cfg, image: { ...cfg.image, args: ["--image-flag"] } };
-    const ci = antigravityAdapter.buildImageCommand!(withArgs, image, { model: "agy-image", prompt: "a red bicycle" });
+    const ci = antigravityAdapter.buildImageCommand!(withArgs, image, { model: "antigravity-image", prompt: "a red bicycle" });
     expect(ci.args.slice(0, cfg.args.length)).toEqual(cfg.args);
     expect(ci.args).toHaveLength(cfg.args.length + 1 + 2);   // then image.args, then <model_flag> <id>
   });

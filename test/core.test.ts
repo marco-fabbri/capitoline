@@ -110,11 +110,11 @@ describe("Core", () => {
   });
   it("darkens every gateway name of a refused model, not the one that called", async () => {
     // Since the ladder shipped, two names resolve to one CLI id:
-    // `agy-gemini-pro` at the default effort *is* `gemini-3.1-pro-high`, which
-    // `agy-gemini-pro-high` names outright. Keyed by the gateway name, the
+    // `antigravity-gemini-pro` at the default effort *is* `gemini-3.1-pro-high`, which
+    // `antigravity-gemini-pro-high` names outright. Keyed by the gateway name, the
     // second alias spent a call rediscovering the same exhausted model.
     let t = 1_000_000;
-    const p = new FakeProvider("agy", ["pro", "pro-high", "flash"], OK, 2);
+    const p = new FakeProvider("antigravity", ["pro", "pro-high", "flash"], OK, 2);
     p.aliases = { pro: "gemini-3.1-pro-high", "pro-high": "gemini-3.1-pro-high" };
     const core = new Core([p], new UsageStore(":memory:"), { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
     p.script = [{ type: "error", kind: "rate_limited", detail: "reached your limit", scope: "model", retryAfterS: 3600 }];
@@ -133,20 +133,20 @@ describe("Core", () => {
     // And one success on either name clears it for both.
     t += 3_661_000;
     expect(await drain(core.execute(req("pro-high"), { source: "http" }))).toEqual(OK);
-    expect(core.pauseRemainingS("agy", "pro")).toBeUndefined();
+    expect(core.pauseRemainingS("antigravity", "pro")).toBeUndefined();
   });
   it("keeps one provider's pause off another provider serving an id of the same name", async () => {
     // `claude-sonnet-4-6` is served by Anthropic and by Antigravity, on two
     // different subscriptions: the provider is part of the key for this reason.
     const t = 1_000_000;
     const anthropic = new FakeProvider("claude", ["sonnet"], OK, 1);
-    const google = new FakeProvider("agy", ["agy-sonnet"], OK, 1);
+    const google = new FakeProvider("antigravity", ["antigravity-sonnet"], OK, 1);
     anthropic.aliases = { sonnet: "claude-sonnet-4-6" };
-    google.aliases = { "agy-sonnet": "claude-sonnet-4-6" };
+    google.aliases = { "antigravity-sonnet": "claude-sonnet-4-6" };
     const core = new Core([anthropic, google], new UsageStore(":memory:"), { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
     anthropic.script = [{ type: "error", kind: "rate_limited", detail: "reached your limit", scope: "model" }];
     await drain(core.execute(req("sonnet"), { source: "http" }));
-    expect(core.listModels().map((m) => [m.name, m.available])).toEqual([["sonnet", false], ["agy-sonnet", true]]);
+    expect(core.listModels().map((m) => [m.name, m.available])).toEqual([["sonnet", false], ["antigravity-sonnet", true]]);
   });
   it("translates a pause row an older build wrote under the gateway name", async () => {
     // The column holds a CLI id since the key moved off the gateway name
@@ -156,12 +156,12 @@ describe("Core", () => {
     // quota of 58 to rediscover a refusal that was written in the table.
     const t = 1_000_000;
     const usage = new UsageStore(":memory:");
-    usage.setPause("agy", "pro", t + 3_600_000, 2, t);              // the old, gateway-name shape
-    const p = new FakeProvider("agy", ["pro", "flash"], OK, 1);
+    usage.setPause("antigravity", "pro", t + 3_600_000, 2, t);              // the old, gateway-name shape
+    const p = new FakeProvider("antigravity", ["pro", "flash"], OK, 1);
     p.aliases = { pro: "gemini-3.1-pro-high" };
     const core = new Core([p], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
     core.restorePauses();
-    expect(core.pauseRemainingS("agy", "pro")).toBe(3600);
+    expect(core.pauseRemainingS("antigravity", "pro")).toBe(3600);
     expect(core.listModels()).toEqual([
       expect.objectContaining({ name: "pro", available: false, reason: "rate_limited" }),
       expect.objectContaining({ name: "flash", available: true }),
@@ -169,13 +169,13 @@ describe("Core", () => {
     // Rewritten in the store under the id, with its strikes, so the next start
     // finds the new shape and the translation runs once.
     // The column holds a scope: the CLI id qualified by the kind of request.
-    expect(usage.pauses(t)).toEqual([{ provider: "agy", model: "text:gemini-3.1-pro-high", until: t + 3_600_000, strikes: 2 }]);
+    expect(usage.pauses(t)).toEqual([{ provider: "antigravity", model: "text:gemini-3.1-pro-high", until: t + 3_600_000, strikes: 2 }]);
   });
   it("drops a restored pause whose row names neither a CLI id nor a model still declared", async () => {
     const t = 1_000_000;
     const usage = new UsageStore(":memory:");
-    usage.setPause("agy", "a-model-that-was-removed", t + 3_600_000, 1, t);
-    const p = new FakeProvider("agy", ["pro"], OK, 1);
+    usage.setPause("antigravity", "a-model-that-was-removed", t + 3_600_000, 1, t);
+    const p = new FakeProvider("antigravity", ["pro"], OK, 1);
     p.aliases = { pro: "gemini-3.1-pro-high" };
     const core = new Core([p], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
     core.restorePauses();
@@ -492,7 +492,7 @@ function makeImages(opts: { now?: () => number; imageQuotas?: Record<string, num
 
 describe("Core images", () => {
   it("does not take a text model down with an exhausted image quota on the same id", async () => {
-    // `agy-image` and `agy-gemini-flash-low` are one CLI id,
+    // `antigravity-image` and `antigravity-gemini-flash-low` are one CLI id,
     // `gemini-3.8-flash-low`, and two different quotas: image generation has
     // its own 12-per-5-hours and 58-per-7-days windows while the text models
     // answer from another allowance (spike §8). Keyed by the id alone, the

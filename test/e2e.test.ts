@@ -44,7 +44,7 @@ describe("end to end with fake CLIs", () => {
       expect(data.find((m) => m.id === name), name).toMatchObject({ owned_by: "capitoline", capitoline: { kind: "council" } });
     }
   });
-  it.each([["claude-opus", "ok"], ["codex-gpt-5.5", "OK"], ["agy-gemini-flash", "ok ok\n"]])("answers through %s", async (model, expected) => {
+  it.each([["claude-opus", "ok"], ["codex-gpt-5.5", "OK"], ["antigravity-gemini-flash", "ok ok\n"]])("answers through %s", async (model, expected) => {
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }] }),
@@ -92,11 +92,11 @@ describe("end to end with fake CLIs", () => {
     // The configured quota travelled from the YAML through main.ts into Core:
     // a wrong provider key there would leave this null with every unit test
     // still green.
-    expect(data.find((m) => m.id === "agy-image")!.capitoline.quota).toEqual({ used: 0, limit: 12, window_started_at: null });
-    expect(kinds["agy-image"]).toBe("image");
-    expect(kinds["agy-gemini-3.7-flash"]).toBe("text");
-    expect(kinds["agy-gemini-3.6-flash"]).toBe("text");
-    expect(kinds["agy-gemini-flash"]).toBe("text");
+    expect(data.find((m) => m.id === "antigravity-image")!.capitoline.quota).toEqual({ used: 0, limit: 12, window_started_at: null });
+    expect(kinds["antigravity-image"]).toBe("image");
+    expect(kinds["antigravity-gemini-3.7-flash"]).toBe("text");
+    expect(kinds["antigravity-gemini-3.6-flash"]).toBe("text");
+    expect(kinds["antigravity-gemini-flash"]).toBe("text");
   });
 });
 
@@ -147,7 +147,7 @@ describe("image generation end to end", () => {
     // Exact, not partial: no provider detail (stderr, conversation id, host
     // paths) may leak into the response, here or in the body's top level.
     expect(body.capitoline).toEqual({
-      provider: "antigravity", model: "agy-image", mime: "image/jpeg", width: 1376, height: 768, bytes: SAMPLE.length, ignored: [],
+      provider: "antigravity", model: "antigravity-image", mime: "image/jpeg", width: 1376, height: 768, bytes: SAMPLE.length, ignored: [],
     });
     expect(Object.keys(body).sort()).toEqual(["capitoline", "created", "data"]);
   });
@@ -157,7 +157,7 @@ describe("image generation end to end", () => {
     expect(r.headers.get("x-capitoline-ignored")).toBe("size");
   });
   it("refuses an image request against a text model", async () => {
-    const r = await post({ model: "agy-gemini-flash", prompt: "a lighthouse" });
+    const r = await post({ model: "antigravity-gemini-flash", prompt: "a lighthouse" });
     expect(r.status).toBe(400);
     // The message pins the refusal to the kind check in core, not to some other
     // bad_request (a zod rejection carries the same code).
@@ -165,7 +165,7 @@ describe("image generation end to end", () => {
       .toMatchObject({ error: { code: "bad_request", message: expect.stringContaining("use the chat endpoint") } });
   });
   it("refuses a chat request against the image model", async () => {
-    const r = await post({ model: "agy-image", messages: [{ role: "user", content: "hi" }] }, "/v1/chat/completions");
+    const r = await post({ model: "antigravity-image", messages: [{ role: "user", content: "hi" }] }, "/v1/chat/completions");
     expect(r.status).toBe(400);
     expect((await r.json()) as { error: { code: string; message: string } })
       .toMatchObject({ error: { code: "bad_request", message: expect.stringContaining("use the images endpoint") } });
@@ -230,8 +230,8 @@ describe("a council end to end", () => {
     expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
       ["anthropic", "claude-fable", ANSWERS.claude],
       ["openai", "codex-gpt-6-astra", ANSWERS.codex],
-      ["google", "agy-gemini-pro", ANSWERS.agy],
-      ["open-weights", "agy-gpt-oss", ANSWERS.agy],
+      ["google", "antigravity-gemini-pro", ANSWERS.agy],
+      ["open-weights", "antigravity-gpt-oss", ANSWERS.agy],
     ]);
     expect(d.members.every((m) => m.fellBackFrom === undefined)).toBe(true);
     expect(d.lost).toEqual([]);
@@ -239,7 +239,7 @@ describe("a council end to end", () => {
     // Every member ranked, and every ranking parsed: the four fake panels
     // answer stage 2 in JSON, so a reply the parser refused would show up
     // here as a missing vote rather than as an error nobody sees.
-    expect(d.rankings.map((x) => x.by).sort()).toEqual(["agy-gemini-pro", "agy-gpt-oss", "claude-fable", "codex-gpt-6-astra"]);
+    expect(d.rankings.map((x) => x.by).sort()).toEqual(["antigravity-gemini-pro", "antigravity-gpt-oss", "claude-fable", "codex-gpt-6-astra"]);
     // The aggregate of those four recorded ballots, best first. Exact, and it
     // can be: the recordings are fixed and the averages follow from them,
     // whichever seat each label fell to.
@@ -288,8 +288,8 @@ describe("a council end to end", () => {
     expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
       ["anthropic", "claude-fable", ANSWERS.claude],
       ["openai", "codex-gpt-6-astra", ANSWERS.codex],
-      ["google", "agy-gemini-pro", ANSWERS.agy],
-      ["open-weights", "agy-gpt-oss", ANSWERS.agy],
+      ["google", "antigravity-gemini-pro", ANSWERS.agy],
+      ["open-weights", "antigravity-gpt-oss", ANSWERS.agy],
     ]);
     expect(d.lost).toEqual([]);
     expect(d.members.map((m) => m.label).sort()).toEqual(["Response A", "Response B", "Response C", "Response D"]);
@@ -340,9 +340,9 @@ describe("a council end to end", () => {
     // reasoning level in its own id. All three answer what the same
     // subscription answers a direct request, since only the id differs.
     expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
-      ["pro-high", "agy-gemini-pro-high", ANSWERS.agy],
-      ["flash-high", "agy-gemini-flash-high", ANSWERS.agy],
-      ["flash-low", "agy-gemini-flash-low", ANSWERS.agy],
+      ["pro-high", "antigravity-gemini-pro-high", ANSWERS.agy],
+      ["flash-high", "antigravity-gemini-flash-high", ANSWERS.agy],
+      ["flash-low", "antigravity-gemini-flash-low", ANSWERS.agy],
     ]);
     // No chain on any rung, so a rung that failed could only be lost, never
     // replaced — and with min_members 3 a single loss would have ended the
@@ -354,7 +354,7 @@ describe("a council end to end", () => {
     // Three ballots cast and three parsed: stage 2 ran three `agy` processes
     // in parallel as stage 1 did, and a rung that had waited out the queue
     // would be missing from this list.
-    expect(d.rankings.map((x) => x.by).sort()).toEqual(["agy-gemini-flash-high", "agy-gemini-flash-low", "agy-gemini-pro-high"]);
+    expect(d.rankings.map((x) => x.by).sort()).toEqual(["antigravity-gemini-flash-high", "antigravity-gemini-flash-low", "antigravity-gemini-pro-high"]);
     expect(d.aggregate).toEqual([
       { label: "Response B", averageRank: 1, votes: 3 },
       { label: "Response A", averageRank: 2, votes: 3 },

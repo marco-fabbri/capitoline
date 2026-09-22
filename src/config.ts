@@ -318,7 +318,7 @@ export const ConfigSchema = z
       // weights on the same Antigravity subscription. The judge is not
       // counted: it is seated alone, after the members are done.
       for (const s of c.seats) {
-        // A chain can span providers (`claude-opus` and `agy-claude-opus`), and
+        // A chain can span providers (`claude-opus` and `antigravity-claude-opus`), and
         // any of them may end up serving the seat, so each needs the slot.
         const providers = new Set(s.models.map((m) => seen.get(m)).filter((pid): pid is string => pid !== undefined));
         for (const pid of providers) {

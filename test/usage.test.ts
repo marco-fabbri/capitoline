@@ -33,12 +33,12 @@ describe("UsageStore", () => {
     const s = new UsageStore(":memory:");
     const now = 1_000_000_000_000;
     const img = (ts: number, outcome: "ok" | "rate_limited") =>
-      s.record({ provider: "antigravity", model: "agy-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 20_000, outcome, source: "http", ts });
+      s.record({ provider: "antigravity", model: "antigravity-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 20_000, outcome, source: "http", ts });
     img(now - 6 * 3600_000, "ok");                 // before the window
     img(now - 4 * 3600_000, "ok");                 // the window opens here
     img(now - 1000, "ok");
     img(now - 500, "rate_limited");                // a failed generation costs no quota
-    s.record({ provider: "antigravity", model: "agy-gemini-flash", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now - 100 });
+    s.record({ provider: "antigravity", model: "antigravity-gemini-flash", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now - 100 });
     s.record({ provider: "other", model: "other-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 5, outcome: "ok", source: "http", ts: now - 100 });
     expect(s.imageWindow("antigravity", H5, now)).toEqual({ used: 2, windowStartedAt: now - 4 * 3600_000 });
     expect(s.imageWindow("antigravity", 2 * 3600_000, now)).toEqual({ used: 1, windowStartedAt: now - 1000 });
@@ -48,9 +48,9 @@ describe("UsageStore", () => {
   it("defaults the image window to five hours and the recorded kind to text", () => {
     const s = new UsageStore(":memory:");
     const now = Date.now();
-    s.record({ provider: "antigravity", model: "agy-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 5, outcome: "ok", source: "mcp", ts: now - 1000 });
-    s.record({ provider: "antigravity", model: "agy-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 5, outcome: "ok", source: "mcp", ts: now - 6 * 3600_000 });
-    s.record({ provider: "antigravity", model: "agy-gemini-flash", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now - 1000 });
+    s.record({ provider: "antigravity", model: "antigravity-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 5, outcome: "ok", source: "mcp", ts: now - 1000 });
+    s.record({ provider: "antigravity", model: "antigravity-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 5, outcome: "ok", source: "mcp", ts: now - 6 * 3600_000 });
+    s.record({ provider: "antigravity", model: "antigravity-gemini-flash", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now - 1000 });
     expect(s.imageWindow("antigravity")).toEqual({ used: 1, windowStartedAt: now - 1000 });
     s.close();
   });
@@ -69,11 +69,11 @@ describe("UsageStore", () => {
         input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
         outcome TEXT NOT NULL, source TEXT NOT NULL)`);
       legacy.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source)
-        VALUES (?, 'antigravity', 'agy-gemini-flash', 10, 2, 5, 'ok', 'http')`).run(now - 1000);
+        VALUES (?, 'antigravity', 'antigravity-gemini-flash', 10, 2, 5, 'ok', 'http')`).run(now - 1000);
       legacy.close();
 
       const s = new UsageStore(path);
-      s.record({ provider: "antigravity", model: "agy-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 20, outcome: "ok", source: "http", ts: now });
+      s.record({ provider: "antigravity", model: "antigravity-image", kind: "image", inputTokens: 0, outputTokens: 0, durationMs: 20, outcome: "ok", source: "http", ts: now });
       // The pre-image row is still there and counted as text, so it weighs on
       // the budget but not on the image quota.
       expect(s.totals("antigravity", H5, now + 1).calls).toBe(2);
@@ -273,13 +273,13 @@ describe("UsageStore", () => {
     const s = new UsageStore(":memory:");
     const now = 1_000_000_000_000;
     s.setPause("antigravity", null, now + 60_000, 1, now);
-    s.setPause("antigravity", "agy-image", now + 5 * 24 * 3600_000, 2, now);
+    s.setPause("antigravity", "antigravity-image", now + 5 * 24 * 3600_000, 2, now);
     s.setPause("claude", "claude-fable", now + 3600_000, 3, now);
     // A provider-wide pause and one of that provider's models coexist, as they
     // do in memory: sqlite orders the null model first.
     expect(s.pauses(now)).toEqual([
       { provider: "antigravity", model: null, until: now + 60_000, strikes: 1 },
-      { provider: "antigravity", model: "agy-image", until: now + 5 * 24 * 3600_000, strikes: 2 },
+      { provider: "antigravity", model: "antigravity-image", until: now + 5 * 24 * 3600_000, strikes: 2 },
       { provider: "claude", model: "claude-fable", until: now + 3600_000, strikes: 3 },
     ]);
     s.close();

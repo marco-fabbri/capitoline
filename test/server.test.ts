@@ -65,23 +65,23 @@ describe("GET /v1/models", () => {
   it("reports the kind of every model in the capitoline block", async () => {
     const { app } = makeImages();
     const r = await request(app).get("/v1/models");
-    expect(r.body.data.map((m: { id: string; capitoline: { kind: string } }) => [m.id, m.capitoline.kind])).toEqual([["agy-text", "text"], ["agy-image", "image"]]);
+    expect(r.body.data.map((m: { id: string; capitoline: { kind: string } }) => [m.id, m.capitoline.kind])).toEqual([["antigravity-text", "text"], ["antigravity-image", "image"]]);
   });
   it("exposes the image quota of an image model, and only of an image model", async () => {
     const { app } = makeImages();
     const before = await request(app).get("/v1/models");
     const quotaOf = (r: { body: { data: { id: string; capitoline: Record<string, unknown> }[] } }, id: string) =>
       r.body.data.find((m) => m.id === id)!.capitoline.quota;
-    expect(quotaOf(before, "agy-image")).toEqual({ used: 0, limit: 12, window_started_at: null });
-    expect(quotaOf(before, "agy-text")).toBeUndefined();
-    await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" });
+    expect(quotaOf(before, "antigravity-image")).toEqual({ used: 0, limit: 12, window_started_at: null });
+    expect(quotaOf(before, "antigravity-text")).toBeUndefined();
+    await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "antigravity-image" });
     const after = await request(app).get("/v1/models");
-    expect(quotaOf(after, "agy-image")).toEqual({ used: 1, limit: 12, window_started_at: expect.any(Number) });
+    expect(quotaOf(after, "antigravity-image")).toEqual({ used: 1, limit: 12, window_started_at: expect.any(Number) });
   });
   it("drops an image model whose quota is exhausted, and says so nowhere in this list", async () => {
     const { app } = makeImages([{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }]);
     const sent = Date.now();
-    expect((await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" })).status).toBe(429);
+    expect((await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "antigravity-image" })).status).toBe(429);
     // The quota hit paused the provider past the reset it reported, so every
     // model of that provider is unavailable and this list has dropped it
     // (spec 6.4). That is why the block here carries no reset instant: it
@@ -252,7 +252,7 @@ describe("POST /v1/chat/completions", () => {
   });
   it("returns 400 for a chat request against an image model", async () => {
     const { app, p } = makeImages();
-    const r = await request(app).post("/v1/chat/completions").send(body({ model: "agy-image" }));
+    const r = await request(app).post("/v1/chat/completions").send(body({ model: "antigravity-image" }));
     expect(r.status).toBe(400);
     expect(r.body.error.code).toBe("bad_request");
     expect(p.calls).toHaveLength(0);
@@ -298,7 +298,7 @@ describe("POST /v1/chat/completions", () => {
 const JPEG = Buffer.from("ffd8ffe000104a464946", "hex");
 const IMG: ProviderEvent = { type: "image", mime: "image/jpeg", bytes: JPEG, width: 1376, height: 768 };
 function makeImages(script: ProviderEvent[] = [IMG, { type: "done" }], access?: RequestHandler) {
-  const p = new FakeProvider("antigravity", ["agy-text", { name: "agy-image", kind: "image" }], OK, 1);
+  const p = new FakeProvider("antigravity", ["antigravity-text", { name: "antigravity-image", kind: "image" }], OK, 1);
   p.imageScript = script;
   const usage = new UsageStore(":memory:");
   const core = new Core([p], usage, { maxWaitMs: QUEUE_WAIT_MS, budgets: {}, log: createLogger("t"), imageQuotas: { antigravity: 12 } });
@@ -308,22 +308,22 @@ function makeImages(script: ProviderEvent[] = [IMG, { type: "done" }], access?: 
 describe("POST /v1/images/generations", () => {
   it("returns the image as b64_json with the capitoline block", async () => {
     const { app, p } = makeImages();
-    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" });
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "antigravity-image" });
     expect(r.status).toBe(200);
     expect(r.body.created).toEqual(expect.any(Number));
     expect(r.body.data).toHaveLength(1);
     expect(Buffer.from(r.body.data[0].b64_json, "base64")).toEqual(JPEG);
-    expect(r.body.capitoline).toEqual({ provider: "antigravity", model: "agy-image", mime: "image/jpeg", width: 1376, height: 768, bytes: JPEG.length, ignored: [] });
+    expect(r.body.capitoline).toEqual({ provider: "antigravity", model: "antigravity-image", mime: "image/jpeg", width: 1376, height: 768, bytes: JPEG.length, ignored: [] });
     expect(r.headers["x-capitoline-ignored"]).toBeUndefined();
-    expect(p.imageCalls).toEqual([{ model: "agy-image", prompt: "a lighthouse" }]);
+    expect(p.imageCalls).toEqual([{ model: "antigravity-image", prompt: "a lighthouse" }]);
     expect(p.calls).toHaveLength(0);
   });
   it("defaults to the first image model when model is omitted", async () => {
     const { app, p } = makeImages();
     const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
     expect(r.status).toBe(200);
-    expect(r.body.capitoline.model).toBe("agy-image");
-    expect(p.imageCalls[0].model).toBe("agy-image");
+    expect(r.body.capitoline.model).toBe("antigravity-image");
+    expect(p.imageCalls[0].model).toBe("antigravity-image");
   });
   it("defaults to an available image model, skipping one whose provider is unhealthy", async () => {
     const first = new FakeProvider("one", [{ name: "one-image", kind: "image" }], OK, 1);
@@ -401,7 +401,7 @@ describe("POST /v1/images/generations", () => {
   });
   it("returns 400 for an image request against a text model", async () => {
     const { app, p } = makeImages();
-    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-text" });
+    const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "antigravity-text" });
     expect(r.status).toBe(400);
     expect(r.body.error.code).toBe("bad_request");
     expect(p.imageCalls).toHaveLength(0);
@@ -478,17 +478,17 @@ describe("GET /health", () => {
     const { app } = makeImages();
     const before = await request(app).get("/health");
     expect(before.body.providers[0].imageQuota).toEqual({ used: 0, limit: 12, windowStartedAt: null, resetAt: null });
-    await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" });
+    await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "antigravity-image" });
     const after = await request(app).get("/health");
     expect(after.body.providers[0].imageQuota).toMatchObject({ used: 1, limit: 12, windowStartedAt: expect.any(Number), resetAt: null });
-    expect(after.body.models.find((m: { name: string }) => m.name === "agy-image").quota.used).toBe(1);
+    expect(after.body.models.find((m: { name: string }) => m.name === "antigravity-image").quota.used).toBe(1);
     const textOnly = await request(make().app).get("/health");
     expect(textOnly.body.providers[0].imageQuota).toBeNull();
   });
   it("reports the quota reset after an image rate limit", async () => {
     const { app } = makeImages([{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }]);
     const sent = Date.now();
-    const gen = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" });
+    const gen = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "antigravity-image" });
     expect(gen.status).toBe(429);
     const r = await request(app).get("/health");
     expect(r.body.providers[0].imageQuota.resetAt).toBeGreaterThanOrEqual(sent + 442_209 * 1000);
@@ -504,7 +504,7 @@ describe("GET /health", () => {
 // repository's panel in miniature: enough for a quorum, and small enough that
 // taking one provider down breaks it.
 const COUNCIL_SEATS: Seat[] = [{ family: "anthropic", models: ["claude-opus"] }, { family: "openai", models: ["codex-astra"] }];
-const THREE_SEATS: Seat[] = [...COUNCIL_SEATS, { family: "google", models: ["agy-pro"] }];
+const THREE_SEATS: Seat[] = [...COUNCIL_SEATS, { family: "google", models: ["antigravity-pro"] }];
 const COUNCIL_JUDGE: Seat = { family: "anthropic", models: ["claude-haiku"] };
 const COUNCIL_CFG: CouncilConfig = { seats: COUNCIL_SEATS, judge: COUNCIL_JUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, ranking: true, stageTimeoutS: 5 };
 
@@ -515,7 +515,7 @@ const COUNCIL_CFG: CouncilConfig = { seats: COUNCIL_SEATS, judge: COUNCIL_JUDGE,
 const COUNCIL_ANSWERS: Record<string, string> = {
   "claude-opus": "Retry once, and only on a refusal nobody predicted.",
   "codex-astra": "Retrying twice turns one question into four calls.",
-  "agy-pro": "It depends whether the refusal is the model's or the subscription's.",
+  "antigravity-pro": "It depends whether the refusal is the model's or the subscription's.",
 };
 const COUNCIL_SYNTHESIS = "Retry exactly once.";
 // The stage a call belongs to, read from the prompt the council actually sent:
@@ -534,7 +534,7 @@ const councilReply = (req: InternalRequest): ProviderEvent[] => {
 function makeCouncil(seats: Seat[] = COUNCIL_SEATS, agyScript: Script = councilReply) {
   const claude = new FakeProvider("claude", ["claude-opus", "claude-haiku"], councilReply, 2);
   const codex = new FakeProvider("codex", ["codex-astra"], councilReply, 1);
-  const agy = new FakeProvider("agy", ["agy-pro"], agyScript, 1);
+  const agy = new FakeProvider("antigravity", ["antigravity-pro"], agyScript, 1);
   const usage = new UsageStore(":memory:");
   const core = new Core([claude, codex, agy], usage, { maxWaitMs: QUEUE_WAIT_MS, budgets: {}, log: createLogger("t") });
   const council = new Council("capitoline", { ...COUNCIL_CFG, seats }, core, createLogger("t"));
@@ -665,7 +665,7 @@ describe("a council over HTTP", () => {
     expect(r.status).toBe(200);
     const d = r.body.capitoline.council as Deliberation;
     expect(d.members.map((m) => m.model)).toEqual(["claude-opus", "codex-astra"]);
-    expect(d.lost).toEqual([{ family: "google", model: "agy-pro", reason: "cli_crashed" }]);
+    expect(d.lost).toEqual([{ family: "google", model: "antigravity-pro", reason: "cli_crashed" }]);
     expect(JSON.stringify(r.body)).not.toContain("SECRET-STDERR");
   });
 
@@ -848,7 +848,7 @@ describe("usage attribution", () => {
   });
   it("attributes an image generation as well as a completion", async () => {
     const { app, usage } = makeImages([IMG, { type: "done" }], asCaller({ email: "me@example.com", sub: "u1", type: "user" }));
-    expect((await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "agy-image" })).status).toBe(200);
+    expect((await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "antigravity-image" })).status).toBe(200);
     expect(usage.callers(60_000)).toEqual([{ caller: "me@example.com", calls: 1, inputTokens: 0, outputTokens: 0 }]);
   });
   // The breakdown names people, so it lives under /v1, behind Access, and not

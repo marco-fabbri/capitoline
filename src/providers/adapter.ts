@@ -57,8 +57,8 @@ export interface Provider {
   /**
    * The id this provider will send to its CLI for `model` at `effort`, which
    * is the thing a quota refusal is actually about. Two gateway names can
-   * resolve to one id — `agy-gemini-pro` at the default effort is
-   * `gemini-3.1-pro-high`, which `agy-gemini-pro-high` names outright — and
+   * resolve to one id — `antigravity-gemini-pro` at the default effort is
+   * `gemini-3.1-pro-high`, which `antigravity-gemini-pro-high` names outright — and
    * before this the pause was keyed by the name that made the call, so the
    * other alias spent a call rediscovering the same exhausted model.
    */
@@ -90,7 +90,7 @@ export interface Provider {
  * and nothing in the response could tell them the cheap level ran instead,
  * while the cost of the opposite mistake is latency and quota, which /health
  * reports and the budget windows already track. The only model the rule
- * touches today is `agy-gemini-pro` (`efforts: [low, high]`, no medium in the
+ * touches today is `antigravity-gemini-pro` (`efforts: [low, high]`, no medium in the
  * CLI's ids), whose default requests on the deployed host all resolve to
  * `gemini-3.1-pro-high`: flipping the tie-break would silently downgrade every
  * one of them with no request having asked for it. A caller who wants the

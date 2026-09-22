@@ -211,7 +211,7 @@ describe("start() with more than one council", () => {
   council-b:
     seats:
       - { family: anthropic, models: [claude-sonnet] }
-      - { family: google,    models: [agy-gemini-flash] }
+      - { family: google,    models: [antigravity-gemini-flash] }
     judge: { family: anthropic, models: [claude-haiku] }
     stage_timeout_s: 20
 `;
@@ -233,7 +233,7 @@ describe("start() with more than one council", () => {
   const fakes = () => [
     new FakeProvider("claude", ["claude-opus", "claude-sonnet", "claude-haiku"], OK),
     new FakeProvider("codex", ["codex-gpt-5.5"], OK),
-    new FakeProvider("antigravity", ["agy-gemini-flash"], OK),
+    new FakeProvider("antigravity", ["antigravity-gemini-flash"], OK),
   ];
 
   it("registers every configured council and offers them all", async () => {
@@ -274,7 +274,7 @@ describe("start() with more than one council", () => {
       const offered = ((await r.json()) as { data: { id: string }[] }).data.map((m) => m.id);
       expect(offered).toContain("council-a");
       expect(offered).not.toContain("council-b");
-      expect(offered).not.toContain("agy-gemini-flash");
+      expect(offered).not.toContain("antigravity-gemini-flash");
     } finally { await app.close(); }
   });
 });

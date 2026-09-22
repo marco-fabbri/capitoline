@@ -70,7 +70,7 @@ describe("config", () => {
     const cfg = loadConfig("config/capitoline.yaml");
     expect(Object.keys(cfg.providers).sort()).toEqual(["antigravity", "claude", "codex"]);
     expect(cfg.providers.claude.models["claude-opus"].cli_model).toBe("opus");
-    expect(cfg.providers.antigravity.models["agy-gemini-flash"].effort_suffix).toBe(true);
+    expect(cfg.providers.antigravity.models["antigravity-gemini-flash"].effort_suffix).toBe(true);
     expect(cfg.providers.codex.system_prompt_flag).toBe("developer_instructions");
     expect(cfg.providers.codex.system_prompt_flag_prefix).toBe("-c");
     expect(cfg.providers.claude.system_prompt_flag_prefix).toBeNull();
@@ -78,12 +78,12 @@ describe("config", () => {
     expect(cfg.server.port).toBe(8080);
     expect(cfg.usage.db_path).toBe("capitoline.sqlite");
   });
-  it("loads the repository config with the agy-image model and the collect helper", () => {
+  it("loads the repository config with the antigravity-image model and the collect helper", () => {
     const cfg = loadConfig("config/capitoline.yaml");
     const agy = cfg.providers.antigravity;
-    expect(agy.models["agy-image"]).toEqual({ cli_model: "gemini-3.8-flash-low", effort_suffix: false, kind: "image", timeout_s: 240 });
-    expect(agy.models["agy-gemini-3.7-flash"].cli_model).toBe("gemini-3.7-flash");
-    expect(agy.models["agy-gemini-3.6-flash"].cli_model).toBe("gemini-3.6-flash");
+    expect(agy.models["antigravity-image"]).toEqual({ cli_model: "gemini-3.8-flash-low", effort_suffix: false, kind: "image", timeout_s: 240 });
+    expect(agy.models["antigravity-gemini-3.7-flash"].cli_model).toBe("gemini-3.7-flash");
+    expect(agy.models["antigravity-gemini-3.6-flash"].cli_model).toBe("gemini-3.6-flash");
     expect(agy.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
     expect(agy.image.min_bytes).toBe(200000);
     expect(agy.image.quota_per_window).toBe(12);
@@ -277,7 +277,7 @@ describe("config", () => {
       // one opinion voting twice (design §12.2).
       expect(c.seats.map((s) => s.family), file).toEqual(["anthropic", "openai", "google", "open-weights"]);
       expect(c.seats[0].models, file).toEqual(["claude-fable", "claude-opus", "claude-sonnet"]);
-      expect(c.seats[3].models, file).toEqual(["agy-gpt-oss"]);
+      expect(c.seats[3].models, file).toEqual(["antigravity-gpt-oss"]);
       // The chain is built around models this council's seats cannot take.
       // The judge writes the answer the client reads, so it is the one seat
       // where economising is false economy — measured on 2026-09-22, when a
@@ -298,7 +298,7 @@ describe("config", () => {
       // anthropic seat takes claude-fable this is free and it is the strongest
       // model on the table. What follows it cannot be struck out, so the bad
       // day falls to a strong judge instead of a cheap one.
-      expect(c.judge, file).toEqual({ family: "best-available", models: ["claude-opus", "agy-claude-opus", "codex-gpt-6-sol", "codex-gpt-5.6-terra"] });
+      expect(c.judge, file).toEqual({ family: "best-available", models: ["claude-opus", "antigravity-claude-opus", "codex-gpt-6-sol", "codex-gpt-5.6-terra"] });
       const seatedModels = new Set(c.seats.flatMap((s) => s.models));
       expect(c.judge.models.filter((m) => !seatedModels.has(m)).length, `${file}: the seats can strike out the whole chain`).toBeGreaterThan(0);
       expect(c.judge.models.every((m) => typeof m === "string" && m.length > 0), file).toBe(true);
@@ -358,17 +358,17 @@ describe("config", () => {
       expect(ladder.ranking, file).toBe(true);
       // One model per seat and no chain: a rung that steps down to another
       // model stops being the rung it was declared to measure.
-      expect(ladder.seats.map((s) => s.models), file).toEqual([["agy-gemini-pro-high"], ["agy-gemini-flash-high"], ["agy-gemini-flash-low"]]);
+      expect(ladder.seats.map((s) => s.models), file).toEqual([["antigravity-gemini-pro-high"], ["antigravity-gemini-flash-high"], ["antigravity-gemini-flash-low"]]);
       // The reasoning level is part of the model id and not a request-time
       // choice, which is what makes a seat a rung: effort_suffix is off, so
       // the id reaches the CLI exactly as written here.
       const agy = cfg.providers.antigravity;
-      for (const [name, cli] of [["agy-gemini-pro-high", "gemini-3.1-pro-high"], ["agy-gemini-flash-high", "gemini-3.8-flash-high"], ["agy-gemini-flash-low", "gemini-3.8-flash-low"]]) {
+      for (const [name, cli] of [["antigravity-gemini-pro-high", "gemini-3.1-pro-high"], ["antigravity-gemini-flash-high", "gemini-3.8-flash-high"], ["antigravity-gemini-flash-low", "gemini-3.8-flash-low"]]) {
         expect(agy.models[name], `${file} ${name}`).toMatchObject({ cli_model: cli, effort_suffix: false, kind: "text" });
       }
       // The judge is neither a rung nor Gemini at all: the ladder under test
       // must not synthesize its own measurement. claude-haiku is the cheapest
-      // model of another family, and agy-claude-sonnet stands behind it for
+      // model of another family, and antigravity-claude-sonnet stands behind it for
       // the reason every chain exists — the refusal that is not in the state
       // yet. A rung already known paused is simply not seated and the
       // deliberation degrades honestly, but a first refusal at the judge with
@@ -494,7 +494,7 @@ describe("config", () => {
   });
 
   it("exposes only Antigravity model ids the CLI actually lists", () => {
-    // `agy-gpt-oss` is the council's open-weights seat, and `agy models` lists
+    // `antigravity-gpt-oss` is the council's open-weights seat, and `agy models` lists
     // that family at one effort only (gpt-oss-120b-medium). With effort_suffix
     // the effort completes the model id, so every effort the model leaves open
     // must name an id the CLI knows — otherwise a request asking for `high`
@@ -503,8 +503,8 @@ describe("config", () => {
       .split("\n").map((l) => l.split("\t")[0]).filter(Boolean);
     for (const file of BOTH_FILES) {
       const agy = loadConfig(file).providers.antigravity;
-      expect(agy.models["agy-gpt-oss"].cli_model, file).toBe("gpt-oss-120b");
-      expect(agy.models["agy-gpt-oss"].effort_suffix, file).toBe(true);
+      expect(agy.models["antigravity-gpt-oss"].cli_model, file).toBe("gpt-oss-120b");
+      expect(agy.models["antigravity-gpt-oss"].effort_suffix, file).toBe(true);
       for (const [name, m] of Object.entries(agy.models)) {
         // The same two steps effortValue() takes (src/providers/adapter.ts):
         // an effort the provider's table does not define is dropped, and the

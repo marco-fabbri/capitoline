@@ -24,7 +24,7 @@ type _ReasonFlows = CarriesReason<ModelInfo["reason"]>;
 // families.
 const ANTHROPIC: Seat = { family: "anthropic", models: ["claude-fable", "claude-opus", "claude-sonnet"] };
 const OPENAI: Seat = { family: "openai", models: ["codex-gpt-6-astra", "codex-gpt-5.6-sol"] };
-const OPEN_WEIGHTS: Seat = { family: "open-weights", models: ["agy-gpt-oss"] };
+const OPEN_WEIGHTS: Seat = { family: "open-weights", models: ["antigravity-gpt-oss"] };
 
 // The state as Core.listModels() reports it: every model of every provider,
 // available or not, with the reason when it is not.
@@ -34,7 +34,7 @@ const state = (...entries: [string, boolean?, string?][]): ModelState[] =>
 const ALL_UP = state(
   ["claude-fable"], ["claude-opus"], ["claude-sonnet"],
   ["codex-gpt-6-astra"], ["codex-gpt-5.6-sol"],
-  ["agy-gpt-oss"],
+  ["antigravity-gpt-oss"],
 );
 
 describe("seat", () => {
@@ -43,7 +43,7 @@ describe("seat", () => {
     expect(r.members).toEqual([
       { seat: ANTHROPIC, model: "claude-fable" },
       { seat: OPENAI, model: "codex-gpt-6-astra" },
-      { seat: OPEN_WEIGHTS, model: "agy-gpt-oss" },
+      { seat: OPEN_WEIGHTS, model: "antigravity-gpt-oss" },
     ]);
     expect(r.skipped).toEqual([]);
     expect(r.empty).toEqual([]);
@@ -72,9 +72,9 @@ describe("seat", () => {
   it("leaves a seat whose whole chain is down empty, which is not an error", () => {
     const r = seat([ANTHROPIC, OPEN_WEIGHTS], state(
       ["claude-fable", false, "rate_limited"], ["claude-opus", false, "rate_limited"], ["claude-sonnet", false, "unhealthy"],
-      ["agy-gpt-oss"],
+      ["antigravity-gpt-oss"],
     ));
-    expect(r.members).toEqual([{ seat: OPEN_WEIGHTS, model: "agy-gpt-oss" }]);
+    expect(r.members).toEqual([{ seat: OPEN_WEIGHTS, model: "antigravity-gpt-oss" }]);
     expect(r.empty).toEqual([ANTHROPIC]);
     expect(r.skipped).toHaveLength(3);
   });
@@ -83,12 +83,12 @@ describe("seat", () => {
     const r = seat([OPEN_WEIGHTS], state(["claude-opus"]));
     expect(r.members).toEqual([]);
     expect(r.empty).toEqual([OPEN_WEIGHTS]);
-    expect(r.skipped).toEqual([{ seat: OPEN_WEIGHTS, model: "agy-gpt-oss", reason: "unknown_model" }]);
+    expect(r.skipped).toEqual([{ seat: OPEN_WEIGHTS, model: "antigravity-gpt-oss", reason: "unknown_model" }]);
   });
 
   it("records a reason even when the state gives none", () => {
-    const r = seat([OPEN_WEIGHTS], state(["agy-gpt-oss", false]));
-    expect(r.skipped).toEqual([{ seat: OPEN_WEIGHTS, model: "agy-gpt-oss", reason: "unavailable" }]);
+    const r = seat([OPEN_WEIGHTS], state(["antigravity-gpt-oss", false]));
+    expect(r.skipped).toEqual([{ seat: OPEN_WEIGHTS, model: "antigravity-gpt-oss", reason: "unavailable" }]);
   });
 
   it("returns no members for no seats", () => {
@@ -104,7 +104,7 @@ describe("nextInChain", () => {
 
   it("returns null at the end of the chain, so a refusal cannot cascade", () => {
     expect(nextInChain(ANTHROPIC, "claude-sonnet")).toBeNull();
-    expect(nextInChain(OPEN_WEIGHTS, "agy-gpt-oss")).toBeNull();
+    expect(nextInChain(OPEN_WEIGHTS, "antigravity-gpt-oss")).toBeNull();
   });
 
   it("returns null for a model that is not in the chain", () => {
@@ -135,7 +135,7 @@ describe("nextInChain", () => {
 });
 
 describe("labels", () => {
-  const MEMBERS = [{ model: "claude-fable" }, { model: "codex-gpt-6-astra" }, { model: "agy-gemini-pro" }, { model: "agy-gpt-oss" }];
+  const MEMBERS = [{ model: "claude-fable" }, { model: "codex-gpt-6-astra" }, { model: "antigravity-gemini-pro" }, { model: "antigravity-gpt-oss" }];
   const QUESTION = "What is the half-life of a design decision?";
   const asObject = (m: Map<string, string>): Record<string, string> => Object.fromEntries([...m].sort());
 

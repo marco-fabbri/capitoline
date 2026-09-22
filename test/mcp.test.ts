@@ -29,7 +29,7 @@ let warnings: Record<string, unknown>[];
 // script can undo, and the next generate_image test would silently get a 429.
 beforeEach(async () => {
   provider = new FakeProvider("claude", ["claude-opus"], [{ type: "text", delta: "answer" }, { type: "done", usage: { input: 5, output: 1 } }]);
-  images = new FakeProvider("antigravity", [{ name: "agy-image", kind: "image" }], []);
+  images = new FakeProvider("antigravity", [{ name: "antigravity-image", kind: "image" }], []);
   images.imageScript = [{ type: "text", delta: "saved as ./image.png" }, IMG, { type: "done" }];
   usage = new UsageStore(":memory:");
   core = new Core([provider, images], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
@@ -70,7 +70,7 @@ describe("MCP", () => {
     const text = (r.content as { type: string; text: string }[])[0].text;
     expect(JSON.parse(text)).toEqual([
       { name: "claude-opus", provider: "claude", kind: "text", available: true, over_budget: false },
-      { name: "agy-image", provider: "antigravity", kind: "image", available: true, over_budget: false, quota: { used: 0, limit: null, windowStartedAt: null, resetAt: null } },
+      { name: "antigravity-image", provider: "antigravity", kind: "image", available: true, over_budget: false, quota: { used: 0, limit: null, windowStartedAt: null, resetAt: null } },
     ]);
     await c.close();
   });
@@ -78,10 +78,10 @@ describe("MCP", () => {
     images.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }];
     const sent = Date.now();
     const c = await client();
-    await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "agy-image" } });
+    await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "antigravity-image" } });
     const r = await c.callTool({ name: "list_models", arguments: {} });
     const models = JSON.parse((r.content as Block[])[0].text!) as { name: string; available: boolean; reason?: string; quota?: { resetAt: number | null } }[];
-    const image = models.find((m) => m.name === "agy-image")!;
+    const image = models.find((m) => m.name === "antigravity-image")!;
     // /v1/models drops an unavailable model, so this tool is where a client
     // reads when the exhausted quota frees up.
     expect(image).toMatchObject({ available: false, reason: "rate_limited" });
@@ -118,7 +118,7 @@ describe("MCP", () => {
   });
   it("ask_model refuses an image model as a tool error", async () => {
     const c = await client();
-    const r = await c.callTool({ name: "ask_model", arguments: { model: "agy-image", prompt: "q" } });
+    const r = await c.callTool({ name: "ask_model", arguments: { model: "antigravity-image", prompt: "q" } });
     expect(r.isError).toBe(true);
     // The reason, not only the kind: it is Capitoline's own text (spec 8.3
     // covers CLI output), and it is what lets the agent pick another model.
@@ -169,7 +169,7 @@ describe("MCP", () => {
         { family: "anthropic", model: "claude-opus", label: "Response A", answer: "the first answer" },
         { family: "openai", model: "codex-gpt-5.5", label: "Response B", answer: "the second answer", fellBackFrom: ["codex-gpt-6-astra (rate_limited)"] },
       ],
-      lost: [{ family: "google", model: "agy-gemini-pro", reason: "timeout" }],
+      lost: [{ family: "google", model: "antigravity-gemini-pro", reason: "timeout" }],
       rankings: [{ by: "claude-opus", ranking: [{ label: "Response B", rank: 1, reason: "clearer" }, { label: "Response A", rank: 2, reason: "mine" }] }],
       aggregate: [{ label: "Response B", averageRank: 1, votes: 1 }, { label: "Response A", averageRank: 2, votes: 1 }],
       judge: { model: "claude-haiku", blind: true },
@@ -491,7 +491,7 @@ describe("MCP", () => {
   describe("generate_image", () => {
     it("returns the image as an image block plus a text line describing it, without the agent's prose", async () => {
       const c = await client();
-      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "agy-image" } });
+      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "antigravity-image" } });
       expect(r.isError).toBeFalsy();
       const content = r.content as Block[];
       expect(content).toHaveLength(2);
@@ -501,8 +501,8 @@ describe("MCP", () => {
       expect(JSON.stringify(r)).not.toContain("./image.png");
       // The description the output schema used to carry, unchanged, in the
       // one place an image can travel with it (#1).
-      expect(JSON.parse(content[1].text!)).toEqual({ model: "agy-image", provider: "antigravity", mime: "image/jpeg", width: 1376, height: 768, bytes: JPEG.length });
-      expect(images.imageCalls.at(-1)).toEqual({ model: "agy-image", prompt: "a lighthouse" });
+      expect(JSON.parse(content[1].text!)).toEqual({ model: "antigravity-image", provider: "antigravity", mime: "image/jpeg", width: 1376, height: 768, bytes: JPEG.length });
+      expect(images.imageCalls.at(-1)).toEqual({ model: "antigravity-image", prompt: "a lighthouse" });
       await c.close();
     });
     // #1: an image content block cannot live inside structuredContent, so this
@@ -514,13 +514,13 @@ describe("MCP", () => {
       const c = await client();
       const tool = (await c.listTools()).tools.find((t) => t.name === "generate_image")!;
       expect(tool.outputSchema).toBeUndefined();
-      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "agy-image" } });
+      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "antigravity-image" } });
       expect(r.isError).toBeFalsy();
       expect(r.structuredContent).toBeUndefined();
       const content = r.content as Block[];
       expect(content.map((b) => b.type)).toEqual(["image", "text"]);
       expect(Buffer.from(content[0].data!, "base64")).toEqual(JPEG);
-      expect(JSON.parse(content[1].text!)).toEqual({ model: "agy-image", provider: "antigravity", mime: "image/jpeg", width: 1376, height: 768, bytes: JPEG.length });
+      expect(JSON.parse(content[1].text!)).toEqual({ model: "antigravity-image", provider: "antigravity", mime: "image/jpeg", width: 1376, height: 768, bytes: JPEG.length });
       await c.close();
     });
 
@@ -530,15 +530,15 @@ describe("MCP", () => {
       expect(r.isError).toBeFalsy();
       // Which model the default landed on is read off the text block: this
       // tool has no structured object to read it from any more.
-      expect(JSON.parse((r.content as Block[])[1].text!)).toMatchObject({ model: "agy-image", provider: "antigravity" });
-      expect(images.imageCalls.at(-1)).toEqual({ model: "agy-image", prompt: "a lighthouse" });
+      expect(JSON.parse((r.content as Block[])[1].text!)).toMatchObject({ model: "antigravity-image", provider: "antigravity" });
+      expect(images.imageCalls.at(-1)).toEqual({ model: "antigravity-image", prompt: "a lighthouse" });
       await c.close();
     });
     it("still defaults to a declared image model when no image model is available", async () => {
       images.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 30 }];
       const c = await client();
-      await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "agy-image" } });
-      // agy-image is now unavailable (its provider is paused). The default must
+      await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "antigravity-image" } });
+      // antigravity-image is now unavailable (its provider is paused). The default must
       // still land on it, so the caller gets that provider's own 429 rather
       // than "no image model is configured", which would be a wrong diagnosis.
       const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse" } });

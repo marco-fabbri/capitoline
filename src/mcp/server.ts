@@ -78,7 +78,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
   });
 
   server.registerTool("ask_model", {
-    description: "Ask one model a single question through its CLI. Use list_models for names. From Claude Code, prefer codex-* and agy-* models: asking claude-* spends the same subscription twice.",
+    description: "Ask one model a single question through its CLI. Use list_models for names. From Claude Code, prefer codex-* and antigravity-* models: asking claude-* spends the same subscription twice.",
     inputSchema: {
       model: z.string().describe("Model name from list_models"),
       prompt: z.string().min(1).describe("The question"),
