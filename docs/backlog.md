@@ -5,8 +5,10 @@ findings only; each was checked against the current code and dropped if
 already fixed or superseded), plus phase 2 and beyond. Findings that were
 duplicated across tasks are merged into one line. Runner (`src/runner/runner.ts`)
 had two review findings and both are already fixed in the current code
-(attachment name validation, eager line buffering); the Runner section below is
-not one of them but a later observation from the host, still to be confirmed.
+(attachment name validation, eager line buffering). Its own section below is
+empty because the observation that filled it — sandboxes an earlier process
+left behind — shipped as the sweep on start; the heading is kept so the next
+finding has somewhere to go.
 
 ## Tests
 
