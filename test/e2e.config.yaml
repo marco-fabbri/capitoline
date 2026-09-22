@@ -224,13 +224,32 @@ council:
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-5.5] }
       - { family: google,       models: [agy-gemini-pro, agy-gemini-flash] }
       - { family: open-weights, models: [agy-gpt-oss] }
-    # The top model of each family, descending, and the panel's own heads at
-    # the front: the judge writes the answer the client reads, so it is the one
-    # seat where economising is false economy (the first ladder run measured
-    # what a cheap judge costs — docs/backlog.md). With judge_allow_member:
-    # false, a model a seat has taken is skipped over at seating time, which is
-    # why the chain is long enough to survive the panel taking its first two.
-    judge: { family: best-available, models: [claude-fable, claude-opus, codex-gpt-6-astra, agy-gemini-pro, codex-gpt-5.6-sol] }
+    # Every model here but the first sits in no seat of this council, and that
+    # is the whole design of the chain. Measured 2026-09-23: the previous one
+    # named the top model of each family, and *every* one of its five entries
+    # was reachable by a seat. With judge_allow_member: false a seated model is
+    # struck out of the chain, so the judge was never the best available — it
+    # was whatever the panel had left over. On a day when claude-fable was
+    # exhausted the anthropic seat took claude-opus, the first four entries
+    # were all gone, and the panel was judged by codex-gpt-5.6-sol, the
+    # cheapest thing in the list. That is the failure the chain was reordered
+    # to prevent this morning, arriving by a different road.
+    #
+    # claude-opus stays at the head and stays seat-reachable on purpose: when
+    # the anthropic seat takes claude-fable, as it does whenever Fable has
+    # quota, this is free and it is the strongest model on the table. When
+    # Fable is out the seat takes it instead, and the chain falls to
+    # agy-claude-opus — Claude Opus 4.6 through the Google subscription, in no
+    # seat of any council, spending neither the Anthropic weekly window nor the
+    # Codex allowance that becomes a Plus allowance in October. So the good day
+    # is judged by the best model and the bad day by a strong one, which is the
+    # opposite of what the old chain did.
+    #
+    # Not used, although they sit in no seat: claude-opus-1m and its siblings
+    # are the same model as a seated one with a wider context, so a judge
+    # seated there would be weighing its own answer, which is exactly what
+    # judge_allow_member: false exists to prevent.
+    judge: { family: best-available, models: [claude-opus, agy-claude-opus, codex-gpt-6-sol, codex-gpt-5.6-terra] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to rank
@@ -256,7 +275,7 @@ council:
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-5.5] }
       - { family: google,       models: [agy-gemini-pro, agy-gemini-flash] }
       - { family: open-weights, models: [agy-gpt-oss] }
-    judge: { family: best-available, models: [claude-fable, claude-opus, codex-gpt-6-astra, agy-gemini-pro, codex-gpt-5.6-sol] }
+    judge: { family: best-available, models: [claude-opus, agy-claude-opus, codex-gpt-6-sol, codex-gpt-5.6-terra] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to synthesize

@@ -278,26 +278,29 @@ describe("config", () => {
       expect(c.seats.map((s) => s.family), file).toEqual(["anthropic", "openai", "google", "open-weights"]);
       expect(c.seats[0].models, file).toEqual(["claude-fable", "claude-opus", "claude-sonnet"]);
       expect(c.seats[3].models, file).toEqual(["agy-gpt-oss"]);
-      // The chain is the top model of each family, in descending order: the
-      // judge writes the answer the client reads, so it is the one seat where
-      // economising is false economy — measured on 2026-09-22, when a cheap
-      // judge merged three answers and shipped a claim none of them made.
-      // When the chain empties the design already degrades honestly (§12.5,
-      // the best-ranked answer returned unsynthesised), which is a better
-      // floor than a weak synthesis, so no cheap model closes it.
-      expect(c.judge, file).toEqual({ family: "best-available", models: ["claude-fable", "claude-opus", "codex-gpt-6-astra", "agy-gemini-pro", "codex-gpt-5.6-sol"] });
-      // Every model of this chain is also a seat candidate somewhere, and that
-      // is deliberate. seatJudge() filters the chain against the models the
-      // members actually took, not against every candidate, and four seats can
-      // take at most four of the five — so filtering alone always leaves one.
-      // Filtering plus refusals can still empty it, and that is accepted: when
-      // no judge can be seated the council returns the best-ranked answer
-      // unsynthesised and says so (§12.5), which is a better floor than the
-      // weak synthesis a cheap tail model would produce. Measured on
-      // 2026-09-22: a cheap judge shipped a claim none of the members made.
+      // The chain is built around models this council's seats cannot take.
+      // The judge writes the answer the client reads, so it is the one seat
+      // where economising is false economy — measured on 2026-09-22, when a
+      // cheap judge merged three answers and shipped a claim none of them
+      // made.
+      //
+      // Until 2026-09-23 the chain was the top model of each family, and every
+      // one of its five entries was reachable by a seat. The reasoning was
+      // that four seats can take at most four of five, so filtering alone
+      // always leaves one — true, and beside the point: *which* one is left is
+      // decided by what the seats happened not to want. On a day when
+      // claude-fable was exhausted the anthropic seat took claude-opus, and
+      // the panel was judged by codex-gpt-5.6-sol, the cheapest entry. The
+      // same paragraph that claimed no cheap model closed the chain had one at
+      // its end.
+      //
+      // The head is still a model a seat usually takes, deliberately: when the
+      // anthropic seat takes claude-fable this is free and it is the strongest
+      // model on the table. What follows it cannot be struck out, so the bad
+      // day falls to a strong judge instead of a cheap one.
+      expect(c.judge, file).toEqual({ family: "best-available", models: ["claude-opus", "agy-claude-opus", "codex-gpt-6-sol", "codex-gpt-5.6-terra"] });
       const seatedModels = new Set(c.seats.flatMap((s) => s.models));
-      const takeable = c.seats.length;
-      expect(c.judge.models.length, `${file}: the chain must outnumber the seats, or filtering alone could empty it`).toBeGreaterThan(takeable);
+      expect(c.judge.models.filter((m) => !seatedModels.has(m)).length, `${file}: the seats can strike out the whole chain`).toBeGreaterThan(0);
       expect(c.judge.models.every((m) => typeof m === "string" && m.length > 0), file).toBe(true);
       expect(seatedModels.size, file).toBeGreaterThan(0);
       // Every provider must offer a slot per seat it serves, or the second
@@ -510,6 +513,51 @@ describe("config", () => {
         const efforts = m.effort_suffix ? (m.efforts ?? (Object.keys(agy.effort) as Effort[])).filter((e) => Object.hasOwn(agy.effort, e)) : [];
         if (efforts.length === 0) expect(listed, `${file} ${name}`).toContain(m.cli_model);
         for (const e of efforts) expect(listed, `${file} ${name} @ ${e}`).toContain(`${m.cli_model}-${agy.effort[e]}`);
+      }
+    }
+  });
+
+  it("gives every council a judge its own seats cannot strike out", () => {
+    // With judge_allow_member: false a seated model is removed from the judge
+    // chain, so a chain whose every entry a seat can take leaves the judge to
+    // be whatever the panel happened not to use. Measured on the host
+    // 2026-09-23: all five entries of the reference panel's chain were
+    // seat-reachable, and on a day when claude-fable was exhausted the panel
+    // was judged by the cheapest model in the list — the very failure the
+    // chain had been reordered to prevent that morning.
+    //
+    // The rule is not "no entry may be seat-reachable": the head is
+    // deliberately a model a seat usually takes, because when it does not the
+    // head is the strongest thing on the table and costs nothing. The rule is
+    // that the chain must not be *exhaustible* by the seats.
+    for (const file of BOTH_FILES) {
+      const cfg = loadConfig(file);
+      for (const [name, c] of Object.entries(cfg.council)) {
+        const seated = new Set(c.seats.flatMap((s) => s.models));
+        const safe = c.judge.models.filter((m) => !seated.has(m));
+        expect(safe.length, `${file} ${name}: every judge candidate is one of its own seats' models`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("never seats a judge that is the same model as one of its seats under another name", () => {
+    // `claude-opus-1m` sits in no seat and would pass the check above, while
+    // being the same model as `claude-opus` with a wider context window: a
+    // judge seated there weighs its own answer, which is what
+    // judge_allow_member: false exists to prevent. The names differ and the
+    // CLI id does not, so the id is what this compares.
+    for (const file of BOTH_FILES) {
+      const cfg = loadConfig(file);
+      const idOf = (name: string): string | undefined => {
+        for (const p of Object.values(cfg.providers)) if (p.models[name]) return p.models[name].cli_model;
+        return undefined;
+      };
+      for (const [name, c] of Object.entries(cfg.council)) {
+        const seatedIds = new Set(c.seats.flatMap((s) => s.models).map(idOf));
+        for (const j of c.judge.models) {
+          if (c.judge.models.indexOf(j) === 0) continue;   // the head is allowed to be a seat's own model
+          expect(seatedIds.has(idOf(j)), `${file} ${name}: judge ${j} is a seat's model under another name`).toBe(false);
+        }
       }
     }
   });
