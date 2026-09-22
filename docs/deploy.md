@@ -720,6 +720,26 @@ That is what shows a prompt that has grown or a model change that costs more.
 For one figure across the three, count calls, not tokens: `calls` is the same
 unit everywhere.
 
+The same endpoint answers a different question in `.models`: **which real
+model served each gateway name**, over the last week rather than the last day,
+because what it is read for is a change.
+
+```sh
+curl -s https://api.example.com/v1/usage \
+  -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" | jq .models
+# [ { "model": "claude-opus", "cliModelId": "claude-opus-5",   "calls": 40, "firstAt": …, "lastAt": … },
+#   { "model": "claude-opus", "cliModelId": "claude-opus-5-5", "calls": 12, "firstAt": …, "lastAt": … } ]
+```
+
+Two rows under one name is an alias that moved. The configuration names CLI
+aliases — `opus`, `fable`, `haiku` — and not dated ids, on purpose: the day
+Anthropic points `opus` at a new model the gateway serves it with nothing
+changed here. `opus` meant Opus 5 until 2026-09-22 and Opus 5.5 after it, and
+before this column no record said so, which made every measurement in
+`docs/spike-2026-09.md` undated underneath. Only Claude appears: a Codex slug
+and an Antigravity id are the model itself, so those rows carry no id and are
+left out rather than listed as unchanged.
+
 A council is nine of those rows for the reference panel, five for
 `capitoline-fast` and seven for `capitoline-gemini`, under as many models as
 the seats and the judge resolved to, and they are tied

@@ -173,8 +173,12 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // under /v1, where the app-wide Access middleware protects it like every
   // other route. It carries no provider detail and no prompt, only what the
   // Access token already said about the caller.
+  // `callers` is the last day, `models` the last week: the first answers "who
+  // spent it", the second "what actually answered". They differ because the
+  // second is read for a change — a gateway name whose model moved shows two
+  // rows — and a day is too short to catch one.
   app.get("/v1/usage", (_req, res) => {
-    res.json({ callers: core.callers() });
+    res.json({ callers: core.callers(), models: core.modelIdentities() });
   });
 
   // The quota block is only there for image models, and its keys follow this

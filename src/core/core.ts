@@ -2,7 +2,7 @@ import { EffortSchema, type Effort } from "../config.js";
 import type { CouncilEvent } from "../council/council.js";
 import type { Logger } from "../log.js";
 import type { HealthStatus, ModelKind, ModelSpec, Provider } from "../providers/adapter.js";
-import { H5, type CallerUsage, type UsageStore } from "../usage/store.js";
+import { H5, type CallerUsage, type ModelIdentity, type UsageStore } from "../usage/store.js";
 import { flatten, splitSystem } from "./prompt.js";
 import { Semaphore } from "./semaphore.js";
 import { CLIENT_MESSAGE, CapitolineError, type ErrorKind, type ImageRequest, type InternalRequest, type ProviderEvent } from "./types.js";
@@ -311,6 +311,15 @@ export class Core {
     return this.usage.callers(D1, this.now());
   }
 
+  /**
+   * Which real model has served each gateway name over the last week. A week
+   * and not a day, because the reading is the *change*: two rows under one
+   * name is an alias that moved, and a day is too short to catch it.
+   */
+  modelIdentities(): ModelIdentity[] {
+    return this.usage.modelIdentities(D7, this.now());
+  }
+
   // The health `detail` carries raw CLI stderr and must never reach a client
   // (/health is unauthenticated): only the classification is exposed.
   providerStates(): ProviderState[] {
@@ -457,11 +466,13 @@ export class Core {
     const started = this.now();
     let outcome: "ok" | ErrorKind = "bad_output";
     let usage = { input: 0, output: 0 };
+    // What the provider says actually answered, when it says anything.
+    let cliModelId: string | undefined;
     let sawTerminal = false;
     let phase: "running" | "ended" | "threw" = "running";
     try {
       for await (const ev of produce()) {
-        if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; this.onSuccess(id, s, key, scope); }
+        if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; cliModelId = ev.cliModelId; this.onSuccess(id, s, key, scope); }
         else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, key, scope, ev, kind); }
         else if (ev.type === "rate_limit") this.onRateLimit(id, ev);
         yield ev;
@@ -477,7 +488,7 @@ export class Core {
       const aborted = !sawTerminal && phase !== "threw" && (phase === "running" || ctx.signal?.aborted === true);
       this.usage.record({ provider: id, model: modelName, kind, inputTokens: usage.input, outputTokens: usage.output,
         durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, caller: ctx.caller ?? null,
-        deliberation: ctx.deliberation ?? null, ts: this.now() });
+        deliberation: ctx.deliberation ?? null, cliModelId: cliModelId ?? null, ts: this.now() });
     }
   }
 

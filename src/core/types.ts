@@ -33,7 +33,13 @@ export type ImageMime = "image/jpeg" | "image/png";
 
 export type ProviderEvent =
   | { type: "text"; delta: string }
-  | { type: "done"; usage?: Usage }
+  // cliModelId: the dated id of the model that actually answered, when the CLI
+  // reports one. Only Claude does, and only Claude needs to: its model names
+  // are aliases (`opus`, `fable`) that move onto a new model without a word,
+  // while a Codex slug and an Antigravity id are the model itself. Absent
+  // everywhere else, and absent on Claude too when the stream carried no
+  // message_start — the honest value for "nothing said".
+  | { type: "done"; usage?: Usage; cliModelId?: string }
   // retryAfterS: an explicit wait the CLI reported (quota reset); absent when unknown.
   // scope: what the refusal is about. Absent means the provider, which is the
   // safe reading — a subscription-wide limit must stop every model behind it.

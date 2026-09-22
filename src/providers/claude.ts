@@ -46,10 +46,24 @@ export const claudeAdapter: Adapter = {
 
   async *parse(lines): AsyncIterable<ProviderEvent> {
     let sawDelta = false;
+    // The dated id of the model that answered, which `--model opus` does not
+    // say and the alias hides: `opus` meant Opus 5 on 2026-09-22 and Opus 5.5
+    // on the 23rd, with no configuration changed and nothing in any record
+    // saying which one a measurement was taken against.
+    //
+    // Read from `message_start` rather than from the `result` object's
+    // `modelUsage` keys, although both carry it: `modelUsage` is `{}` in every
+    // error capture, while `message_start` arrives before anything can go
+    // wrong, so the id is known even for a run that then fails.
+    let cliModelId: string | undefined;
     for await (const o of jsonLines(lines)) {
       const type = o.type;
       if (type === "stream_event") {
-        const ev = o.event as { type?: string; delta?: { type?: string; text?: string } } | undefined;
+        const ev = o.event as { type?: string; message?: unknown; delta?: { type?: string; text?: string } } | undefined;
+        if (ev?.type === "message_start") {
+          const model = (ev.message as { model?: unknown } | undefined)?.model;
+          if (typeof model === "string" && model.length) cliModelId = model;
+        }
         if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && typeof ev.delta.text === "string") {
           sawDelta = true;
           yield { type: "text", delta: ev.delta.text };
@@ -82,7 +96,7 @@ export const claudeAdapter: Adapter = {
         }
         const u = (o.usage ?? {}) as Record<string, number>;
         const input = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-        yield { type: "done", usage: { input, output: u.output_tokens ?? 0 } };
+        yield { type: "done", usage: { input, output: u.output_tokens ?? 0 }, ...(cliModelId !== undefined ? { cliModelId } : {}) };
         return;
       }
     }

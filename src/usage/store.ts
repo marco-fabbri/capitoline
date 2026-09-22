@@ -18,10 +18,25 @@ export interface CallRecord {
    * a guess over a time window.
    */
   deliberation?: string | null;
+  /**
+   * The dated id of the model that actually answered — `claude-opus-5-5-…`
+   * for a row whose `model` is `claude-opus`. Null when the CLI said nothing,
+   * which is the honest value for every Codex and Antigravity row and for
+   * every row written before 2026-09-23: only Claude's names are aliases that
+   * move, so only Claude reports this.
+   */
+  cliModelId?: string | null;
 }
 export interface Totals { calls: number; inputTokens: number; outputTokens: number }
 /** What one caller spent in a window. `caller` is null for the calls nothing identified. */
 export interface CallerUsage { caller: string | null; calls: number; inputTokens: number; outputTokens: number }
+/**
+ * Which real model served a gateway name, and when. More than one row for the
+ * same `model` is the thing worth seeing: the name did not change and the
+ * model under it did — `claude-opus` was Opus 5 until 2026-09-22 and Opus 5.5
+ * after it, with nothing in the configuration touched.
+ */
+export interface ModelIdentity { model: string; cliModelId: string; calls: number; firstAt: number; lastAt: number }
 export type WindowName = "five_hour" | "seven_day";
 /** Image generations counted in a rolling window: `windowStartedAt` is null while the window is empty. */
 export interface ImageWindow { used: number; windowStartedAt: number | null }
@@ -40,7 +55,7 @@ export class UsageStore {
   private readonly stmts: {
     record: StatementSync; imageWindow: StatementSync; totals: StatementSync; setWindow: StatementSync; windows: StatementSync;
     callers: StatementSync; setPause: StatementSync; clearPause: StatementSync; prunePauses: StatementSync; pauses: StatementSync;
-    deliberation: StatementSync;
+    deliberation: StatementSync; identities: StatementSync;
   };
   private closed = false;
   constructor(path: string) {
@@ -97,9 +112,15 @@ export class UsageStore {
     // council existed, and every direct request after it, belongs to no
     // deliberation, and NULL is that state's name.
     if (!columns.has("deliberation")) this.db.exec(`ALTER TABLE calls ADD COLUMN deliberation TEXT`);
+    // And the dated model id, added 2026-09-23 when `opus` moved from Opus 5
+    // to Opus 5.5 with nothing in the history saying which one any measurement
+    // had used. Nullable with no default, for the same reason `caller` is:
+    // "the CLI said nothing" is a real state, and it is what every Codex row,
+    // every Antigravity row and every row older than this column will hold.
+    if (!columns.has("cli_model_id")) this.db.exec(`ALTER TABLE calls ADD COLUMN cli_model_id TEXT`);
 
     this.stmts = {
-      record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind, caller, deliberation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind, caller, deliberation, cli_model_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
       imageWindow: this.db.prepare(`SELECT COUNT(*) AS used, MIN(ts) AS started FROM calls WHERE provider = ? AND kind = 'image' AND outcome = 'ok' AND ts > ?`),
       totals: this.db.prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o FROM calls WHERE provider = ? AND ts > ?`),
       setWindow: this.db.prepare(`INSERT INTO rate_windows (provider, window, utilization, resets_at, updated_at) VALUES (?, ?, ?, ?, ?)
@@ -129,10 +150,14 @@ export class UsageStore {
       // on a column that is NULL for almost every row would cost every insert
       // for a read nothing does in a loop.
       deliberation: this.db.prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o FROM calls WHERE deliberation = ?`),
+      // Rows the CLI identified, only: a null would say "Codex, as always"
+      // and add a line to every listing for it. `calls_ts` covers the bound.
+      identities: this.db.prepare(`SELECT model, cli_model_id AS id, COUNT(*) AS calls, MIN(ts) AS first_at, MAX(ts) AS last_at
+        FROM calls WHERE ts > ? AND cli_model_id IS NOT NULL GROUP BY model, cli_model_id ORDER BY model, last_at`),
     };
   }
   record(c: CallRecord): void {
-    this.stmts.record.run(c.ts ?? Date.now(), c.provider, c.model, c.inputTokens, c.outputTokens, c.durationMs, c.outcome, c.source, c.kind ?? "text", c.caller ?? null, c.deliberation ?? null);
+    this.stmts.record.run(c.ts ?? Date.now(), c.provider, c.model, c.inputTokens, c.outputTokens, c.durationMs, c.outcome, c.source, c.kind ?? "text", c.caller ?? null, c.deliberation ?? null, c.cliModelId ?? null);
   }
 
   // What one deliberation spent, across every model that served it: the other
@@ -148,6 +173,17 @@ export class UsageStore {
   callers(sinceMs: number, now = Date.now()): CallerUsage[] {
     const rows = this.stmts.callers.all(now - sinceMs) as { caller: string | null; calls: number; i: number; o: number }[];
     return rows.map((r) => ({ caller: r.caller, calls: Number(r.calls), inputTokens: Number(r.i), outputTokens: Number(r.o) }));
+  }
+
+  /**
+   * Which real models served each gateway name in the window, oldest last seen
+   * first within a name. Rows the CLI did not identify are left out rather than
+   * gathered under a null: only Claude's names are aliases that move, so a null
+   * row would say "Codex, as always" for every Codex model in the table.
+   */
+  modelIdentities(sinceMs: number, now = Date.now()): ModelIdentity[] {
+    const rows = this.stmts.identities.all(now - sinceMs) as { model: string; id: string; calls: number; first_at: number; last_at: number }[];
+    return rows.map((r) => ({ model: r.model, cliModelId: r.id, calls: Number(r.calls), firstAt: Number(r.first_at), lastAt: Number(r.last_at) }));
   }
 
   // The image quota is counted in generations, not tokens, and only a

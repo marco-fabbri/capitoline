@@ -161,6 +161,56 @@ describe("UsageStore", () => {
     }
   });
 
+  // 2026-09-23: `opus` moved from Opus 5 to Opus 5.5 with no configuration
+  // changed, and nothing in the history said which one any measurement used.
+  it("records the dated id of the model that answered, and null when the CLI said nothing", () => {
+    const s = new UsageStore(":memory:");
+    const now = 1_000_000_000_000;
+    s.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", cliModelId: "claude-opus-5", ts: now - 3 * 24 * 3600_000 });
+    s.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", cliModelId: "claude-opus-5-5", ts: now - 1000 });
+    s.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", cliModelId: "claude-opus-5-5", ts: now });
+    // Codex and Antigravity report nothing, and null is the honest value: the
+    // listing leaves them out rather than adding a row that says "as always".
+    s.record({ provider: "codex", model: "codex-gpt-5.5", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", ts: now });
+
+    // Two rows under one gateway name is the reading the column exists for.
+    expect(s.modelIdentities(7 * 24 * 3600_000, now)).toEqual([
+      { model: "claude-opus", cliModelId: "claude-opus-5", calls: 1, firstAt: now - 3 * 24 * 3600_000, lastAt: now - 3 * 24 * 3600_000 },
+      { model: "claude-opus", cliModelId: "claude-opus-5-5", calls: 2, firstAt: now - 1000, lastAt: now },
+    ]);
+    // A window that predates the change shows one model and no history.
+    expect(s.modelIdentities(3600_000, now).map((r) => r.cliModelId)).toEqual(["claude-opus-5-5"]);
+    s.close();
+  });
+
+  it("adds the model id column to a database written before it existed", () => {
+    // The store upgrades in place: three columns were added this way before
+    // (kind, caller, deliberation) and the history is kept, not rebuilt.
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-usage-"));
+    const path = join(dir, "usage.sqlite");
+    const now = 1_000_000_000_000;
+    try {
+      const old = new DatabaseSync(path);
+      old.exec(`CREATE TABLE calls (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
+        outcome TEXT NOT NULL, source TEXT NOT NULL)`);
+      old.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source) VALUES (?,?,?,?,?,?,?,?)`)
+        .run(now - 1000, "claude", "claude-opus", 1, 1, 5, "ok", "http");
+      old.close();
+
+      const s = new UsageStore(path);
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", cliModelId: "claude-opus-5-5", ts: now });
+      // The old row is still there and says nothing, which is true of it.
+      expect(s.totals("claude", 3600_000, now).calls).toBe(2);
+      expect(s.modelIdentities(3600_000, now)).toEqual([
+        { model: "claude-opus", cliModelId: "claude-opus-5-5", calls: 1, firstAt: now, lastAt: now },
+      ]);
+      s.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // What /health answers: who spent the window. The gateway's own health
   // probes are not a caller and would swamp the null row (45 of the first 56
   // calls on the host were health checks), so they are left out.

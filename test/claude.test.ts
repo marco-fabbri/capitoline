@@ -59,6 +59,18 @@ describe("claude adapter", () => {
     const done = ev.at(-1) as any;
     expect(done.type).toBe("done");
     expect(done.usage).toEqual({ input: 2 + 2947 + 3046, output: 6 });
+    // The dated id of what actually answered, which `--model opus` never says.
+    // Read from message_start and not from the result object's modelUsage,
+    // although both carry it: modelUsage is `{}` in every error capture, while
+    // message_start arrives before anything can go wrong. Confirmed against a
+    // real run on the host, 2026-09-23.
+    expect(done.cliModelId).toBe("claude-sonnet-5");
+  });
+  it("leaves the model id unset when the stream carried no message_start", async () => {
+    // "Nothing said" is a real state and null is its name. The locked capture
+    // is a real one and has no message_start in it.
+    const ev = await events("test/fixtures/claude/stream-json-locked.jsonl");
+    expect((ev.at(-1) as any).cliModelId).toBeUndefined();
   });
   it("uses the assistant message when no deltas were streamed", async () => {
     const ev = await events("test/fixtures/claude/stream-json-locked.jsonl");
