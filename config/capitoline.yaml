@@ -192,7 +192,7 @@ council:
     # and on a day when Fable and Opus are both refused the Anthropic seat
     # walks down to claude-sonnet and would otherwise leave the chain empty
     # after eight of the nine calls have been spent.
-    judge: { family: anthropic, models: [claude-opus, claude-sonnet, claude-haiku] }
+    judge: { family: best-available, models: [claude-fable, claude-opus, codex-gpt-6-astra, agy-gemini-pro, codex-gpt-5.6-sol] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to rank
@@ -218,7 +218,7 @@ council:
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-5.5] }
       - { family: google,       models: [agy-gemini-pro, agy-gemini-flash] }
       - { family: open-weights, models: [agy-gpt-oss] }
-    judge: { family: anthropic, models: [claude-opus, claude-sonnet, claude-haiku] }
+    judge: { family: best-available, models: [claude-fable, claude-opus, codex-gpt-6-astra, agy-gemini-pro, codex-gpt-5.6-sol] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to synthesize
@@ -279,7 +279,7 @@ council:
     # costs — claude-haiku merged the three answers and shipped a claim none of
     # them made, on the very point the question turned on (docs/backlog.md,
     # "The judge can introduce an error none of the members made").
-    judge: { family: anthropic, models: [claude-opus, claude-sonnet, agy-claude-sonnet] }
+    judge: { family: best-available, models: [codex-gpt-6-astra, claude-fable, claude-opus, codex-gpt-5.6-sol] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     # Every rung or nothing, unlike the two panels above. A ladder missing one

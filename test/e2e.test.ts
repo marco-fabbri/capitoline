@@ -353,7 +353,8 @@ describe("a council end to end", () => {
     ]);
     // The head of the judge's chain, seated because no rung can take it: the
     // ladder does not synthesize its own measurement.
-    expect(d.judge).toEqual({ model: "claude-opus", blind: true });
+    // The ladder opens its judge chain on OpenAI, never on Gemini it is measuring
+    expect(d.judge).toEqual({ model: "codex-gpt-6-astra", blind: true });
     // Seven calls: three answers, three rankings, one synthesis — the panel's
     // nine less the seat it does not have, read off the usage table.
     expect(d.calls).toBe(7);

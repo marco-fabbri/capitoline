@@ -277,13 +277,28 @@ describe("config", () => {
       expect(c.seats.map((s) => s.family), file).toEqual(["anthropic", "openai", "google", "open-weights"]);
       expect(c.seats[0].models, file).toEqual(["claude-fable", "claude-opus", "claude-sonnet"]);
       expect(c.seats[3].models, file).toEqual(["agy-gpt-oss"]);
-      expect(c.judge, file).toEqual({ family: "anthropic", models: ["claude-opus", "claude-sonnet", "claude-haiku"] });
-      // The judge is seated apart (judge_allow_member: false), so its chain
-      // must keep a model the panel cannot take: on a day when Fable and Opus
-      // are both refused the Anthropic seat walks down to claude-sonnet, and a
-      // judge chain inside the seat's would be empty with eight calls spent.
+      // The chain is the top model of each family, in descending order: the
+      // judge writes the answer the client reads, so it is the one seat where
+      // economising is false economy — measured on 2026-09-22, when a cheap
+      // judge merged three answers and shipped a claim none of them made.
+      // When the chain empties the design already degrades honestly (§12.5,
+      // the best-ranked answer returned unsynthesised), which is a better
+      // floor than a weak synthesis, so no cheap model closes it.
+      expect(c.judge, file).toEqual({ family: "best-available", models: ["claude-fable", "claude-opus", "codex-gpt-6-astra", "agy-gemini-pro", "codex-gpt-5.6-sol"] });
+      // Every model of this chain is also a seat candidate somewhere, and that
+      // is deliberate. seatJudge() filters the chain against the models the
+      // members actually took, not against every candidate, and four seats can
+      // take at most four of the five — so filtering alone always leaves one.
+      // Filtering plus refusals can still empty it, and that is accepted: when
+      // no judge can be seated the council returns the best-ranked answer
+      // unsynthesised and says so (§12.5), which is a better floor than the
+      // weak synthesis a cheap tail model would produce. Measured on
+      // 2026-09-22: a cheap judge shipped a claim none of the members made.
       const seatedModels = new Set(c.seats.flatMap((s) => s.models));
-      expect(c.judge.models.filter((m) => !seatedModels.has(m)), file).not.toEqual([]);
+      const takeable = c.seats.length;
+      expect(c.judge.models.length, `${file}: the chain must outnumber the seats, or filtering alone could empty it`).toBeGreaterThan(takeable);
+      expect(c.judge.models.every((m) => typeof m === "string" && m.length > 0), file).toBe(true);
+      expect(seatedModels.size, file).toBeGreaterThan(0);
       // Every provider must offer a slot per seat it serves, or the second
       // member of that provider waits on the queue and loses its seat: the
       // default seats put google and open-weights on antigravity (design §12.1).
@@ -353,13 +368,13 @@ describe("config", () => {
       // the reason every chain exists — the refusal that is not in the state
       // yet. A rung already known paused is simply not seated and the
       // deliberation degrades honestly, but a first refusal at the judge with
-      // an empty chain ends six spent calls in an error (design §12.2). The
-      // fallback is billed to the Google subscription, so it spends none of
-      // the Anthropic window this ladder was put on Gemini to spare.
-      // The head is the strongest model of the family, not the cheapest: the judge
-      // writes the answer, and the first ladder run measured a cheap judge shipping
-      // a claim none of the members made.
-      expect(ladder.judge, file).toEqual({ family: "anthropic", models: ["claude-opus", "claude-sonnet", "agy-claude-sonnet"] });
+      // an empty chain ends six spent calls in an error (design §12.2).
+      // The chain opens on OpenAI and not on Anthropic, unlike the panels':
+      // this ladder was put on Gemini to spare the Anthropic window, and a
+      // Claude judge would spend it back on one call in seven. No Gemini
+      // anywhere in the chain — the ladder must not synthesize its own
+      // measurement.
+      expect(ladder.judge, file).toEqual({ family: "best-available", models: ["codex-gpt-6-astra", "claude-fable", "claude-opus", "codex-gpt-5.6-sol"] });
       // Every rung or nothing: a ladder missing one has nothing to compare the
       // cheap rungs against, so the quorum is the whole panel and a lost rung
       // makes the instrument refuse instead of spending five uninterpretable
