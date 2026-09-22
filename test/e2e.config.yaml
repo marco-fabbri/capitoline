@@ -89,14 +89,19 @@ providers:
 
   antigravity:
     binary: test/fake-cli/fake-agy.sh
-    # Two slots, not one. The council seats Google and open weights on this
-    # same subscription (design §12.1), so with a single slot the second of
-    # the two members would wait on the provider's queue for
+    # Three slots, not one. The reference panel seats Google and open weights
+    # on this same subscription (design §12.1), so with a single slot the
+    # second of the two members would wait on the provider's queue for
     # server.queue.max_wait_s and then lose its seat to queue_full, twice per
-    # deliberation. Two `agy` processes on one subscription is what `claude`
+    # deliberation. Three rather than two because capitoline-gemini is a
+    # ladder of three rungs, all of them here, and all three start in the same
+    # instant. The count is per council, over the largest council this
+    # provider is seated in, and never the sum over the three: two councils
+    # overlapping is load, and load is what server.queue.max_wait_s answers.
+    # Three `agy` processes on one subscription is one more than `claude`
     # already runs above; the shared quota is accounted per model, not per
-    # slot, so the second slot costs nothing that the first does not.
-    concurrency: 2
+    # slot, so the third slot costs nothing that the first does not.
+    concurrency: 3
     timeout_s: 10
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: agy-gemini-flash
@@ -106,6 +111,14 @@ providers:
       agy-gemini-3.7-flash: { cli_model: gemini-3.7-flash, effort_suffix: true }
       agy-gemini-3.6-flash: { cli_model: gemini-3.6-flash, effort_suffix: true }
       agy-gemini-pro:       { cli_model: gemini-3.1-pro,   effort_suffix: true, efforts: [low, high] }
+      # The three rungs of capitoline-gemini. The reasoning level is part of
+      # the id here and not a request-time choice (effort_suffix: false), which
+      # is what makes a seat a rung: `agy-gemini-pro` above answers at whatever
+      # effort the request asks for, while `agy-gemini-pro-high` is one fixed
+      # point on the ladder. Every id is one `agy models` lists.
+      agy-gemini-pro-high:   { cli_model: gemini-3.1-pro-high,   effort_suffix: false }
+      agy-gemini-flash-high: { cli_model: gemini-3.8-flash-high, effort_suffix: false }
+      agy-gemini-flash-low:  { cli_model: gemini-3.8-flash-low,  effort_suffix: false }
       # The council's open-weights seat. `agy models` lists this family at one
       # effort only (gpt-oss-120b-medium), so `efforts` pins it: with the
       # provider's whole table open, a request asking for `high` would build
@@ -192,4 +205,45 @@ council:
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to synthesize
     ranking: false              # no stage 2: four answers and a synthesis, five calls
+    stage_timeout_s: 20         # seconds, not minutes, so a hung member fails fast in the suite
+
+  # The first capability ladder: one family at three reasoning levels, biggest
+  # first — the big model, the small one trying, the small one not trying. It
+  # answers "how far down can I go", not "which answer is best": if the three
+  # rungs agree, the cheapest of them would have sufficed. A measuring
+  # instrument to run over a sample of real questions, not a daily mode.
+  #
+  # On Gemini and not on Claude because a ladder spends three of its calls on
+  # the family it measures and the Anthropic weekly window is the scarce one.
+  # Antigravity serves no Flash-Lite — that model lives in the Gemini API,
+  # which this gateway does not use — but it serves every model at several
+  # reasoning levels, and those are better rungs than three Claude sizes
+  # would be, because the level is pinned by the model id itself.
+  #
+  # This is the one council that seats a single lineage more than once, and it
+  # does so knowingly: one seat per family is what buys independent judgment
+  # (design §12.2), and independent judgment is not what is being bought here.
+  # A seat's `family` is therefore the name of its rung.
+  #
+  # No `ranking: false`. The blind peer ranking is the measurement itself — it
+  # is what says whether the cheap rung's answer is judged as good as the
+  # expensive one's — so the shape stays the reference panel's, as the name
+  # already says: `-gemini` is a family name, not a shape word (design §12.8).
+  capitoline-gemini:
+    seats:
+      # No fallback chain on any rung: a seat stepping down to another model
+      # stops being the rung whose capability was being measured, and the
+      # deliberation would report a ladder it never ran. A rung the state
+      # refuses is a lost seat and is declared as one (design §12.5).
+      - { family: pro-high,   models: [agy-gemini-pro-high] }
+      - { family: flash-high, models: [agy-gemini-flash-high] }
+      - { family: flash-low,  models: [agy-gemini-flash-low] }
+    # The judge is no rung, and no Gemini at all: the ladder under test must
+    # not synthesize its own measurement. claude-haiku is the cheapest model of
+    # another family and sits in no seat of any council, so nothing has to
+    # stand behind it in the chain the way it does for the reference panel.
+    judge: { family: anthropic, models: [claude-haiku] }
+    judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
+    judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
+    min_members: 2              # two rungs still compare, and the response names the one that was lost
     stage_timeout_s: 20         # seconds, not minutes, so a hung member fails fast in the suite

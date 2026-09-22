@@ -268,7 +268,7 @@ describe("config", () => {
   it("loads the council of both configuration files", () => {
     for (const file of BOTH_FILES) {
       const cfg = loadConfig(file);
-      expect(Object.keys(cfg.council), file).toEqual(["capitoline", "capitoline-fast"]);
+      expect(Object.keys(cfg.council), file).toEqual(["capitoline", "capitoline-fast", "capitoline-gemini"]);
       const c = cfg.council.capitoline;
       // One seat per family, and no family twice — a rule the schema enforces
       // ("rejects two seats of the same family"), because models of one
@@ -323,6 +323,69 @@ describe("config", () => {
       // the rule is per council, so the two slots the reference panel needs
       // are the two this one needs (task 1 of the variants plan).
       expect(cfg.providers.antigravity.concurrency, file).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("ships capitoline-gemini as one capability ladder on Antigravity", () => {
+    for (const file of BOTH_FILES) {
+      const cfg = loadConfig(file);
+      const ladder = cfg.council["capitoline-gemini"];
+      // Three rungs of one lineage, best first: the big model, the small one
+      // trying, the small one not trying. `-gemini` is a family name and not a
+      // shape word (design §12.8), so the shape is the reference panel's —
+      // here the blind ranking is the measurement itself, since what the
+      // instrument asks is whether the cheap rung's answer is judged as good
+      // as the expensive one's.
+      expect(ladder.ranking, file).toBe(true);
+      // One model per seat and no chain: a rung that steps down to another
+      // model stops being the rung it was declared to measure.
+      expect(ladder.seats.map((s) => s.models), file).toEqual([["agy-gemini-pro-high"], ["agy-gemini-flash-high"], ["agy-gemini-flash-low"]]);
+      // The reasoning level is part of the model id and not a request-time
+      // choice, which is what makes a seat a rung: effort_suffix is off, so
+      // the id reaches the CLI exactly as written here.
+      const agy = cfg.providers.antigravity;
+      for (const [name, cli] of [["agy-gemini-pro-high", "gemini-3.1-pro-high"], ["agy-gemini-flash-high", "gemini-3.8-flash-high"], ["agy-gemini-flash-low", "gemini-3.8-flash-low"]]) {
+        expect(agy.models[name], `${file} ${name}`).toMatchObject({ cli_model: cli, effort_suffix: false, kind: "text" });
+      }
+      // The judge is neither a rung nor Gemini at all: the ladder under test
+      // must not synthesize its own measurement. claude-haiku is the cheapest
+      // model of another family, and it sits in no seat of any council — with
+      // judge_allow_member false, a judge the panel could take would leave the
+      // chain empty on the day the seats walk down to it.
+      expect(ladder.judge, file).toEqual({ family: "anthropic", models: ["claude-haiku"] });
+      expect([ladder.judgeAllowMember, ladder.judgeBlind, ladder.minMembers], file).toEqual([false, true, 2]);
+      const seatedAnywhere = new Set(Object.values(cfg.council).flatMap((c) => c.seats.flatMap((s) => s.models)));
+      expect(seatedAnywhere.has("claude-haiku"), file).toBe(false);
+      expect(ladder.stageTimeoutS, file).toBe(cfg.council.capitoline.stageTimeoutS);
+    }
+  });
+
+  it("gives every provider a slot for the largest council it is seated in", () => {
+    for (const file of BOTH_FILES) {
+      const cfg = loadConfig(file);
+      // The rule of task 1, recomputed here over the shipped file: per
+      // council, over the largest council each provider is seated in, and
+      // deliberately not summed across them — the sum would ask one
+      // Antigravity subscription for seven parallel `agy` processes and reject
+      // this very configuration at startup, under Restart=always.
+      const providerOf = new Map(Object.entries(cfg.providers).flatMap(([id, p]) => Object.keys(p.models).map((m) => [m, id] as const)));
+      const largest = new Map<string, number>();
+      for (const c of Object.values(cfg.council)) {
+        const per = new Map<string, number>();
+        for (const s of c.seats) {
+          for (const pid of new Set(s.models.map((m) => providerOf.get(m)))) if (pid) per.set(pid, (per.get(pid) ?? 0) + 1);
+        }
+        for (const [pid, n] of per) largest.set(pid, Math.max(largest.get(pid) ?? 0, n));
+      }
+      // Three rungs on one subscription is the largest Antigravity seating of
+      // the three councils — the reference panel and the fast one seat it
+      // twice each — so `concurrency: 3` is the whole change the ladder costs
+      // and no other provider moves.
+      expect(largest.get("antigravity"), file).toBe(3);
+      expect(cfg.providers.antigravity.concurrency, file).toBe(3);
+      expect(cfg.providers.claude.concurrency, file).toBe(2);
+      expect(cfg.providers.codex.concurrency, file).toBe(1);
+      for (const [pid, seats] of largest) expect(cfg.providers[pid].concurrency, `${file} ${pid}`).toBeGreaterThanOrEqual(seats);
     }
   });
 
@@ -494,6 +557,7 @@ describe("the end-to-end configuration tracks the repository one", () => {
   // machine as on the host.
   const INTENDED = [
     "council.capitoline-fast.stageTimeoutS",     // the same, for the fast shape
+    "council.capitoline-gemini.stageTimeoutS",   //   and for the ladder
     "council.capitoline.stageTimeoutS",          // seconds, not minutes, so a suspended member fails fast
     "providers.antigravity.binary",              // the fake CLIs replay fixtures
     "providers.antigravity.image.collect",       //   and so does the collect helper
@@ -539,7 +603,7 @@ describe("the end-to-end configuration tracks the repository one", () => {
       expect(p.timeout_s, id).toBeLessThanOrEqual(30);
       expect(repo.providers[id].timeout_s, id).toBeGreaterThanOrEqual(600);
     }
-    for (const name of ["capitoline", "capitoline-fast"]) {
+    for (const name of ["capitoline", "capitoline-fast", "capitoline-gemini"]) {
       expect(e2e.council[name].stageTimeoutS, name).toBeLessThanOrEqual(30);
       expect(repo.council[name].stageTimeoutS, name).toBeGreaterThanOrEqual(300);
     }
