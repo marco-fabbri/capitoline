@@ -1,6 +1,7 @@
 # Terms of service: what the CLI-behind-an-API pattern is allowed to do
 
-Checked 2026-09-21 against the primary documents. Not legal advice; a reading of
+Checked 2026-09-21 against the primary documents; the boundary re-read and
+redrawn 2026-09-22. Not legal advice; a reading of
 the texts as they stand today, with the quotes that matter. Re-check after any
 provider announcement.
 
@@ -11,7 +12,9 @@ Capitoline runs the unmodified official CLIs (`claude -p`, `codex exec`,
 subscriptions, and exposes their answers over an HTTP API and an MCP server
 that only the owner's credentials (Cloudflare Access) can reach.
 
-The question that decides everything is **who the answers are for**.
+The question that decides everything is **whether anyone but the owner can
+put words in front of a model**. Not who reads the answer: who writes the
+prompt. **Where the line is**, below, says why.
 
 ## Anthropic (Claude Max)
 
@@ -38,10 +41,10 @@ Sources: [Consumer Terms](https://www.anthropic.com/legal/consumer-terms),
   or make your Account available to anyone else."
 
 Reading: the owner asking Claude questions through their own tooling is
-ordinary individual use of the official binary. A service whose end users are
-other people, answered through the owner's Max plan, is "routing requests
-through Max plan credentials on behalf of their users": not permitted, and
-the page says Anthropic enforces without notice.
+ordinary individual use of the official binary. The clause about routing
+requests "on behalf of their users" is the one that decides everything else,
+and it is read below, under **Rule for this project**, rather than here: it
+is the same question for all three providers and it deserves one answer.
 
 ## OpenAI (ChatGPT Pro, Codex)
 
@@ -58,9 +61,9 @@ Sources: [Terms of Use](https://openai.com/policies/terms-of-use/),
   and say to treat `auth.json` "like a password"; they do not forbid plan
   sign-in in automation.
 
-Reading: the owner's own use through the official CLI is within the plan;
-answering other people's requests with the owner's plan makes the account
-"available to anyone else". Same line as Anthropic, less explicitly drawn.
+Reading: the owner's own use through the official CLI is within the plan.
+"Available to anyone else" is the same clause Anthropic draws more explicitly,
+and it is read the same way, below.
 
 ## Google (AI Pro, Antigravity)
 
@@ -77,22 +80,81 @@ Sources: [Antigravity additional terms](https://antigravity.google/terms),
   beyond robots.txt-style scraping.
 
 Reading: the least precise of the three. Personal use through the official
-binary is defensible; serving other people is the same risk as above, and the
-wording gives Google the widest latitude.
+binary is defensible, and the same line is taken here as for the other two —
+with the caveat that the wording gives Google the widest latitude, so a path
+that is marginal anywhere is marginal here first.
+
+## Where the line is
+
+The three quotations that matter are alike: Anthropic forbids a third-party
+developer to "offer Claude.ai login into their own applications, or to route
+requests through Free, Pro, or Max plan credentials on behalf of their users",
+and both Anthropic and OpenAI forbid making the account "available to anyone
+else". Google's wording is looser and gives Google the widest latitude.
+
+**This is read narrowly, and the reading is stated here rather than assumed.**
+Two readings are available. The broad one: any request whose answer serves
+another person. The narrow one: do not let other people use your subscription
+as their own Claude — no resale, no proxied login, no free access handed out.
+
+The narrow reading is taken, for a reason that can be checked. The shape the
+clause names is a product that lets *its* users sign in with, or spend, the
+developer's plan; that is what Anthropic actually shut down in February 2026,
+and the sentence sits in a paragraph about OAuth and about developers who
+should be using API keys. The broad reading would also forbid a script that
+summarises the owner's mail and sends the summary to his wife, which is not
+what the clause pursues and not how anyone reads it.
+
+So the line is drawn at **free-form passthrough**:
+
+- **Not permitted: text of another person's choosing reaching a model.** A
+  chat window, an API handed out, a command that forwards whatever was typed.
+  If someone else can put words in front of the model, the account has been
+  made available to them, and that is the clause.
+- **Defensible: the model as an internal component of the owner's software.**
+  The code composes the prompt from its own data and its own templates; a
+  person presses a button or types a fixed command and receives the
+  software's output. They are a recipient of a product, not a user of Claude.
+
+Four conditions hold the second case up, and all four must hold:
+
+1. **No user text reaches a prompt.** Every value a person supplies is chosen
+   from a closed list the software defines, or is data the software itself
+   produced. A free-text field that lands in a prompt fails this outright.
+2. **Personal volume.** "Ordinary, individual usage", in Anthropic's words.
+   A few dozen calls a day, not a product's traffic.
+3. **Nothing is sold.** No subscription, no per-use charge, no access resold.
+4. **No provider is named or branded.** The output is the software's, not an
+   answer presented as coming from Claude, Codex or Gemini.
+
+The residual risk is not zero and this document will not pretend otherwise:
+the broad reading exists, and a provider who chose it would be within the
+words. What is recorded here is which reading is being followed and why, so
+that if one of the four conditions stops holding, the change is visible and
+the path moves to free-tier or self-hosted inference instead.
 
 ## Rule for this project
 
 1. **Subscription providers (`claude-*`, `codex-*`, `agy-*`) serve the owner
-   only**: Claude Code via MCP, Open WebUI, the owner's scripts, the council
-   the owner asks. Volumes stay "ordinary, individual".
+   and the owner's own software**: Claude Code via MCP, Open WebUI, the
+   owner's scripts, the council the owner asks, and the applications listed in
+   `docs/clients.md`. Volumes stay "ordinary, individual".
 2. **Content the owner generates and then publishes is the owner's use**: a
    batch that writes recipes into a database, an article draft, images for a
    site. Who reads the result afterwards does not matter, as with any text
    written with Claude and published.
-3. **Requests triggered by other people, answered live for them** (a bot
-   command that calls a model for the parent who typed it, a service for
-   colleagues, an endpoint registered in a corporate gateway) **must not be
-   answered by the subscription providers.** Those paths use free-tier or
-   self-hosted inference (Gemini free tier, the platform, Ollama), or API keys if the
-   no-pay-per-use rule is ever lifted.
-4. Never pool accounts, never share the service token with anyone else's app.
+3. **A request another person triggered may be answered by a subscription
+   provider only when all four conditions above hold.** app-one's `/dinner`
+   is the case that settled this: a parent types a fixed command, the Worker
+   builds the prompt from the menu, the month, the dishes already
+   suggested and a set of taste codes taken from a closed list, and sends a
+   dinner suggestion back. No word the parent wrote reaches the model. That
+   is the software using the owner's subscription to run itself.
+4. **A path that takes free text from another person uses something else**:
+   free-tier inference (app-one already holds a Gemini free-tier key),
+   self-hosted (the platform, Ollama), or API keys if the no-pay-per-use rule is ever
+   lifted. This is not a matter of volume and cannot be bought off with a
+   rate limit.
+5. Never pool accounts, and give every application its own service token —
+   never a shared one, and never a token belonging to someone else's app
+   (`docs/clients.md`).

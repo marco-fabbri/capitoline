@@ -26,7 +26,7 @@ Requirements: Node 24.x (pinned in `.nvmrc`; `engines` is `>=24 <25`), and the C
     npm ci && npm run build
     node dist/main.js                      # reads config/capitoline.yaml, listens on 127.0.0.1:8080
 
-Production deployment on any Debian/Ubuntu host (a Nutanix AHV VM, a Proxmox LXC, bare metal), with a separate `runner` user and Cloudflare Tunnel + Access: see `docs/deploy.md`. An OpenAI-compatible API adapter (a company inference platform, Ollama, vLLM) is planned next, which also makes a stateless Kubernetes/NKP deployment possible.
+Connecting another application of your own: `docs/clients.md`, which covers the service token, where the secret goes and what the token may be used for. Production deployment on any Debian/Ubuntu host (a Nutanix AHV VM, a Proxmox LXC, bare metal), with a separate `runner` user and Cloudflare Tunnel + Access: see `docs/deploy.md`. An OpenAI-compatible API adapter (a company inference platform, Ollama, vLLM) is planned next, which also makes a stateless Kubernetes/NKP deployment possible.
 
 ## Use it
 
