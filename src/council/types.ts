@@ -72,3 +72,63 @@ export interface Aggregate {
   averageRank: number;
   votes: number;
 }
+
+/**
+ * One member as the client is told about it, after the fact and un-blinded
+ * (§12.6): the seat's family, the model that actually answered, the label its
+ * answer was ranked under and the answer itself.
+ *
+ * `fellBackFrom` lists the models of the chain the seat walked past to get
+ * here, in the order it walked them, each with the reason it was walked past —
+ * `"claude-fable (rate_limited)"`. Both halves of the two-step seating land in
+ * it: the models the state already reported unavailable before the call, and
+ * the one model a mid-flight refusal stepped down from. It is absent, not
+ * empty, when the seat took the first model of its chain, so the common case
+ * costs nothing in the response.
+ */
+export interface DeliberationMember {
+  family: string;
+  model: string;
+  label: string;
+  answer: string;
+  fellBackFrom?: string[];
+}
+
+/**
+ * A seat that produced no answer, declared rather than hidden (§12.5). `model`
+ * is the last model the seat tried and is absent when it never called one,
+ * which is the case of a seat whose whole chain the state already reported
+ * unavailable.
+ */
+export interface LostSeat {
+  family: string;
+  model?: string;
+  reason: string;
+}
+
+/** One member's vote, under the model that cast it. The deliberation reaches the client un-blinded, so the voter is named by model; its label is in `members`. */
+export interface MemberRanking {
+  by: string;
+  ranking: Ranking[];
+}
+
+/**
+ * Everything the council did, which is what the `capitoline` field of the
+ * response carries (§12.6). It is the un-blinded record of a blind
+ * deliberation: the labels the members ranked under sit next to the real model
+ * names, after the fact, where no prompt can reach them.
+ *
+ * `judge.model` is the empty string when no judge was seated — the one case of
+ * §12.5, where a single surviving answer is returned as it is and nothing is
+ * synthesised. `calls` counts every call the deliberation spent, retries
+ * included, which is what §12.7 ties to the usage rows.
+ */
+export interface Deliberation {
+  strategyVersion: number;
+  members: DeliberationMember[];
+  lost: LostSeat[];
+  rankings: MemberRanking[];
+  aggregate: Aggregate[];
+  judge: { model: string; blind: boolean };
+  calls: number;
+}

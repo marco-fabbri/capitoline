@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CapitolineError, type Attachment, type ErrorKind, type InternalRequest, type Message, type Usage } from "../core/types.js";
+import { CapitolineError, type Attachment, type ErrorKind, type FailureKind, type InternalRequest, type Message, type Usage } from "../core/types.js";
 import { EffortSchema } from "../config.js";
 
 const Part = z.union([
@@ -81,7 +81,12 @@ export const CLIENT_MESSAGE: Record<string, string> = {
   bad_output: "the provider returned unreadable output",
 };
 
-export function httpStatus(e: CapitolineError | ErrorKind): { status: number; retryAfterS?: number } {
+// FailureKind and not ErrorKind: the switch below already answers for every
+// one of them, and a council reports the kind of the failure that ended it
+// (queue_full, model_unavailable) exactly as Core would have reported it to a
+// direct request. Every existing caller passes a narrower value and is
+// unaffected.
+export function httpStatus(e: CapitolineError | FailureKind): { status: number; retryAfterS?: number } {
   const kind = typeof e === "string" ? e : e.kind;
   const retry = typeof e === "string" ? undefined : e.retryAfterS;
   switch (kind) {
