@@ -14,10 +14,29 @@ import { Council, type CouncilEvent } from "../src/council/council.js";
 import type { CouncilConfig, Deliberation, Seat } from "../src/council/types.js";
 
 const OK: ProviderEvent[] = [{ type: "text", delta: "hel" }, { type: "text", delta: "lo" }, { type: "done", usage: { input: 3, output: 2 } }];
+
+/**
+ * The queue budget every Core in this file is built with. Seconds, not the
+ * tenth of a second it was until 2026-09-22.
+ *
+ * Nothing here tests queueing: the fake providers answer at once, and the one
+ * test that means to see a `queue_full` injects the event rather than racing
+ * the semaphore for it. What a tenth of a second bought was a failure mode —
+ * a worker busy enough to delay a slot by 100 ms turns any of these into a 503
+ * with `queue_full`, under whatever name the losing test happened to have,
+ * which is the shape of the flake recorded in docs/backlog.md. The council
+ * block below is the likeliest loser: a deliberation makes several calls
+ * through providers of concurrency one, so its members really do queue behind
+ * each other, and only the scheduler decides by how much.
+ *
+ * Raising it costs nothing. A test that hangs is caught by vitest's own
+ * timeout, which is what should catch it.
+ */
+const QUEUE_WAIT_MS = 5_000;
 function make(script: ProviderEvent[] = OK, access?: RequestHandler) {
   const p = new FakeProvider("claude", ["claude-opus"], script, 1);
   const usage = new UsageStore(":memory:");
-  const core = new Core([p], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+  const core = new Core([p], usage, { maxWaitMs: QUEUE_WAIT_MS, budgets: {}, log: createLogger("t") });
   const outcomes = () => (usage as unknown as { db: { prepare(q: string): { all(): { outcome: string }[] } } }).db
     .prepare("SELECT outcome FROM calls WHERE source = 'http' ORDER BY id").all().map((r) => r.outcome);
   return { p, core, usage, outcomes, app: createApp(core, { log: createLogger("t"), access }) };
@@ -258,7 +277,7 @@ function makeImages(script: ProviderEvent[] = [IMG, { type: "done" }], access?: 
   const p = new FakeProvider("antigravity", ["agy-text", { name: "agy-image", kind: "image" }], OK, 1);
   p.imageScript = script;
   const usage = new UsageStore(":memory:");
-  const core = new Core([p], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t"), imageQuotas: { antigravity: 12 } });
+  const core = new Core([p], usage, { maxWaitMs: QUEUE_WAIT_MS, budgets: {}, log: createLogger("t"), imageQuotas: { antigravity: 12 } });
   return { p, core, usage, app: createApp(core, { log: createLogger("t"), access }) };
 }
 
@@ -287,7 +306,7 @@ describe("POST /v1/images/generations", () => {
     const second = new FakeProvider("two", [{ name: "two-image", kind: "image" }], OK, 1);
     first.imageScript = [IMG, { type: "done" }]; second.imageScript = [IMG, { type: "done" }];
     first.healthResult = { ok: false, kind: "auth_expired", detail: "expired", checkedAt: 0 };
-    const core = new Core([first, second], new UsageStore(":memory:"), { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+    const core = new Core([first, second], new UsageStore(":memory:"), { maxWaitMs: QUEUE_WAIT_MS, budgets: {}, log: createLogger("t") });
     await core.checkHealth();
     const app = createApp(core, { log: createLogger("t") });
     const r = await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse" });
@@ -493,7 +512,7 @@ function makeCouncil(seats: Seat[] = COUNCIL_SEATS, agyScript: Script = councilR
   const codex = new FakeProvider("codex", ["codex-astra"], councilReply, 1);
   const agy = new FakeProvider("agy", ["agy-pro"], agyScript, 1);
   const usage = new UsageStore(":memory:");
-  const core = new Core([claude, codex, agy], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+  const core = new Core([claude, codex, agy], usage, { maxWaitMs: QUEUE_WAIT_MS, budgets: {}, log: createLogger("t") });
   const council = new Council("capitoline", { ...COUNCIL_CFG, seats }, core, createLogger("t"));
   core.registerVirtual("capitoline", (q, ctx) => council.deliberate(q, ctx), (models) => council.seatable(models));
   return { core, claude, codex, agy, app: createApp(core, { log: createLogger("t") }) };
@@ -518,7 +537,7 @@ function makeVirtual(events: CouncilEvent[] = SYNTHESIS) {
 function makeVirtualRun(run: (question: string, ctx: Context) => AsyncIterable<CouncilEvent>) {
   const p = new FakeProvider("claude", ["claude-opus"], OK, 1);
   const usage = new UsageStore(":memory:");
-  const core = new Core([p], usage, { maxWaitMs: 100, budgets: {}, log: createLogger("t") });
+  const core = new Core([p], usage, { maxWaitMs: QUEUE_WAIT_MS, budgets: {}, log: createLogger("t") });
   core.registerVirtual("capitoline", run);
   return { core, app: createApp(core, { log: createLogger("t") }) };
 }

@@ -10,7 +10,11 @@ not one of them but a later observation from the host, still to be confirmed.
 
 ## Tests
 
-- **A flaky test in the suite.** Seen twice on 2026-09-22, both times a single failure that passed on the next run with nothing changed; once identified as `POST /v1/images/generations > maps provider error timeout to 504`, once unidentified because the second run was already green. A test that fails at random is worse than a missing one: it teaches the reader to ignore red. Find it by running the suite in a loop with `--reporter=verbose` until it reproduces, and fix the timing assumption rather than widening the timeout — the timeout path is exercised through the fake CLI's `hang` mode and a real deadline, so the race is probably between the runner's kill and the assertion.
+- **A flaky test in the suite, still unreproduced.** Seen three times on 2026-09-22, each time a single failure that passed on the next run with nothing changed; once identified as `POST /v1/images/generations > maps provider error timeout to 504`. It did not reproduce under 12 consecutive full-suite runs and 25 runs of `test/server.test.ts` alone, so what follows is a narrowed cause and not a confirmed one.
+
+  The backlog first guessed a race between the runner's kill and the assertion. That is wrong for the named test: it uses a fake provider with no delay and no deadline, so no process is involved at all. What every `Core` in `test/server.test.ts` did share was `maxWaitMs: 100`, and a worker busy enough to delay a concurrency slot by a tenth of a second turns any request in that file into a 503 with `queue_full` — under whatever name the losing test happens to have, which explains both the intermittency and why the reported name is not stable. Nothing in the file tests queueing (the one `queue_full` test injects the event), so the budget has been raised to five seconds and the class of failure removed rather than the instance found. The council block of that file is the likeliest loser: a deliberation makes several calls through providers of concurrency one, so its members genuinely queue behind each other.
+
+  Left open because it is a narrowing and not a capture: if it recurs, the next step is `--reporter=verbose` with the failing body printed, since a `queue_full` code in the response would confirm this reading outright.
 
 ## Council
 
