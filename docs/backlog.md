@@ -28,6 +28,13 @@ not one of them but a later observation from the host, still to be confirmed.
 
   Still open. **The measurement across question shapes**: strategy 2 has three runs now and all on one question, which says the failure did not recur and nothing about whether the prompt helps in general. And then, only if it does not, **the fourth stage**: one member checking the synthesis against the answers, which doubles the tail of every deliberation and should not be built while cheaper remedies are untested.
 
+## Providers
+
+- A decisive capture for Codex's cached input. The one taken on the host (2026-09-22, the same prompt twice through `codex exec`) gave `input=13399 cached=4480` then `input=11738 cached=2432`: the input moves between identical prompts, so the numbers alone exclude neither reading. What it would take is a prompt whose input token count is stable across runs — no session history, no repository context, nothing dated injected by the CLI — sent twice, the second run hitting the cache: only then does `cached` counted inside or beside `input` show up as a difference in the total. Nothing to decide until such a prompt exists; why each adapter is right as it stands is in Shipped, 2026-09-22.
+
+## Runner
+
+
 ## Dated
 
 - **October 2026: ChatGPT Pro becomes Plus** (2026-09-22). The Codex subscription drops back from Pro to Plus. Assessed the same day, and the conclusion is that **nothing needs changing beforehand**: the design already absorbs a scarce provider. A refused provider is paused, disappears from `/v1/models`, and the council's seat chains read that state and step down to another family without spending a call; `runHealthCheck` skips a paused provider, so the hourly probe stops too; and with `min_members: 2` the reference panel deliberates with three members instead of four, which is degrading honestly rather than failing. The gateway does no polling, so a pause only ever costs a call when a request actually arrives.
