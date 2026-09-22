@@ -339,15 +339,18 @@ Edit `/etc/capitoline/overlay.yaml`:
 | `runner.sandbox_root` | `/var/lib/capitoline/sandboxes` |
 | `usage.db_path` | `/var/lib/capitoline/usage.sqlite` — absolute, because the service's working directory is the clone |
 | `providers.claude.binary` | `/home/runner/.npm-global/bin/claude` |
-| `providers.claude.args` | the repository's list plus `--settings` and `/home/runner/.claude/capitoline.json` as two more items, written out in full because a list replaces. That file (owned by `runner`, mode `0600`) holds `{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}`, and `--settings` applies even with `--setting-sources ""`, so the gateway process never sees the token. It is the one value the overlay pins against the repository: re-read it after a pull that changes `providers.claude.args` |
+| `providers.claude.args` | the repository's list plus `--settings` and `/home/runner/.claude/capitoline.json` as two more items, written out in full because a list replaces. That file (owned by `runner`, mode `0600`) holds `{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}`, and `--settings` applies even with `--setting-sources ""`, so the gateway process never sees the token. It is the one value the overlay pins against the repository: re-read it after a pull that changes `providers.claude.args`, with the command below |
 | `providers.codex.binary` | `/home/runner/.npm-global/bin/codex` |
 | `providers.antigravity.binary` | `/home/runner/.local/bin/agy` |
 | `providers.antigravity.image.collect` | `[/usr/local/bin/capitoline-collect-image]` — must match the sudoers path of §5 (a developer machine sets `runner.user: null` and points it at `scripts/capitoline-collect-image`; the runner then spawns it directly, as the developer, so it reads that machine's own `$HOME`) |
 | `server.access.team_domain`, `server.access.audience` | filled in §9; both empty until then |
 
 `config/overlay.example.yaml` in the repository is exactly this file with the
-Access pair left empty, and `test/config.test.ts` pins its key list: a host
-key added there without a line here, or the other way round, fails in CI.
+Access pair left empty, and `test/config.test.ts` pins the list of keys that
+example sets: a key added to it, or dropped from it, fails in CI until the
+list in the test is updated too. The table above is prose and nothing checks
+it against either — a row added here without a key there passes, so the two
+are kept in step by hand.
 
 Everything else stays in the repository file, the verified set for the CLI
 versions of `docs/update-clis.md`. Three of its keys are worth knowing even
@@ -374,7 +377,36 @@ startup, where under `Restart=always` (§8) it is a restart loop whose only
 trace is the journal. The message names both files, since the rejected key is
 in one of the two. A missing overlay file is an error as well, never a silent
 skip: a typo in the path would otherwise start the gateway on the repository's
-own sandboxes, database and user.
+own sandboxes, database and user. An overlay that exists but is empty — the
+file created now and filled in later, a write cut short — is refused by name
+(`the configuration overlay /etc/capitoline/overlay.yaml is empty`) rather
+than as a schema error with no key in it.
+
+One value in the overlay is a copy of a repository value and drifts silently:
+`providers.claude.args`, written out in full because a list replaces. After a
+pull that changes it the host keeps passing the old command line, and
+`check-config` stays green — the schema is satisfied either way. Re-read it
+with the same two files the service loads:
+
+```sh
+cd /var/lib/capitoline/app && sudo -Hu capitoline node -e "
+import('./dist/config.js').then(m => {
+  const repo = m.loadConfig('config/capitoline.yaml').providers.claude.args;
+  const host = m.loadConfig('config/capitoline.yaml', '/etc/capitoline/overlay.yaml').providers.claude.args;
+  const same = JSON.stringify(host.slice(0, repo.length)) === JSON.stringify(repo);
+  console.log(same ? 'args in step; the host adds: ' + host.slice(repo.length).join(' ')
+                   : 'DRIFT\nrepo: ' + repo.join(' ') + '\nhost: ' + host.join(' '));
+});"
+```
+
+It prints `args in step` and the host's own tail (`--settings
+/home/runner/.claude/capitoline.json`) when the overlay's list is still the
+repository's plus that tail, and the two command lines when it is not — in
+which case edit the overlay's `args` to the repository's list with the tail
+back at the end. Run it after every pull that touches `claude`'s flags
+(`docs/update-clis.md` step 3). The residue is recorded in `docs/backlog.md`
+§ Deployment: a dedicated key for the host's extra arguments would remove the
+duplication altogether.
 
 **A host that still runs a full copy keeps working.** Passing no overlay is
 still supported and behaves exactly as it did, so a deployment where
@@ -476,7 +508,9 @@ having to know what `WorkingDirectory` is. The first line of the journal at
 every start is `configuration loaded`, naming both files and the keys — never
 the values — the overlay set. A host that has not migrated yet keeps the
 single `CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml` and no
-`CAPITOLINE_OVERLAY`, and behaves exactly as before.
+`CAPITOLINE_OVERLAY`, and behaves exactly as before; `CAPITOLINE_OVERLAY=`
+with nothing after it counts as no overlay too, which is how the variable is
+turned off without editing the unit's other lines.
 
 `NoNewPrivileges` must stay off: `sudo` needs it. The service listens on
 `127.0.0.1:8080` only. The startup log shows `listening` first, then one
@@ -764,11 +798,24 @@ the step below. And hence a scratch directory owned by `capitoline` and
 usage data, and `/var/tmp` is world-readable on a host that also runs
 `runner`.
 
-Putting it back:
+Putting it back. The configuration goes back into the file this host's own
+unit names — `/etc/capitoline/overlay.yaml` on a host migrated to the overlay
+of §7, `/etc/capitoline/capitoline.yaml` on one that still runs a full copy,
+the same distinction the validation above makes. It is read from the unit
+rather than assumed, because writing the archive into the other file leaves
+the live configuration in place: the service then restarts clean on exactly
+what was being replaced, and nothing says so. `CAPITOLINE_OVERLAY` first and
+`CAPITOLINE_CONFIG` only when it is unset or empty, since on a migrated host
+the base is the clone's `config/capitoline.yaml`, which is in git and is not
+what the archive holds.
 
 ```sh
 systemctl stop capitoline
-install -o root -g capitoline -m 0640 /var/tmp/restore/capitoline.yaml /etc/capitoline/overlay.yaml
+env=$(systemctl show capitoline -p Environment --value | tr ' ' '\n')
+dest=$(printf '%s\n' "$env" | sed -n 's/^CAPITOLINE_OVERLAY=//p')
+dest=${dest:-$(printf '%s\n' "$env" | sed -n 's/^CAPITOLINE_CONFIG=//p')}
+echo "$dest"        # /etc/capitoline/overlay.yaml, or the full copy — never the clone's own file
+install -o root -g capitoline -m 0640 /var/tmp/restore/capitoline.yaml "$dest"
 install -o capitoline -g capitoline -m 0640 /var/tmp/restore/usage.sqlite /var/lib/capitoline/usage.sqlite
 rm -f /var/lib/capitoline/usage.sqlite-wal /var/lib/capitoline/usage.sqlite-shm
 systemctl start capitoline

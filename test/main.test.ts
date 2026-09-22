@@ -234,6 +234,48 @@ describe("start() with a host overlay", () => {
     await expect(start(CONFIG, { port: 0, providers: [p], overlayPath: absent })).rejects.toThrow(absent);
   });
 
+  it("treats an empty CAPITOLINE_OVERLAY as no overlay at all", async () => {
+    // `Environment=CAPITOLINE_OVERLAY=` in a unit, or an empty export in a
+    // shell, is the natural way to turn the overlay off — and an empty string
+    // is not undefined, so without normalising it the service dies on a
+    // readFileSync("") whose message names no file.
+    const before = process.env.CAPITOLINE_OVERLAY;
+    process.env.CAPITOLINE_OVERLAY = "";
+    const p = new FakeProvider("claude", ["claude-opus"], OK);
+    try {
+      const app = await start(CONFIG, { port: 0, providers: [p] });
+      try {
+        const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
+        expect(((await r.json()) as { data: { id: string }[] }).data.map((m) => m.id)).toEqual(["claude-opus"]);
+      } finally { await app.close(); }
+    } finally {
+      if (before === undefined) delete process.env.CAPITOLINE_OVERLAY;
+      else process.env.CAPITOLINE_OVERLAY = before;
+    }
+  });
+
+  it("logs which files were loaded and the overlay's keys, never its values", async () => {
+    // The requirement the startup line exists for: `server.access.audience` is
+    // not a secret, but a log that prints the overlay's values is a habit this
+    // one does not start, and a host that extends the overlay decides what ends
+    // up in the journal. The database path is the sentinel: it is a value the
+    // overlay sets, and it must appear nowhere in the line.
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-overlay-"));
+    const db = join(dir, "sentinel-db.sqlite");
+    const path = join(dir, "overlay.yaml");
+    writeFileSync(path, `usage:\n  db_path: "${db}"\nrunner:\n  user: null\n`);
+    const lines: string[] = [];
+    const p = new FakeProvider("claude", ["claude-opus"], OK);
+    const app = await start(CONFIG, { port: 0, providers: [p], overlayPath: path, logDest: { write: (chunk: string) => { lines.push(chunk); } } });
+    try {
+      const loaded = lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.msg === "configuration loaded");
+      expect(loaded).toBeDefined();
+      expect(loaded).toMatchObject({ config: CONFIG, overlay: path, overlayKeys: ["usage.db_path", "runner.user"] });
+      // Every line, not only that one: the whole startup output is the journal.
+      expect(lines.join("")).not.toContain("sentinel-db");
+    } finally { await app.close(); }
+  });
+
   it("starts as it does today when no overlay is named", async () => {
     const before = process.env.CAPITOLINE_OVERLAY;
     delete process.env.CAPITOLINE_OVERLAY;

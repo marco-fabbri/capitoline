@@ -387,6 +387,19 @@ describe("loadConfig with a host overlay", () => {
     expect(() => parseConfig("providers: {}\nrunner: { sandbox_root: /tmp/x }\n")).toThrow(/^invalid configuration:\n/);
   });
 
+  it("names the overlay when it is empty or is not a mapping", () => {
+    // The realistic case is an operator who creates /etc/capitoline/overlay.yaml
+    // and fills it afterwards, or a write cut short. A non-object replaces the
+    // base by the merge rules, so without this the message is the schema's
+    // `expected object, received null` with no key and no file in it.
+    const empty = overlayFile("");
+    expect(() => loadConfig(REPO, empty)).toThrow(`the configuration overlay ${empty} is empty`);
+    const comments = overlayFile("# written later\n");
+    expect(() => loadConfig(REPO, comments)).toThrow(/is empty/);
+    const list = overlayFile("- runner\n");
+    expect(() => loadConfig(REPO, list)).toThrow(`the configuration overlay ${list} must be a mapping of configuration keys`);
+  });
+
   it("raises when the overlay file is not there", () => {
     // Naming a file that does not exist is a mistake, not a request to skip it:
     // a silent skip would start the gateway with the repository's own paths,

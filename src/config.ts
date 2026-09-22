@@ -248,6 +248,16 @@ export function loadConfigWithOverlay(path: string, overlayPath?: string): Loade
     throw new Error(`cannot read the configuration overlay ${overlayPath}: ${(e as Error).message}`, { cause: e });
   }
   const overlay = parse(text);
+  // An overlay that is not a mapping never reaches the schema. By the merge
+  // rules anything that is not an object replaces the base whole, so an empty
+  // file — the operator who creates /etc/capitoline/overlay.yaml and fills it
+  // afterwards, a write cut short — would throw the entire configuration away
+  // and be reported as `: Invalid input: expected object, received null`, with
+  // no key and no file name. Named here instead.
+  if (!isPlain(overlay)) {
+    const why = overlay === null || overlay === undefined ? "is empty" : "must be a mapping of configuration keys";
+    throw new Error(`the configuration overlay ${overlayPath} ${why}`);
+  }
   // Both file names in the message: the key the schema rejects is in one of
   // the two, and the reader has to know which file to open.
   return { config: validate(mergeConfig(base, overlay), ` (${path} + ${overlayPath})`), overlayKeys: leafKeys(overlay) };

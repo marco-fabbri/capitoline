@@ -29,6 +29,8 @@ export interface StartOverrides {
    * systemd unit sets — is the one the tests exercise.
    */
   overlayPath?: string;
+  /** Destination for the startup log. Tests only: the one seam that lets the `configuration loaded` line be read back. */
+  logDest?: Parameters<typeof createLogger>[1];
 }
 
 /**
@@ -56,8 +58,12 @@ function listen(app: ReturnType<typeof createApp>, port: number, log: Logger): P
 }
 
 export async function start(configPath: string, overrides: StartOverrides = {}) {
-  const log = createLogger("capitoline");
-  const overlayPath = overrides.overlayPath ?? process.env.CAPITOLINE_OVERLAY;
+  const log = createLogger("capitoline", overrides.logDest);
+  // `|| undefined`, not `??`: an environment variable set to nothing is not
+  // unset. `Environment=CAPITOLINE_OVERLAY=` in a unit, or an empty export in a
+  // shell, is how one turns the overlay off, and the empty string would
+  // otherwise be read as a path and fail with an ENOENT naming no file.
+  const overlayPath = overrides.overlayPath ?? (process.env.CAPITOLINE_OVERLAY || undefined);
   const { config: cfg, overlayKeys } = loadConfigWithOverlay(configPath, overlayPath);
   // Which files the configuration came from, and which keys the host's overlay
   // set — the keys only. `server.access.audience` is not a secret, but a log

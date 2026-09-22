@@ -43,9 +43,10 @@ On the host, as root:
    `scripts/smoke.sh http://127.0.0.1:8080` (see `docs/deploy.md` §12).
 
 3. If the updated CLI's line is not `200`:
-   - compare the CLI's `--help` with its `args` in `config/capitoline.yaml`
-     (production copy: `/etc/capitoline/capitoline.yaml`) and with the parser
-     in `src/providers/<id>.ts` (`claude.ts`, `codex.ts`, `antigravity.ts`);
+   - compare the CLI's `--help` with its `args` in the clone's
+     `config/capitoline.yaml` — the flags live in the repository, not on the
+     host (`docs/deploy.md` §7) — and with the parser in
+     `src/providers/<id>.ts` (`claude.ts`, `codex.ts`, `antigravity.ts`);
    - capture a new fixture with the same command used in
      `docs/spike-2026-09.md` §3 for that CLI, sanitize paths and user names,
      and put it next to the existing ones in `test/fixtures/<id>/`;
@@ -55,11 +56,18 @@ On the host, as root:
      /var/lib/capitoline/app/scripts/capitoline-collect-image
      /usr/local/bin/capitoline-collect-image`, `docs/deploy.md` §7.1 — the
      installed copy is a snapshot of the clone, not a link, so without this
-     a change to the helper has no effect), copy any config change to
-     `/etc/capitoline/capitoline.yaml` — `diff` it against the repository
-     copy, keys added by an update are not optional (`docs/deploy.md` §7) —
-     `systemctl restart capitoline`; then
-     run the smoke test again.
+     a change to the helper has no effect), `systemctl restart capitoline`;
+     then run the smoke test again. The configuration change arrives with the
+     pull: the host's `/etc/capitoline/overlay.yaml` holds only what is local
+     and nothing is copied across. The one exception is
+     `providers.claude.args`, which the overlay repeats in full because a list
+     replaces — if the pull touched it, run the re-read command of
+     `docs/deploy.md` §7 and realign the overlay's list by hand (the
+     repository's list, then `--settings
+     /home/runner/.claude/capitoline.json`) before the restart. On a host that
+     has not migrated to the overlay yet, the whole configuration is still a
+     hand-made copy and every changed key has to be retyped into it
+     (`docs/deploy.md` §7, last paragraph).
 
 4. Update the table above with the new version, the date and what changed.
 

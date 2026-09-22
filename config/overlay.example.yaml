@@ -39,7 +39,8 @@ providers:
     # points at the file holding the OAuth token, which is readable by runner
     # only and applies even with --setting-sources "". Re-check this list
     # against config/capitoline.yaml after a pull that changes claude's args —
-    # it is the one place where the host still pins a repository value.
+    # it is the one place where the host still pins a repository value, and
+    # docs/deploy.md §7 has the command that compares the two.
     args:
       - -p
       - --output-format
