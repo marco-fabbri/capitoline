@@ -704,23 +704,39 @@ claude mcp add --transport http capitoline https://api.example.com/mcp \
   --header "CF-Access-Client-Id: <id>" --header "CF-Access-Client-Secret: <secret>"
 ```
 
-A CLI answer can take minutes and an image 11-45 s; raise the tool timeout
-in the Mac shell profile:
+A CLI answer can take minutes, an image 11-45 s and a deliberation longer
+than either; raise the tool timeout in the Mac shell profile:
 
 ```sh
-export MCP_TOOL_TIMEOUT=600000
+export MCP_TOOL_TIMEOUT=1200000
 ```
 
-This is the only thing that keeps a long call alive. `generate_image` sends
-a progress notification every 5 s to clients that ask for one (a request
-with a progress token), but a notification postpones the client's deadline
-only when that client sets `resetTimeoutOnProgress`, off by default in the
-MCP TypeScript SDK (spec §6.2); treat it as a sign of life, not as a
-timeout extension.
+Twenty minutes, and the figure is `ask_council`'s: a deliberation has no
+deadline of its own, only each member of each stage has one —
+`council.capitoline.stage_timeout_s`, 300 s in the shipped configuration
+(§9) — and the three stages run in sequence, so the worst case is above
+900 s with nothing wrong. The timeout has to stay larger than three times
+`stage_timeout_s`; re-derive it whenever that value changes. Below it Claude
+Code drops a call the gateway keeps running, and the nine calls carry on
+spending three subscriptions for a client that is already gone — the MCP
+twin of the `524` of §9.
+
+This is the only thing that keeps a long call alive. `ask_council` sends a
+progress notification as each stage opens and as each member comes back
+(`answers 2/4`, `rankings 0/4`, then the characters of the synthesis as the
+judge writes it), and `generate_image` one every 5 s while it draws — both
+only to a client that asked for one (a request with a progress token). But a
+notification postpones the client's deadline only when that client sets
+`resetTimeoutOnProgress`, off by default in the MCP TypeScript SDK (spec
+§6.2): treat the progress as a sign of life for whoever is watching the call,
+and the timeout above as the thing that carries it.
 
 Test: in Claude Code run `/mcp` (the server must show as connected), then
-ask "use capitoline ask_model with codex-gpt-5.5: reply ok" and "use
-capitoline generate_image: a red fox in the snow".
+ask "use capitoline ask_model with codex-gpt-5.5: reply ok", "use capitoline
+generate_image: a red fox in the snow" and "use capitoline ask_council: why
+is a blind ranking better than a public one?". The last one is nine calls on
+three subscriptions and takes minutes: run it once, and not on a day when
+the quotas are already tight (§9).
 
 ## 11. Backup
 

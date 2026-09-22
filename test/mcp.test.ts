@@ -211,11 +211,52 @@ describe("MCP", () => {
       await c.close();
     });
 
-    it("defaults to the only configured council when the name is omitted", async () => {
+    // The default is "the first available council", not "the first council":
+    // a panel declared first that cannot fill its quorum must not swallow the
+    // question, while a panel that is the only one left must still answer with
+    // its own refusal (the test below) rather than with "no council".
+    it("defaults to the first available council, not to the first declared one", async () => {
+      core.registerVirtual("senate", async function* () { yield { type: "text", delta: "x" }; },
+        () => ({ available: false, reason: "only 1 of 4 seats can be filled: the quorum is 2" }));
       register(RUN, "capitoline");
       const c = await client();
       const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      expect(r.isError).toBeFalsy();
       expect(r.structuredContent).toMatchObject({ council: "capitoline" });
+      await c.close();
+    });
+
+    // A misspelled council is an unknown name, not a model: sending it to
+    // ask_model would only earn it a second refusal there.
+    it("answers a misspelled council name as an unknown model, with the name", async () => {
+      register();
+      const c = await client();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?", council: "capitolin" } });
+      expect(r.isError).toBe(true);
+      const text = (r.content as Block[])[0].text!;
+      expect(text).toMatch(/unknown_model.*capitolin/);
+      expect(text).not.toMatch(/ask_model/);
+      expect(asked).toHaveLength(0);
+      await c.close();
+    });
+
+    // §12.5: with one surviving answer there is nothing to rank and no judge
+    // is seated, so the gateway hands back that answer and says plainly that no
+    // council took place. structuredContent drops `rankings`, so an MCP caller
+    // reads that only in the empty aggregate and the empty judge model: the
+    // text block alone is indistinguishable from a synthesis.
+    it("carries the shape that says no council took place: no aggregate, no judge", async () => {
+      const alone: Deliberation = { ...DETAIL, members: [DETAIL.members[0]], lost: [], rankings: [], aggregate: [], judge: { model: "", blind: true }, calls: 1 };
+      register([
+        { type: "progress", stage: "answers", done: 1, total: 1 },
+        { type: "text", delta: "the first answer" },
+        { type: "done", usage: { input: 3, output: 4 }, detail: alone },
+      ]);
+      const c = await client();
+      const r = await c.callTool({ name: "ask_council", arguments: { question: "why?" } });
+      expect(r.isError).toBeFalsy();
+      expect((r.content as Block[])[0].text).toBe("the first answer");
+      expect(r.structuredContent).toMatchObject({ members: [DETAIL.members[0]], aggregate: [], judge: { model: "", blind: true }, calls: 1 });
       await c.close();
     });
 
@@ -236,10 +277,12 @@ describe("MCP", () => {
       await c.close();
     });
 
-    // §12.6: the two silent stages are what the progress exists for, and in
-    // Claude Code a client that asked for progress also extends its own tool
-    // timeout on every notification — which is what keeps a multi-minute
-    // deliberation from being abandoned halfway.
+    // §12.6: the two silent stages are what the progress exists for — the only
+    // thing the agent, and the operator watching it, can read while the panel
+    // works. It extends no deadline by itself: a notification restarts the tool
+    // timeout only in a client that sets resetTimeoutOnProgress, off by default
+    // in the MCP TypeScript SDK (spec §6.2), so a multi-minute deliberation is
+    // carried by the raised MCP_TOOL_TIMEOUT of docs/deploy.md §10.
     it("turns every stage event into a progress notification, with values that always increase", async () => {
       register();
       const c = await client();
@@ -346,9 +389,14 @@ describe("MCP", () => {
     // already recorded every call it made as aborted, and the operator must not
     // read a warn line hunting for a council that never finished.
     it("answers a cancelled call as cancelled, and logs nothing", async () => {
-      core.registerVirtual("capitoline", async function* () {
+      // The fake stops the way Council.deliberate stops on an abort: no done
+      // event, no error event. A fake that yielded `done` anyway would leave
+      // the handler with a detail and never reach the guard under test, and
+      // the test would keep passing with that guard deleted.
+      core.registerVirtual("capitoline", async function* (_q, ctx) {
         yield { type: "progress", stage: "answers", done: 0, total: 2 };
         await new Promise((r) => setTimeout(r, 200));
+        if (ctx.signal?.aborted) return;
         yield { type: "done", usage: { input: 1, output: 1 }, detail: DETAIL };
       });
       const c = await client();
@@ -457,6 +505,18 @@ describe("MCP", () => {
       const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "claude-opus" } });
       expect(r.isError).toBe(true);
       expect((r.content as Block[])[0].text).toMatch(/bad_request.*is a text model/);
+      await c.close();
+    });
+    it("refuses a council, and names the tool that runs one", async () => {
+      // Core.lookup would answer "use the chat endpoint" here: HTTP advice that
+      // names nothing an MCP client can call, and the wrong name now that
+      // ask_council exists.
+      core.registerVirtual("capitoline", async function* () { yield { type: "text", delta: "the synthesis" }; });
+      const c = await client();
+      const r = await c.callTool({ name: "generate_image", arguments: { prompt: "a lighthouse", model: "capitoline" } });
+      expect(r.isError).toBe(true);
+      expect((r.content as Block[])[0].text).toMatch(/bad_request.*council.*ask_council/);
+      expect(images.imageCalls).toHaveLength(0);
       await c.close();
     });
     it("reports a provider that ends without an image as bad_output", async () => {

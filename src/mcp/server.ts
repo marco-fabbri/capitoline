@@ -20,8 +20,9 @@ export interface McpOptions {
 
 const PROGRESS_INTERVAL_MS = 5_000;
 // How many text events a streaming answer takes before it says so again. It is
-// a sign of life and an extension of the client's own tool timeout, not a
-// measurement, so the exact figure matters less than sending it steadily.
+// a sign of life and not a measurement — and not a deadline extension either,
+// except in a client that sets resetTimeoutOnProgress (spec §6.2) — so the
+// exact figure matters less than sending it steadily.
 const TEXT_PROGRESS_EVERY = 20;
 
 // `caller` is who the Access identity behind this request names, null when
@@ -163,8 +164,14 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       if (!name) throw new CapitolineError("bad_request", "no council is configured: nothing to deliberate with");
       // The mirror of ask_model's refusal: one tool per kind of call, and each
       // names the other, so an agent that guessed wrong is one message away
-      // from the right tool rather than from a 404.
-      if (!core.isVirtual(name)) throw new CapitolineError("bad_request", `model "${name}" is not a council: use ask_model`);
+      // from the right tool rather than from a 404. Split in two, because a
+      // misspelled council and a real model are not the same mistake: a bare
+      // "not a council: use ask_model" would send a typo to ask_model only to
+      // be refused there as unknown_model, two round trips for one dropped
+      // letter. Both kinds are in CALLER_FAULT, so the name reaches the caller.
+      const known = models.find((m) => m.name === name);
+      if (!known) throw new CapitolineError("unknown_model", `unknown model "${name}": use list_models`);
+      if (known.kind !== "council") throw new CapitolineError("bad_request", `model "${name}" is not a council: use ask_model`);
       const token = extra._meta?.progressToken;
       // One sequence for every notification this call sends, for the reason
       // ask_model explains: the MCP spec requires each progress value to be
@@ -187,8 +194,13 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       for await (const ev of core.deliberate({ model: name, messages: [{ role: "user", text: question }], stream: true }, { signal: extra.signal, source: "mcp", caller })) {
         if (ev.type === "progress") await progress(`${ev.stage} ${ev.done}/${ev.total}`);
         // The synthesis is the one stage that streams, and it emits no stage
-        // event while it is written: without this mark a client whose timeout
-        // resets on progress would abandon a long one (§12.6).
+        // event while it is written: this mark is the only sign of life in
+        // between (§12.6). It postpones no deadline by itself — a notification
+        // restarts the tool timeout only in a client that sets
+        // resetTimeoutOnProgress, off by default in the MCP TypeScript SDK
+        // (spec §6.2). What carries a deliberation past ten minutes is the
+        // raised MCP_TOOL_TIMEOUT of docs/deploy.md §10, and the progress is
+        // what tells the agent, and the operator, that it is still working.
         else if (ev.type === "text") { text += ev.delta; if (++n % TEXT_PROGRESS_EVERY === 0) await progress(`writing, ${text.length} chars`); }
         else if (ev.type === "done") { usage = ev.usage; detail = ev.detail; }
         // The kind and the wait, never the council's own account of which seats
@@ -243,6 +255,12 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       const models = core.listModels();
       model = requested ?? (models.find((m) => m.kind === "image" && m.available) ?? models.find((m) => m.kind === "image"))?.name;
       if (!model) throw new CapitolineError("bad_request", "no image model is configured: set \"model\" explicitly");
+      // A council named here never comes from the default (it is not an image
+      // model), so it is always the caller's own word. Core.lookup would refuse
+      // it with "use the chat endpoint", which is HTTP advice and names nothing
+      // an MCP client can call: refuse it here, pointing at the tool, exactly
+      // as ask_model does.
+      if (core.isVirtual(model)) throw new CapitolineError("bad_request", `model "${model}" is a council: use ask_council`);
       const provider = models.find((m) => m.name === model)?.provider ?? "unknown";
       const token = extra._meta?.progressToken;
       let ticks = 0;
