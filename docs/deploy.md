@@ -665,7 +665,11 @@ From the host, `curl -s http://127.0.0.1:8080/v1/models` now answers 401
 that is the intended exemption for local monitoring.
 
 A verified token also says who is calling, and every usage row records it: the
-email of a user token, the name (`common_name`) of a service token.
+email of a user token, and for a service token the `common_name` claim —
+which holds the **client id**, `<32 hex>.access`, not the name typed into the
+dashboard. `server.access.callers` maps an id to a name so the breakdown is
+readable; an id the overlay has not named is reported as itself, which is
+unreadable and still correct.
 `GET /v1/usage` reports the last 24 hours grouped by it, which is how two
 applications sharing one gateway are told apart. It is deliberately not on
 `/health`: that route is the exemption above, readable by anyone who can open

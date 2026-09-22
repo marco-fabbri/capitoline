@@ -156,7 +156,23 @@ export const ConfigSchema = z
     server: z
       .object({
         port: z.number().int().default(8080),
-        access: z.object({ team_domain: z.string().default(""), audience: z.string().default("") }).strict().default({}),
+        access: z.object({
+          team_domain: z.string().default(""), audience: z.string().default(""),
+          /**
+           * What to call each service token in the usage table, by its client
+           * id. Cloudflare's service-token JWT carries `common_name`, and what
+           * it holds is the **client id** (`<32 hex>.access`), not the name
+           * typed in the dashboard — that name never leaves the dashboard. So
+           * `/v1/usage` grouped two applications correctly and named neither,
+           * which is most of what per-application tokens are for.
+           *
+           * Host-specific by nature, so the overlay sets it and the repository
+           * leaves it empty. A client id is the public half of the pair and no
+           * more secret than an email address, which is what sits in the same
+           * column for a user token.
+           */
+          callers: z.record(z.string().min(1), z.string().min(1)).default({}),
+        }).strict().default({}),
         queue: z.object({ max_wait_s: z.number().int().min(1).default(120) }).strict().default({}),
       })
       .strict()

@@ -2,12 +2,24 @@ import type { RequestHandler } from "express";
 import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from "jose";
 import type { Logger } from "../log.js";
 
-export interface AccessOptions { teamDomain: string; audience: string; jwks?: ReturnType<typeof createLocalJWKSet> }
+export interface AccessOptions {
+  teamDomain: string; audience: string; jwks?: ReturnType<typeof createLocalJWKSet>;
+  /** What to call each service token in a usage row, by its client id; see `Identity.name`. */
+  names?: Record<string, string>;
+}
 
-// What a verified token says about who is calling. `name` is the service
-// token's own name (`common_name`): a service token has no email and an empty
-// subject, so without it two applications sharing the gateway are
-// indistinguishable in the usage table.
+// What a verified token says about who is calling. A service token has no
+// email and an empty subject, so without `name` two applications sharing the
+// gateway are indistinguishable in the usage table.
+//
+// `name` is **not** the name typed into the Cloudflare dashboard. The
+// service-token JWT carries `common_name`, and what Cloudflare puts there is
+// the client id (`<32 hex>.access`); the friendly name stays in the dashboard
+// and never reaches the token. Observed 2026-09-23, after a second
+// application started calling and `/v1/usage` listed two opaque ids. So the
+// id is translated here, through `server.access.callers`, and falls back to
+// itself when the host has not named it — an unreadable caller is still a
+// correct one.
 export interface Identity { email?: string; sub: string; type: "user" | "service"; name?: string }
 
 // A caller is written into every usage row, so what a token can put there is
@@ -62,7 +74,8 @@ export function createAccessMiddleware(opts: AccessOptions, log: Logger): Reques
     try {
       const { payload } = await jwtVerify(token, jwks, { issuer, audience: opts.audience, algorithms: ALGORITHMS, clockTolerance: CLOCK_TOLERANCE_S });
       const p = payload as { email?: string; sub?: string; common_name?: string };
-      const identity: Identity = { email: p.email, sub: p.sub ?? "", type: p.common_name ? "service" : "user", name: p.common_name };
+      const name = p.common_name === undefined ? undefined : (opts.names?.[p.common_name] ?? p.common_name);
+      const identity: Identity = { email: p.email, sub: p.sub ?? "", type: p.common_name ? "service" : "user", name };
       res.locals.identity = identity;
       next();
     } catch (e) {

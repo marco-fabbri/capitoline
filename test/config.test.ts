@@ -191,7 +191,7 @@ describe("config", () => {
     expect(() => parseConfig(`server: { access: { team_domain: t.cloudflareaccess.com } }\n${base}`)).toThrow(/server\.access\.audience/);
     expect(() => parseConfig(`server: { access: { audience: abc } }\n${base}`)).toThrow(/server\.access\.team_domain/);
     expect(parseConfig(`server: { access: { team_domain: t.cloudflareaccess.com, audience: abc } }\n${base}`).server.access.audience).toBe("abc");
-    expect(parseConfig(base).server.access).toEqual({ team_domain: "", audience: "" });
+    expect(parseConfig(base).server.access).toEqual({ team_domain: "", audience: "", callers: {} });
   });
 
   it("rejects an unknown key in any of the objects", () => {
@@ -895,6 +895,10 @@ describe("config/overlay.example.yaml", () => {
     "runner.sandbox_root",
     "runner.user",
     "server.access.audience",
+    // Two leaves, one per named client id: what to call each service token in
+    // the usage breakdown, which Cloudflare's JWT cannot say by itself.
+    "server.access.callers.0000000000000000000000000000000a.access",
+    "server.access.callers.0000000000000000000000000000000b.access",
     "server.access.team_domain",
     "usage.db_path",
   ];
@@ -919,7 +923,10 @@ describe("config/overlay.example.yaml", () => {
     // rule does, so repeating it in the overlay only invited the two to drift.
     expect(cfg.providers.antigravity.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
     // Access is filled in §9 of the runbook; both empty is the disabled pair.
-    expect(cfg.server.access).toEqual({ team_domain: "", audience: "" });
+    expect(cfg.server.access).toEqual({
+      team_domain: "", audience: "",
+      callers: { "0000000000000000000000000000000a.access": "app-one", "0000000000000000000000000000000b.access": "app-two" },
+    });
     // The host adds and never replaces: the repository's command line arrives
     // with the pull that changes it, and the host names only its own argument.
     // Copying the whole list into `args` to append to it was the drift the

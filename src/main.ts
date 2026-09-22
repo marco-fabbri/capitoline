@@ -100,7 +100,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   }
 
   const access = cfg.server.access.team_domain
-    ? createAccessMiddleware({ teamDomain: cfg.server.access.team_domain, audience: cfg.server.access.audience }, log.child({ mod: "access" }))
+    ? createAccessMiddleware({ teamDomain: cfg.server.access.team_domain, audience: cfg.server.access.audience, names: cfg.server.access.callers }, log.child({ mod: "access" }))
     : undefined;
   if (!access) log.warn("Cloudflare Access verification is disabled (server.access.team_domain is empty)");
 
