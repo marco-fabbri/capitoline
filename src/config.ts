@@ -87,7 +87,13 @@ const ProviderSchema = z.object({
 const SeatSchema = z.object({
   family: z.string().min(1),
   models: z.array(z.string().min(1)).min(1),
-}).strict();
+}).strict()
+  // A chain that names a model twice is a typo every time: the second entry is
+  // unreachable, since a model the state refused on the first pass is refused
+  // on the second too, and a seat stepping down mid-flight must never land
+  // back on the model that has just refused it. The duplicate check further
+  // down is about two *seats* sharing a model, which is a different mistake.
+  .refine((s) => new Set(s.models).size === s.models.length, "a seat must not repeat a model in its chain");
 
 // One council. The file is snake_case like the rest of the configuration, and
 // the transform hands the code the names it uses (src/council/types.ts), so a
@@ -255,6 +261,27 @@ export const ConfigSchema = z
       };
       c.seats.forEach((s, i) => chain(s, ["council", name, "seats", i, "models"]));
       chain(c.judge, ["council", name, "judge", "models"]);
+      // The members answer, and later rank, in parallel, so every provider
+      // must offer one concurrency slot per seat it serves (design §12.1): a
+      // family is not a provider, and the default panel puts Google and open
+      // weights on the same Antigravity subscription. With one slot for two
+      // seats the second member would sit on that provider's queue until
+      // server.queue.max_wait_s and lose its seat in both parallel stages —
+      // eight of the nine calls spent to discover a setting. The judge is not
+      // counted: it is seated alone, after the members are done.
+      const seatsOf = new Map<string, number>();
+      for (const s of c.seats) {
+        // A chain can span providers (`claude-opus` and `agy-claude-opus`), and
+        // any of them may end up serving the seat, so each needs the slot.
+        const providers = new Set(s.models.map((m) => seen.get(m)).filter((pid): pid is string => pid !== undefined));
+        for (const pid of providers) seatsOf.set(pid, (seatsOf.get(pid) ?? 0) + 1);
+      }
+      for (const [pid, seats] of seatsOf) {
+        const slots = cfg.providers[pid].concurrency;
+        if (slots < seats) {
+          ctx.addIssue({ code: "custom", path: ["providers", pid, "concurrency"], message: `provider ${pid} serves ${seats} seats of council "${name}" with concurrency ${slots}: a member would wait on its own subscription's queue and lose its seat in both parallel stages (design §12.1)` });
+        }
+      }
     }
   });
 

@@ -42,8 +42,11 @@ const config = (over: Fields = {}, runner?: string): string => configOf({ x: ove
 // A council over the inline provider, built the same way. The provider gets
 // three models, one per seat: the smallest panel the schema accepts is two
 // seats, and no two seats may name the same model, so a three-seat council
-// needs a third. `prov` varies the provider block for the few tests that are
-// about what a seat names rather than about the council's own keys.
+// needs a third. It also gets three concurrency slots, because every seat of
+// an inline council is served by that one provider and the schema demands a
+// slot per seat (design §12.1); the test about that rule sets its own.
+// `prov` varies the provider block for the few tests that are about what a
+// seat names rather than about the council's own keys.
 const MODELS = "{ a: {cli_model: a}, b: {cli_model: b}, c: {cli_model: c} }";
 const COUNCIL: Fields = {
   seats: "[{family: f1, models: [a]}, {family: f2, models: [b]}]",
@@ -51,7 +54,7 @@ const COUNCIL: Fields = {
 };
 const council = (over: Fields = {}, name = "capitoline", prov: Fields = {}): string => {
   const fields = Object.entries({ ...COUNCIL, ...over }).filter(([, v]) => v !== null);
-  return `council:\n  ${name}: { ${fields.map(([k, v]) => `${k}: ${v}`).join(", ")} }\n${config({ models: MODELS, ...prov })}`;
+  return `council:\n  ${name}: { ${fields.map(([k, v]) => `${k}: ${v}`).join(", ")} }\n${config({ models: MODELS, concurrency: "3", ...prov })}`;
 };
 
 const BOTH_FILES = ["config/capitoline.yaml", "test/e2e.config.yaml"];
@@ -357,6 +360,27 @@ describe("config", () => {
     // The judge shares the first seat's chain in every default council, and
     // judge_allow_member is what governs that: the rule is about seats only.
     expect(() => parseConfig(council({ judge: "{family: f1, models: [a]}" }))).not.toThrow();
+  });
+
+  it("rejects a seat that names the same model twice", () => {
+    // The second entry is unreachable — a model refused on the first pass is
+    // refused on the second — and a seat stepping down mid-flight must not
+    // land back on the model that has just refused it.
+    expect(() => parseConfig(council({ seats: "[{family: f1, models: [a, a]}, {family: f2, models: [b]}]" })))
+      .toThrow(/council\.capitoline\.seats\.0: .*must not repeat a model/);
+  });
+
+  it("rejects a panel its providers cannot answer in parallel", () => {
+    // Two seats on one subscription with one slot: the second member waits on
+    // the queue until max_wait_s and loses its seat in both parallel stages,
+    // eight calls into the deliberation (design §12.1). One slot per seat it
+    // serves, counted per provider and not per family.
+    expect(() => parseConfig(council({}, "capitoline", { concurrency: "1" })))
+      .toThrow(/providers\.x\.concurrency: provider x serves 2 seats of council "capitoline" with concurrency 1/);
+    expect(() => parseConfig(council({ seats: "[{family: f1, models: [a]}, {family: f2, models: [b]}, {family: f3, models: [c]}]" }, "capitoline", { concurrency: "2" })))
+      .toThrow(/providers\.x\.concurrency: .*serves 3 seats .*concurrency 2/);
+    // The judge is not counted: it is seated alone, after the members are done.
+    expect(() => parseConfig(council({ judge: "{family: f3, models: [c]}" }, "capitoline", { concurrency: "2" }))).not.toThrow();
   });
 
   it("rejects a council named after a provider model", () => {

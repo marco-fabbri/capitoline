@@ -3,15 +3,24 @@ import type { Seat } from "./types.js";
 
 /**
  * A model as the gateway's own state reports it. This is the shape of the
- * fields `Core.listModels()` already returns, narrowed to the three the
- * seating needs, so the council can be handed that list directly without the
- * seating importing anything from `src/core`.
+ * fields `Core.listModels()` already returns, narrowed to the few the council
+ * needs, so the council can be handed that list directly without the seating
+ * importing anything from `src/core`.
  */
 export interface ModelState {
   name: string;
   available: boolean;
   /** Why not, in the state's own words: `rate_limited`, `auth_expired`, `unhealthy`, … */
   reason?: string;
+  /**
+   * Which provider serves the model, when the state says. Optional only so a
+   * hand-built state stays easy to write; `Core.listModels()` always sets it.
+   * Two seats can share one subscription (the default panel puts Google and
+   * open weights on Antigravity), and this is the only way a later stage can
+   * tell a seat lost on its provider's queue from a plain timeout (§12.1,
+   * §12.6).
+   */
+  provider?: string;
 }
 
 /**
@@ -29,9 +38,12 @@ export interface Seated {
 /** What a skip is recorded as when the state says "unavailable" and nothing more. */
 const UNAVAILABLE = "unavailable";
 /**
- * A chain model that the state does not mention at all. The configuration
- * schema refuses a seat naming a model no provider declares, so this can only
- * come from a host overlay that dropped a model after the file was validated.
+ * A chain model that the state does not mention at all. The configuration is
+ * validated — base and overlay together, after the merge — against a schema
+ * that refuses a seat naming a model no provider declares, so a state built
+ * from `Core.listModels()` over that configuration always mentions every
+ * chain model. What this guards is a *partial* state: a core injected by a
+ * test, or a model registry that grows entries the panel does not know about.
  * It is treated as a skip rather than seated blind: seating it would spend a
  * call to be answered `unknown_model`, which no fallback retries.
  */
@@ -61,19 +73,38 @@ export function seat(seats: Seat[], state: ModelState[]): Seated {
 }
 
 /**
- * The model after `current` in this seat's chain, or null when there is none.
- * One step, never a loop: the first refusal of a quota window is by definition
- * not in the health state yet, so a seat must be able to step down once
- * mid-flight; letting it walk the whole chain would turn one turned-over quota
- * into three more refused calls and a deliberation far past its deadline.
+ * The model the seat steps down to after `current` refused, or null when the
+ * chain has nobody left. Given the state, it walks the rest of the chain and
+ * returns the first model the state reports available, exactly as `seat()`
+ * does before the call (§12.2, first point): "Fable paused until Friday is
+ * skipped without spending a call to discover it" holds for the step down as
+ * much as for the seating.
  *
- * A `current` that is not in the chain also returns null. It cannot happen
- * with a member this module seated, and the alternative — starting from the
- * head of the chain — would retry a model that may have just refused.
+ * One *retry*, never a loop — which is not the same as one *index*. What the
+ * design rations is the calls: a single retry, so one quota turning over
+ * mid-flight cannot cascade into three more refused calls and a deliberation
+ * far past its deadline. Walking the chain against the state costs nothing and
+ * spends no call, and skipping a model already known to be paused is what
+ * makes the one retry land somewhere useful instead of being burned on a model
+ * the gateway would refuse itself.
+ *
+ * Without `state` the answer is the plain next model, which is the signature
+ * the caller uses when it has no state at hand.
+ *
+ * A `current` that is not in the chain returns null. It cannot happen with a
+ * member this module seated, and the alternative — starting from the head of
+ * the chain — would retry a model that may have just refused. `lastIndexOf`
+ * for the same reason: a chain that names a model twice must still step past
+ * the occurrence that refused, never back onto it.
  */
-export function nextInChain(seat: Seat, current: string): string | null {
-  const i = seat.models.indexOf(current);
-  return i < 0 || i + 1 >= seat.models.length ? null : seat.models[i + 1];
+export function nextInChain(seat: Seat, current: string, state?: ModelState[]): string | null {
+  const from = seat.models.lastIndexOf(current);
+  if (from < 0) return null;
+  const byName = state === undefined ? undefined : new Map(state.map((m) => [m.name, m]));
+  for (const model of seat.models.slice(from + 1)) {
+    if (byName === undefined || byName.get(model)?.available === true) return model;
+  }
+  return null;
 }
 
 /** "Response A" … "Response Z", then "Response AA": more than 26 seats is not a panel, but the labels must stay distinct whatever the configuration says. */

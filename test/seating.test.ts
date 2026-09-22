@@ -3,10 +3,21 @@ import { seat, nextInChain, labels, type ModelState, type Seated } from "../src/
 import type { Seat } from "../src/council/types.js";
 import type { ModelInfo } from "../src/core/core.js";
 
-// Compile-time only, erased at runtime: what Core.listModels() returns must be
-// what seat() takes, or the engine would have to translate the state on the
-// way in and the two shapes could drift apart unnoticed.
-export const _stateComesFromCore = (models: ModelInfo[]): Seated => seat([], models);
+// Compile-time only, and erased whole: a type alias emits nothing at all, so
+// unlike a `const` these leave no unused function behind in the built test.
+//
+// The first guard says what Core.listModels() returns must be what seat()
+// takes, or the engine would have to translate the state on the way in and the
+// two shapes could drift apart unnoticed. It is not enough on its own: every
+// field of ModelState but `name` and `available` is optional, so ModelInfo
+// could lose or rename `reason` and this would still compile — while seat()
+// silently recorded a bare "unavailable" for every skip and lost
+// rate_limited/auth_expired, with every assertion below still green. The
+// second guard names that field, and stops compiling if it goes.
+type TakesCoreState<T extends (seats: Seat[], state: ModelInfo[]) => Seated> = T;
+type _StateComesFromCore = TakesCoreState<typeof seat>;
+type CarriesReason<T extends ModelState["reason"]> = T;
+type _ReasonFlows = CarriesReason<ModelInfo["reason"]>;
 
 // The four default seats of config/capitoline.yaml, shortened: what matters
 // here is a chain with a fallback, a chain of one, and two seats of different
@@ -99,6 +110,28 @@ describe("nextInChain", () => {
   it("returns null for a model that is not in the chain", () => {
     expect(nextInChain(ANTHROPIC, "codex-gpt-5.6-sol")).toBeNull();
   });
+
+  // The real case of 2026-09-21, one step later: Opus is paused, Fable refuses
+  // mid-flight anyway, and the one retry the design allows must not be spent on
+  // the model the gateway would refuse by itself — Sonnet was free.
+  it("steps down to the first model the state reports available, not merely the next one", () => {
+    expect(nextInChain(ANTHROPIC, "claude-fable", state(
+      ["claude-fable", false, "rate_limited"], ["claude-opus", false, "rate_limited"], ["claude-sonnet"],
+    ))).toBe("claude-sonnet");
+  });
+
+  it("returns null when the rest of the chain is unavailable, or unknown to the state", () => {
+    expect(nextInChain(ANTHROPIC, "claude-fable", state(
+      ["claude-opus", false, "rate_limited"], ["claude-sonnet", false, "unhealthy"],
+    ))).toBeNull();
+    // A model the state does not mention is skipped for the same reason seat()
+    // skips it: the call would come back "unknown_model", and nothing retries.
+    expect(nextInChain(ANTHROPIC, "claude-opus", state(["claude-opus"]))).toBeNull();
+  });
+
+  it("never steps back onto a repeated model, which is the one that just refused", () => {
+    expect(nextInChain({ family: "x", models: ["a", "a", "b"] }, "a")).toBe("b");
+  });
 });
 
 describe("labels", () => {
@@ -122,10 +155,45 @@ describe("labels", () => {
     expect(asObject(labels(reversed, QUESTION))).toEqual(asObject(labels(MEMBERS, QUESTION)));
   });
 
-  it("generally pairs different labels with a different question", () => {
+  // §12.4 is not "the mapping changes sometimes", it is that a client cannot
+  // learn one: a near-constant shuffle that moved for one question in twelve
+  // would satisfy the old `size > 1` and leak the panel just the same. So the
+  // assertion is on the spread. Four members have 24 permutations; over 200
+  // fixed questions the implementation produces all 24 and lands each label on
+  // each model about 50 times (25%, observed worst case 68). The bounds below
+  // are loose around that, and deterministic — the questions are fixed — but a
+  // seed that collapsed (one byte of the hash, or the question's length, which
+  // these 200 questions take only three values of) falls far outside them.
+  it("spreads the labels over the members when the question changes", () => {
+    const QUESTIONS = 200;
     const mappings = new Set<string>();
-    for (let i = 0; i < 12; i++) mappings.add(JSON.stringify(asObject(labels(MEMBERS, `question number ${i}`))));
-    expect(mappings.size).toBeGreaterThan(1);
+    const seen = new Map<string, Map<string, number>>();
+    for (let i = 0; i < QUESTIONS; i++) {
+      const m = labels(MEMBERS, `question number ${i}`);
+      mappings.add(JSON.stringify(asObject(m)));
+      for (const [model, label] of m) {
+        const counts = seen.get(model) ?? new Map<string, number>();
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+        seen.set(model, counts);
+      }
+    }
+    expect(mappings.size).toBeGreaterThanOrEqual(20);
+    for (const { model } of MEMBERS) {
+      const counts = seen.get(model);
+      expect(counts?.size).toBe(4);
+      expect(Math.max(...counts!.values())).toBeLessThanOrEqual(QUESTIONS * 0.4);
+    }
+  });
+
+  // The base-26 carry is unreachable from any configuration — a 27-seat panel
+  // is not a panel — but it is the one piece of arithmetic here that can be
+  // wrong, so it is exercised rather than trusted.
+  it("keeps the labels distinct past Z", () => {
+    const many = Array.from({ length: 27 }, (_, i) => ({ model: `m${String(i).padStart(2, "0")}` }));
+    const m = labels(many, QUESTION);
+    expect(new Set(m.values()).size).toBe(27);
+    expect([...m.values()]).toContain("Response Z");
+    expect([...m.values()]).toContain("Response AA");
   });
 
   it("handles one member and none", () => {
