@@ -230,7 +230,7 @@ export const ConfigSchema = z
         ctx.addIssue({ code: "custom", path: ["council", name], message: `council name "${name}" is also a model of provider ${provider}` });
       }
       // Two seats is the floor for the same reason min_members is: there is
-      // nothing to rank below two answers (design §12.5).
+      // nothing to rank or synthesize below two answers (design §12.5).
       if (c.seats.length < 2) {
         ctx.addIssue({ code: "custom", path: ["council", name, "seats"], message: `council "${name}" must declare at least two seats, not ${c.seats.length}` });
       }
@@ -238,7 +238,7 @@ export const ConfigSchema = z
       // nothing to synthesize either, and the deliberation would return the
       // single answer it has and declare no council (§12.5).
       if (c.minMembers < 2) {
-        ctx.addIssue({ code: "custom", path: ["council", name, "min_members"], message: `council "${name}" sets min_members ${c.minMembers}: below two answers there is nothing to rank` });
+        ctx.addIssue({ code: "custom", path: ["council", name, "min_members"], message: `council "${name}" sets min_members ${c.minMembers}: below two answers there is nothing to rank or synthesize` });
       }
       // A quorum larger than the panel can never be met, not even with every
       // seat answering: every deliberation would spend its calls and end in
@@ -324,7 +324,7 @@ export const ConfigSchema = z
       // The largest council: the one deliberation these slots must hold alone.
       const [council, seats] = [...per].reduce((a, b) => (b[1] > a[1] ? b : a));
       if (slots >= seats) continue;
-      ctx.addIssue({ code: "custom", path: ["providers", pid, "concurrency"], message: `provider ${pid} serves ${seats} seats of council "${council}" with concurrency ${slots}: a member would wait on its own subscription's queue and lose its seat in both parallel stages (design §12.1)` });
+      ctx.addIssue({ code: "custom", path: ["providers", pid, "concurrency"], message: `provider ${pid} serves ${seats} seats of council "${council}" with concurrency ${slots}: a member would wait on its own subscription's queue and lose its seat in every parallel stage the council runs (design §12.1)` });
     }
   });
 

@@ -144,9 +144,17 @@ function aggregateLine(a: Aggregate): string {
  * confidently wrong answer first, and a judge ordered to follow the vote would
  * have no way to say so.
  *
- * An empty aggregate is a council that ran no ranking stage (`ranking: false`,
- * the `-fast` shape), and the paragraph that introduces the ranking goes with
- * it, along with every other mention of one: showing an empty section, or
+ * `ranked` is the council's configured shape, passed by the engine from
+ * `ranking:` rather than guessed here: an empty aggregate is only the same
+ * thing by accident, because the engine always hands `aggregate()` the label
+ * list and a ranked panel therefore always has entries (`votes: 0` for the
+ * labels nobody ranked). The day an aggregate is seeded for a fast council
+ * too, a prompt that read the shape off its length would silently tell the
+ * judge about a ranking that never happened. The length stays as the default
+ * for the callers that have no council to ask, the tests among them.
+ *
+ * Unranked — the `-fast` shape — drops the paragraph that introduces the
+ * ranking, along with every other mention of one: showing an empty section, or
  * telling a judge the answers were ranked and then showing nothing, invites it
  * to weigh a vote that was never cast. What stays is the phrase this prompt is
  * recognised by end to end — "You are writing the final answer", which the
@@ -160,6 +168,7 @@ export function synthesisPrompt(
   aggregate: Aggregate[],
   blind: boolean,
   identities?: Map<string, string>,
+  ranked: boolean = aggregate.length > 0,
 ): string {
   if (!blind && identities !== undefined && identities.size > 0 && answers.length > 0 && !answers.some((a) => identities.has(a.label))) {
     // The map that `labels()` builds runs model -> label, and this one runs
@@ -174,7 +183,6 @@ export function synthesisPrompt(
     const model = blind ? undefined : identities?.get(label);
     return model === undefined ? label : `${label} (${model})`;
   };
-  const ranked = aggregate.length > 0;
   return [
     ranked
       ? "Several assistants answered the same question independently and then ranked each other's answers without knowing who wrote what. You are writing the final answer."

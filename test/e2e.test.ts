@@ -250,6 +250,51 @@ describe("a council end to end", () => {
     // not a number the council reports about itself.
     expect((await rows()) - before).toBe(9);
   }, 30_000);
+
+  // The same four seats through the same door, with `ranking: false` in the
+  // configuration: the half-price shape is only worth shipping if the saving
+  // is real on the usage table, which is what this asserts and what no unit
+  // test can (plan 2026-09-22-council-variants, task 2). The fake CLIs need no
+  // new fixture: they pick the judge's recording by "You are writing the final
+  // answer", a phrase the fast synthesis prompt keeps.
+  it("skips the ranking stage for capitoline-fast and writes five usage rows", async () => {
+    const before = await rows();
+    const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "capitoline-fast", messages: [{ role: "user", content: COUNCIL_QUESTION }] }),
+    });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      model: string; choices: { message: { content: string } }[];
+      capitoline: { provider: string; council: Deliberation };
+    };
+    expect(body.model).toBe("capitoline-fast");
+    expect(body.choices[0].message.content).toBe(COUNCIL_SYNTHESIS);
+
+    const d = body.capitoline.council;
+    expect(d.shape).toBe("fast");
+    // The same four subscriptions answering as they answer a direct request,
+    // labelled and judged by a model seated apart from them — everything the
+    // reference panel does except stage 2.
+    expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
+      ["anthropic", "claude-fable", ANSWERS.claude],
+      ["openai", "codex-gpt-6-astra", ANSWERS.codex],
+      ["google", "agy-gemini-pro", ANSWERS.agy],
+      ["open-weights", "agy-gpt-oss", ANSWERS.agy],
+    ]);
+    expect(d.lost).toEqual([]);
+    expect(d.members.map((m) => m.label).sort()).toEqual(["Response A", "Response B", "Response C", "Response D"]);
+    expect(d.judge).toEqual({ model: "claude-opus", blind: true });
+    // Nobody ranked and nothing was aggregated: not a vote that failed to
+    // parse — a ranked panel would still report its four labels with
+    // `votes: 0` — but a stage that never ran.
+    expect(d.rankings).toEqual([]);
+    expect(d.aggregate).toEqual([]);
+    expect(d.calls).toBe(5);
+    // Five spawns, five rows: the price the shape exists for, read off the
+    // usage table and not off the deliberation's own count.
+    expect((await rows()) - before).toBe(5);
+  }, 30_000);
 });
 
 // The three fakes replay one recording per stage, chosen from the prompt they

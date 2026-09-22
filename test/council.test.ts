@@ -201,16 +201,27 @@ describe("Council", () => {
     expect(d.judge).toEqual({ model: "claude-opus", blind: true });
   });
 
-  it("says which shape ran, so an empty aggregate is not read as a panel whose rankings all failed", async () => {
+  it("says which shape ran, next to the aggregate a degraded panel still reports", async () => {
     const fast = detailOf(await run(panel({ cfg: { ranking: false } }).council.deliberate(QUESTION, { source: "http" })));
     expect(fast.shape).toBe("fast");
-    // The same two empty lists, reached the other way: every member of a full
-    // panel answered the ranking with something no parser can trust. Without
-    // the shape the two deliberations are indistinguishable in the response.
+    expect(fast.aggregate).toEqual([]);
+    // The other way of losing every vote: a full panel where no member's
+    // ranking could be parsed. `rankings` is empty here too, but the aggregate
+    // is not — it is seeded with the labels, so the four answers are still
+    // named to the judge and to the client, each with `votes: 0`. That is the
+    // difference this test pins: an empty `aggregate` is never a degraded
+    // panel that ranked, so `shape` is not there to rescue an ambiguity but to
+    // state the council's shape instead of leaving it to be read off votes.
     const broken = panel({ badRanking: ["claude-fable", "codex-astra", "agy-pro", "agy-oss"] });
     const d = detailOf(await run(broken.council.deliberate(QUESTION, { source: "http" })));
     expect(d.shape).toBe("ranked");
     expect(d.rankings).toEqual([]);
+    expect(d.aggregate).toEqual([
+      { label: "Response A", averageRank: 0, votes: 0 },
+      { label: "Response B", averageRank: 0, votes: 0 },
+      { label: "Response C", averageRank: 0, votes: 0 },
+      { label: "Response D", averageRank: 0, votes: 0 },
+    ]);
     expect(d.calls).toBe(9);
   });
 

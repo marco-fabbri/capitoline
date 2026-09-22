@@ -125,7 +125,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
   });
 
   server.registerTool("ask_council", {
-    description: "Put one question to a council: several models of different families answer it independently, rank each other's answers without knowing whose is whose, and a judge writes the final answer from the ranking. One deliberation is nine model calls over several minutes on three different subscriptions, so ask_model is the right tool for anything a single model can answer. Use list_models for council names (kind council); omit council for the first available one.",
+    description: "Put one question to a council: several models of different families answer it independently, rank each other's answers without knowing whose is whose, and a judge writes the final answer from the ranking. One deliberation is nine model calls over several minutes on three different subscriptions; a council configured without the ranking stage (a `-fast` name) costs one call per seat plus the synthesis, five in all. Either way ask_model is the right tool for anything a single model can answer. Use list_models for council names (kind council); omit council for the first available one.",
     inputSchema: {
       question: z.string().min(1).describe("The question the council deliberates on"),
       council: z.string().min(1).optional().describe("Council name from list_models (kind council); default: the first available council"),
@@ -141,11 +141,13 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       council: z.string(),
       deliberation_id: z.string(),
       strategy_version: z.number(),
-      // Which shape deliberated. It travels even though the individual
-      // rankings do not: `aggregate` is empty both for a council that runs no
-      // ranking stage and for a panel whose every vote failed (§12.5), and
-      // without this the caller cannot tell the cheap answer it asked for from
-      // a degraded one.
+      // Which shape deliberated, and the only field that says which of the
+      // two councils the name resolved to — list_models reports a name and a
+      // kind, not a price. It travels even though the individual rankings do
+      // not: a degraded panel is already legible in the aggregate, whose
+      // labels all read `votes: 0` when no vote parsed (§12.5), while a fast
+      // council has no aggregate at all; this states the shape instead of
+      // leaving the caller to read it off the votes.
       shape: z.enum(["ranked", "fast"]),
       members: z.array(z.object({ family: z.string(), model: z.string(), label: z.string(), answer: z.string(), fellBackFrom: z.array(z.string()).optional() })),
       lost: z.array(z.object({ family: z.string(), model: z.string().optional(), reason: z.string(), fellBackFrom: z.array(z.string()).optional() })),

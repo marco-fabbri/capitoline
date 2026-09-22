@@ -320,4 +320,19 @@ describe("prompts", () => {
     expect(p).toContain("You are writing the final answer");
     expect(p).toMatch(/not (?:name|mention|refer)/i);
   });
+
+  it("takes the shape from the caller, not from the length of the aggregate", () => {
+    // The engine passes `ranking:` (src/council/council.ts); the empty
+    // aggregate is only a consequence of how `aggregate()` is called today,
+    // and a fast council whose aggregate were seeded like a ranked one's must
+    // still get the prompt with no ranking in it.
+    const seeded: Aggregate[] = ANSWERS.map((a) => ({ label: a.label, averageRank: 0, votes: 0 }));
+    const fast = synthesisPrompt(QUESTION, ANSWERS, seeded, true, undefined, false);
+    expect(fast).not.toContain("The panel's ranking, best first:");
+    expect(fast).not.toMatch(/rank/i);
+    // And the other direction: a ranked council is told so even though the
+    // argument could be read either way.
+    const ranked = synthesisPrompt(QUESTION, ANSWERS, AGG, true, undefined, true);
+    expect(ranked).toContain("The panel's ranking, best first:");
+  });
 });

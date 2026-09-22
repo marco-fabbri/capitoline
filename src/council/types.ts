@@ -39,7 +39,7 @@ export interface CouncilConfig {
   judgeAllowMember: boolean;
   /** true: the judge sees the labels, not the real model names. The un-blinded detail reaches the client instead. */
   judgeBlind: boolean;
-  /** Fewer answers than this and no ranking happens at all; never below 2. */
+  /** Fewer answers than this and there is no council at all; never below 2. */
   minMembers: number;
   /**
    * false: stage 2 does not run at all — the judge synthesises the answers
@@ -165,13 +165,16 @@ export interface Deliberation {
    * `"fast"` for a council configured with `ranking: false`, which skips the
    * peer ranking.
    *
-   * It is stated rather than inferred because `rankings` and `aggregate` are
-   * both empty in two quite different deliberations: the fast one, where the
-   * stage never ran, and a full panel where every ranking failed or could not
-   * be parsed (§12.5) — the second is a degraded run worth an operator's
-   * attention, the first is what was asked for. The name is the shape word of
-   * the model name (§12.8), so a response says which `capitoline-*` behaviour
-   * produced it even when the request has been forgotten.
+   * It is stated rather than inferred because nothing else states it outright.
+   * A ranked council that reached stage 2 never reports an empty `aggregate`:
+   * `aggregate()` seeds an entry per label, so a panel whose every vote failed
+   * to parse (§12.5) still lists all four labels with `votes: 0`. The empty
+   * `aggregate` belongs to this shape and to the below-quorum branch of §12.5,
+   * which also leaves `judge.model` empty. A client could infer all of that
+   * from `votes: 0` and an empty judge; this field spares it the inference and
+   * makes the choice explicit. The name is the shape word of the model name
+   * (§12.8), so a response says which `capitoline-*` behaviour produced it
+   * even when the request has been forgotten.
    */
   shape: "ranked" | "fast";
   members: DeliberationMember[];

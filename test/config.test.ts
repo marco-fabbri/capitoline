@@ -429,7 +429,7 @@ describe("config", () => {
 
   it("rejects a panel its providers cannot answer in parallel", () => {
     // Two seats on one subscription with one slot: the second member waits on
-    // the queue until max_wait_s and loses its seat in both parallel stages,
+    // the queue until max_wait_s and loses its seat in every parallel stage,
     // eight calls into the deliberation (design §12.1). One slot per seat it
     // serves, counted per provider and not per family.
     expect(() => parseConfig(council({}, "capitoline", { concurrency: "1" })))

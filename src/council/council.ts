@@ -248,11 +248,12 @@ export class Council {
       if (outcome.ok) members.push(outcome.member);
       else { lost.push(outcome.lost); failures.push({ kind: outcome.kind, retryAfterS: outcome.retryAfterS }); }
     }
-    if (lost.length > 0) this.log.warn({ council: this.name, lost }, "seats lost before the ranking");
+    if (lost.length > 0) this.log.warn({ council: this.name, lost }, "seats lost before the synthesis");
 
-    // §12.5: below the quorum there is nothing to rank. One answer is returned
-    // as the member wrote it and declared as no council at all, rather than
-    // dressed as a synthesis; none is reported as the failure that speaks for
+    // §12.5: below the quorum there is no council to run — nothing to rank,
+    // and nothing to synthesize either. One answer is returned as the member
+    // wrote it and declared as no council at all, rather than dressed as a
+    // synthesis; none is reported as the failure that speaks for
     // the panel, which is the one the client can act on (RANK).
     if (members.length < this.cfg.minMembers) {
       if (members.length === 0) {
@@ -317,7 +318,7 @@ export class Council {
       return;
     }
     const identities = new Map(members.map((m) => [m.label, m.model]));
-    const prompt = synthesisPrompt(question, answers, verdict, this.cfg.judgeBlind, identities);
+    const prompt = synthesisPrompt(question, answers, verdict, this.cfg.judgeBlind, identities, this.cfg.ranking);
     let model = judge.model;
     let spoken = false;
     for (let attempt = 0; ; attempt++) {
@@ -401,9 +402,11 @@ export class Council {
     const detail: Deliberation = {
       deliberationId: run.id,
       strategyVersion: STRATEGY_VERSION,
-      // The configured shape, not what happened: empty rankings mean one
-      // thing here and quite another in a panel whose votes all failed
-      // (§12.5), and only this tells the two apart in the response.
+      // The configured shape, not what happened. A ranked council that
+      // reached stage 2 aggregates every label, with `votes: 0` for the ones
+      // nobody ranked (§12.5), so an empty aggregate is this shape or the
+      // below-quorum branch above — readable from `votes: 0` and an empty
+      // judge, and stated here so no client has to read it that way.
       shape: this.cfg.ranking ? "ranked" : "fast",
       members: members.map((m): DeliberationMember => ({
         family: m.seat.family, model: m.model, label: m.label, answer: m.answer,

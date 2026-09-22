@@ -587,6 +587,9 @@ describe("a council over HTTP", () => {
     expect(d.members.map((m) => m.label).sort()).toEqual(["Response A", "Response B"]);
     expect(d.rankings.map((r2) => r2.by).sort()).toEqual(["claude-opus", "codex-astra"]);
     expect(d.aggregate.map((a) => a.votes)).toEqual([2, 2]);
+    // The shape travels over HTTP with the rest of the record: `detail` is
+    // passed whole, and nothing but this asserts that it arrives.
+    expect(d.shape).toBe("ranked");
     expect(d.judge).toEqual({ model: "claude-haiku", blind: true });
     expect(d.calls).toBe(5);
     expect(d.deliberationId).toEqual(expect.any(String));
