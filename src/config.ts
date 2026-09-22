@@ -117,10 +117,6 @@ const CouncilSchema = z.object({
   stageTimeoutS: c.stage_timeout_s,
 }));
 
-/** `a`, `a and b`, `a, b and c`: an enumeration read by whoever has to fix the file. */
-const andList = (items: string[]): string =>
-  items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-
 export const ConfigSchema = z
   .object({
     server: z
@@ -211,9 +207,9 @@ export const ConfigSchema = z
         seen.set(name, id);
       }
     }
-    // How many seats each provider serves, per council, filled in below and
-    // checked once every council has been read: the slots belong to the
-    // subscription and every configured council draws on the same ones.
+    // How many seats each provider serves in each council: filled in below and
+    // checked once every council has been read, since one provider is seated
+    // by more than one of them.
     const seatsOf = new Map<string, Map<string, number>>();
     // The councils, once every provider model is known. Everything checked
     // here is a mistake that would otherwise surface only in the middle of a
@@ -294,23 +290,29 @@ export const ConfigSchema = z
         }
       }
     }
-    // Every council together, not one council at a time. With one slot for two
-    // seats the second member sits on that provider's queue until
-    // server.queue.max_wait_s and loses its seat in both parallel stages —
-    // eight of the nine calls spent to discover a setting. Nothing serialises
-    // two councils either: they are two names on the same endpoint, two
-    // clients can ask for them at the same instant, and the slots they draw on
-    // are the subscription's and not the panel's. Counted per council as well
-    // as summed, because the fix is a choice between raising the slots and
-    // moving a seat out of one of them, and that choice needs both numbers.
+    // One council at a time, and deliberately not the sum over all of them.
+    // The seats of a single council start in the same instant, so a provider
+    // with fewer slots than that council's seats loses a member to its own
+    // queue after server.queue.max_wait_s in every deliberation, in both
+    // parallel stages — eight of the nine calls spent to discover a setting.
+    // That is a property of the file, and only the file can fix it.
+    //
+    // Two councils sharing a provider is a different thing. They contend only
+    // while two deliberations overlap, which is load, and load is what the
+    // queue and max_wait_s answer. Summing the councils would make the slots
+    // grow with the number of names declared — the reference panel, the fast
+    // one and the Gemini ladder would ask this one Antigravity subscription
+    // for seven parallel `agy` processes, a number nobody has measured — and,
+    // since the gateway validates at startup, would leave a configuration the
+    // service cannot restart with under Restart=always. The sum would also
+    // have to count the judges, which do run beside another council's members
+    // and which no council counts against itself.
     for (const [pid, per] of seatsOf) {
       const slots = cfg.providers[pid].concurrency;
-      const seats = [...per.values()].reduce((a, b) => a + b, 0);
+      // The largest council: the one deliberation these slots must hold alone.
+      const [council, seats] = [...per].reduce((a, b) => (b[1] > a[1] ? b : a));
       if (slots >= seats) continue;
-      const which = per.size === 1
-        ? `council "${[...per.keys()][0]}"`
-        : `councils ${andList([...per].map(([n, k]) => `"${n}" (${k})`))}`;
-      ctx.addIssue({ code: "custom", path: ["providers", pid, "concurrency"], message: `provider ${pid} serves ${seats} seats of ${which} with concurrency ${slots}: a member would wait on its own subscription's queue and lose its seat in both parallel stages (design §12.1)` });
+      ctx.addIssue({ code: "custom", path: ["providers", pid, "concurrency"], message: `provider ${pid} serves ${seats} seats of council "${council}" with concurrency ${slots}: a member would wait on its own subscription's queue and lose its seat in both parallel stages (design §12.1)` });
     }
   });
 

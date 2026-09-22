@@ -195,18 +195,20 @@ describe("start()", () => {
 // Core directly, never through the schema and this loop.
 describe("start() with more than one council", () => {
   // Two panels that fit the e2e subscriptions side by side: one seat each on
-  // claude and codex, one seat each on claude and antigravity — two claude
-  // seats in all, which is what that provider's two slots offer. Named with a
-  // number, which by design §12.8 is a version of the same shape: these are
-  // the reference panel's shape with another roster, not another strategy.
+  // claude and codex, one seat each on claude and antigravity — one claude
+  // seat per council, inside that provider's two slots. Two seats is the floor
+  // the schema accepts and nothing more: it is not a shape anyone proposes,
+  // since two members cannot break a tie by ranking. The names are test names
+  // on purpose — by design §12.8 a number after the `capitoline-` prefix means
+  // a version of the shipped council, and neither of these is one.
   const TWO_COUNCILS = `council:
-  capitoline-2:
+  council-a:
     seats:
       - { family: anthropic, models: [claude-opus] }
       - { family: openai,    models: [codex-gpt-5.5] }
     judge: { family: anthropic, models: [claude-haiku] }
     stage_timeout_s: 20
-  capitoline-3:
+  council-b:
     seats:
       - { family: anthropic, models: [claude-sonnet] }
       - { family: google,    models: [agy-gemini-flash] }
@@ -241,12 +243,12 @@ describe("start() with more than one council", () => {
       // The startup log is where the loop is observable: one Council built per
       // entry, each with its own seats, rather than the first one twice.
       const registered = lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((l) => l.msg === "council registered");
-      expect(registered.map((l) => l.council)).toEqual(["capitoline-2", "capitoline-3"]);
+      expect(registered.map((l) => l.council)).toEqual(["council-a", "council-b"]);
       expect(registered[0]).toMatchObject({ seats: ["anthropic", "openai"], judge: "anthropic" });
       expect(registered[1]).toMatchObject({ seats: ["anthropic", "google"], judge: "anthropic" });
       const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
       const data = ((await r.json()) as { data: { id: string; owned_by: string }[] }).data;
-      expect(data.filter((m) => m.owned_by === "capitoline").map((m) => m.id)).toEqual(["capitoline-2", "capitoline-3"]);
+      expect(data.filter((m) => m.owned_by === "capitoline").map((m) => m.id)).toEqual(["council-a", "council-b"]);
     } finally { await app.close(); }
   });
 
@@ -262,7 +264,7 @@ describe("start() with more than one council", () => {
     try {
       const health = (await (await fetch(`http://127.0.0.1:${app.port}/health`)).json()) as { models: { name: string; provider: string; kind: string; available: boolean; reason?: string }[] };
       const seated = health.models.filter((m) => m.provider === "capitoline");
-      expect(seated.map((m) => m.name)).toEqual(["capitoline-2", "capitoline-3"]);
+      expect(seated.map((m) => m.name)).toEqual(["council-a", "council-b"]);
       expect(seated[0]).toMatchObject({ kind: "council", available: true });
       expect(seated[1]).toMatchObject({ kind: "council", available: false });
       expect(seated[1].reason).toMatch(/only 1 of 2 seats/);
@@ -270,8 +272,8 @@ describe("start() with more than one council", () => {
       // is offered and the other one is not — with its models gone as well.
       const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
       const offered = ((await r.json()) as { data: { id: string }[] }).data.map((m) => m.id);
-      expect(offered).toContain("capitoline-2");
-      expect(offered).not.toContain("capitoline-3");
+      expect(offered).toContain("council-a");
+      expect(offered).not.toContain("council-b");
       expect(offered).not.toContain("agy-gemini-flash");
     } finally { await app.close(); }
   });

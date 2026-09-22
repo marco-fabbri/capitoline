@@ -391,6 +391,17 @@ slot the second of them would sit on that provider's queue until
 time. It is not a second subscription, only a second process against the same
 one, which is what `claude` already runs.
 
+The slots belong to the subscription and not to one council, so when `council:`
+holds more than one block the check reads them all and measures each provider
+against the **largest** council it is seated in: those seats start in the same
+instant, and they are the collision the file can be certain of. Adding a
+council therefore raises `concurrency` only when the new panel seats more
+chains on one provider than any existing panel does. Two councils asked for at
+the same moment do draw on the same slots, but that is contention between two
+deliberations — load, answered by the queue and `server.queue.max_wait_s`, not
+by the file. `npm run check-config` names the provider and the council that is
+short, before the service is restarted.
+
 Validate after every edit, and before restarting the service:
 
 ```sh
