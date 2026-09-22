@@ -190,6 +190,18 @@ describe("POST /v1/chat/completions", () => {
     expect(r.body.error.code).toBe(kind);
     expect(JSON.stringify(r.body)).not.toContain("secret stderr");
   });
+  it("names a service token in the usage breakdown, and leaves an unmapped id alone", async () => {
+    // Cloudflare's service-token JWT carries the client id, never the name
+    // typed in the dashboard, so without this /v1/usage groups two
+    // applications correctly and calls them both `<32 hex>.access`.
+    const { core, usage } = make();
+    const now = Date.now();
+    usage.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", caller: "0a0a0a0a.access", ts: now });
+    usage.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 5, outcome: "ok", source: "http", caller: "unmapped.access", ts: now });
+    const app = createApp(core, { log: createLogger("t"), callerNames: { "0a0a0a0a.access": "app-one" } });
+    const r = await request(app).get("/v1/usage");
+    expect(r.body.callers.map((c: { caller: string }) => c.caller).sort()).toEqual(["app-one", "unmapped.access"]);
+  });
   it("reports the model that actually answered, and stays quiet when the CLI said nothing", async () => {
     // app-one stores the model of every recipe and could only store the
     // alias, while the gateway knew the dated id and kept it to itself

@@ -667,9 +667,11 @@ that is the intended exemption for local monitoring.
 A verified token also says who is calling, and every usage row records it: the
 email of a user token, and for a service token the `common_name` claim —
 which holds the **client id**, `<32 hex>.access`, not the name typed into the
-dashboard. `server.access.callers` maps an id to a name so the breakdown is
-readable; an id the overlay has not named is reported as itself, which is
-unreadable and still correct.
+dashboard. `server.access.callers` maps an id to a name where `/v1/usage`
+reports it, not where the row is written: a row stores the id Cloudflare
+sent, so a token mapped an hour late reads back all the way, and renaming an
+application renames its past with it. An id the overlay has not named is
+reported as itself, which is unreadable and still correct.
 `GET /v1/usage` reports the last 24 hours grouped by it, which is how two
 applications sharing one gateway are told apart. It is deliberately not on
 `/health`: that route is the exemption above, readable by anyone who can open

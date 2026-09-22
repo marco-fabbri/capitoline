@@ -100,7 +100,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   }
 
   const access = cfg.server.access.team_domain
-    ? createAccessMiddleware({ teamDomain: cfg.server.access.team_domain, audience: cfg.server.access.audience, names: cfg.server.access.callers }, log.child({ mod: "access" }))
+    ? createAccessMiddleware({ teamDomain: cfg.server.access.team_domain, audience: cfg.server.access.audience }, log.child({ mod: "access" }))
     : undefined;
   if (!access) log.warn("Cloudflare Access verification is disabled (server.access.team_domain is empty)");
 
@@ -113,7 +113,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // reports available, so the app answers 503 + Retry-After to everything but
   // /health (see createApp).
   let ready = false;
-  const app = createApp(core, { log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })), ready: () => ready });
+  const app = createApp(core, { log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })), ready: () => ready, callerNames: cfg.server.access.callers });
   const port = overrides.port ?? cfg.server.port;
 
   // One owner for the sqlite handle: whatever fails between here and the end of

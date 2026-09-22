@@ -42,21 +42,14 @@ describe("access middleware", () => {
     const r = await request(app).get("/x").set("Cookie", `CF_Authorization=${await sign({ common_name: "svc", sub: "" })}`);
     expect(r.status).toBe(200); expect(r.body.who).toEqual({ sub: "", type: "service", name: "svc" });
   });
-  it("calls a service token by the name the host gave its client id", async () => {
+  it("keeps the client id Cloudflare sent, opaque as it is", async () => {
     // Cloudflare puts the **client id** in common_name, not the name typed in
     // the dashboard, so /v1/usage listed two applications under two opaque
-    // ids and named neither (observed 2026-09-23). The host maps them.
-    const named = express();
-    named.use(createAccessMiddleware({ teamDomain: team, audience: aud, jwks, names: { "0a0a0a0a.access": "app-one" } }, createLogger("t")));
-    named.get("/x", (_req, res) => res.json({ who: res.locals.identity }));
-    const r = await request(named).get("/x").set("Cookie", `CF_Authorization=${await sign({ common_name: "0a0a0a0a.access", sub: "" })}`);
-    expect(r.body.who).toEqual({ sub: "", type: "service", name: "app-one" });
-
-    // An id the host has not named keeps the id: unreadable, still correct,
-    // and never null, because a row that cannot be attributed is a worse
-    // outcome than one attributed to something opaque.
-    const other = await request(named).get("/x").set("Cookie", `CF_Authorization=${await sign({ common_name: "unmapped.access", sub: "" })}`);
-    expect(other.body.who).toEqual({ sub: "", type: "service", name: "unmapped.access" });
+    // ids and named neither (observed 2026-09-23). The id is what a usage row
+    // stores; naming it happens where the row is read, in /v1/usage, so a
+    // token mapped an hour late is readable all the way back.
+    const r = await request(app).get("/x").set("Cookie", `CF_Authorization=${await sign({ common_name: "0a0a0a0a.access", sub: "" })}`);
+    expect(r.body.who).toEqual({ sub: "", type: "service", name: "0a0a0a0a.access" });
   });
   it("rejects a wrong audience", async () => {
     expect((await call(await sign({ sub: "u1" }, { aud: "other" }))).status).toBe(401);

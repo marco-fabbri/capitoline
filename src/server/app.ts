@@ -37,7 +37,9 @@ function sendError(res: Response, e: unknown, log: Logger) {
   res.status(status).json({ error: { message: err.message, type: status >= 500 ? "server_error" : "invalid_request_error", code: err.kind } });
 }
 
-export function createApp(core: Core, opts: { access?: RequestHandler; log: Logger; mcp?: RequestHandler; ready?: () => boolean }): express.Express {
+export function createApp(core: Core, opts: { access?: RequestHandler; log: Logger; mcp?: RequestHandler; ready?: () => boolean;
+  /** What to call each service token in /v1/usage, by its client id (server.access.callers). */
+  callerNames?: Record<string, string> }): express.Express {
   const app = express();
   app.disable("x-powered-by");
   // Access runs first, app-wide, so an unauthenticated caller gets a 401 before
@@ -178,7 +180,13 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // second is read for a change — a gateway name whose model moved shows two
   // rows — and a day is too short to catch one.
   app.get("/v1/usage", (_req, res) => {
-    res.json({ callers: core.callers(), models: core.modelIdentities() });
+    // Named here and not when the row was written: a row stores the client id
+    // Cloudflare sent, which is stable, and the name is presentation. So a
+    // token mapped an hour late is readable all the way back, and renaming an
+    // application renames its past with it. An id nobody named is reported as
+    // itself, which is unreadable and still correct.
+    const named = core.callers().map((c) => ({ ...c, caller: (c.caller !== null && opts.callerNames?.[c.caller]) || c.caller }));
+    res.json({ callers: named, models: core.modelIdentities() });
   });
 
   // The quota block is only there for image models, and its keys follow this

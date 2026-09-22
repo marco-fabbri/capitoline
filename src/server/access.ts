@@ -4,8 +4,6 @@ import type { Logger } from "../log.js";
 
 export interface AccessOptions {
   teamDomain: string; audience: string; jwks?: ReturnType<typeof createLocalJWKSet>;
-  /** What to call each service token in a usage row, by its client id; see `Identity.name`. */
-  names?: Record<string, string>;
 }
 
 // What a verified token says about who is calling. A service token has no
@@ -17,9 +15,12 @@ export interface AccessOptions {
 // the client id (`<32 hex>.access`); the friendly name stays in the dashboard
 // and never reaches the token. Observed 2026-09-23, after a second
 // application started calling and `/v1/usage` listed two opaque ids. So the
-// id is translated here, through `server.access.callers`, and falls back to
-// itself when the host has not named it — an unreadable caller is still a
-// correct one.
+// id is what a usage row stores, always, and `server.access.callers` gives it
+// a readable name where `/v1/usage` reports it. Translating on the way in
+// instead would freeze each row under whatever name was configured when it
+// was written: the rows app-one wrote in the hour before its id was mapped
+// would have stayed opaque for ever, and renaming an application would leave
+// its past under the old name.
 export interface Identity { email?: string; sub: string; type: "user" | "service"; name?: string }
 
 // A caller is written into every usage row, so what a token can put there is
@@ -74,8 +75,7 @@ export function createAccessMiddleware(opts: AccessOptions, log: Logger): Reques
     try {
       const { payload } = await jwtVerify(token, jwks, { issuer, audience: opts.audience, algorithms: ALGORITHMS, clockTolerance: CLOCK_TOLERANCE_S });
       const p = payload as { email?: string; sub?: string; common_name?: string };
-      const name = p.common_name === undefined ? undefined : (opts.names?.[p.common_name] ?? p.common_name);
-      const identity: Identity = { email: p.email, sub: p.sub ?? "", type: p.common_name ? "service" : "user", name };
+      const identity: Identity = { email: p.email, sub: p.sub ?? "", type: p.common_name ? "service" : "user", name: p.common_name };
       res.locals.identity = identity;
       next();
     } catch (e) {
