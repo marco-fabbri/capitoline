@@ -99,6 +99,11 @@ providers:
       agy-gemini-3.7-flash: { cli_model: gemini-3.7-flash, effort_suffix: true }
       agy-gemini-3.6-flash: { cli_model: gemini-3.6-flash, effort_suffix: true }
       agy-gemini-pro:       { cli_model: gemini-3.1-pro,   effort_suffix: true, efforts: [low, high] }
+      # The council's open-weights seat. `agy models` lists this family at one
+      # effort only (gpt-oss-120b-medium), so `efforts` pins it: with the
+      # provider's whole table open, a request asking for `high` would build
+      # the model id `gpt-oss-120b-high`, which the CLI does not know.
+      agy-gpt-oss:          { cli_model: gpt-oss-120b,     effort_suffix: true, efforts: [medium] }
       agy-claude-sonnet:    { cli_model: claude-sonnet-4-6 }
       agy-claude-opus:      { cli_model: claude-opus-4-6-thinking }
       # kind: image → served by /v1/images/generations and the generate_image MCP tool
@@ -122,3 +127,30 @@ providers:
       collect: [test/fake-cli/fake-collect-image.sh]   # relative to the repo; the runner resolves it
       min_bytes: 200000
       quota_per_window: 12    # images per 5-hour window, reported in /health and /v1/models
+
+# The council. A virtual model, asked for in `model` like any other, which
+# answers by seating one member per family, having them rank each other's
+# answers blind and letting a judge synthesize (design §12).
+#
+# A seat is a family and an ordered chain, never a single model: quotas run out
+# one model at a time (on 2026-09-21 Fable was refused while the same
+# subscription answered on Opus), and one seat per family is what buys
+# independent judgment, because models of one lineage share their blind spots
+# and rank each other's failures highly. `agy-claude-*` is deliberately not
+# seated: it is the same opinion as the Anthropic seat, through another channel.
+#
+# The three prompts are not here. They are the strategy itself, not a CLI
+# detail, so they live in src/council/prompts.ts and changing them changes the
+# council's name (design §12.8).
+council:
+  capitoline:
+    seats:
+      - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
+      - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-5.5] }
+      - { family: google,       models: [agy-gemini-pro, agy-gemini-flash] }
+      - { family: open-weights, models: [agy-gpt-oss] }
+    judge: { family: anthropic, models: [claude-opus, claude-sonnet] }
+    judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
+    judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
+    min_members: 2              # below two answers there is nothing to rank
+    stage_timeout_s: 300        # per member, per stage — not for the whole deliberation

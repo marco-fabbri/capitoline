@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
+import type { CouncilConfig } from "./council/types.js";
 
 export const EffortSchema = z.enum(["low", "medium", "high"]);
 export type Effort = z.infer<typeof EffortSchema>;
@@ -80,6 +81,36 @@ const ProviderSchema = z.object({
   image: ImageSchema,
 }).strict();
 
+// A seat of a council: a family and the chain of models to try for it, best
+// first. min(1) on the chain because a seat with nothing to seat is not a seat
+// at all, and the failure would otherwise only show at deliberation time.
+const SeatSchema = z.object({
+  family: z.string().min(1),
+  models: z.array(z.string().min(1)).min(1),
+}).strict();
+
+// One council. The file is snake_case like the rest of the configuration, and
+// the transform hands the code the names it uses (src/council/types.ts), so a
+// setting is never spelled two ways in two places. The defaults are the
+// design's: a judge seated apart (§12.3) and blind, two members at the very
+// least (§12.5). `stage_timeout_s` is per member and per stage, not for the
+// whole deliberation, which runs nine calls across three subscriptions.
+const CouncilSchema = z.object({
+  seats: z.array(SeatSchema),
+  judge: SeatSchema,
+  judge_allow_member: z.boolean().default(false),
+  judge_blind: z.boolean().default(true),
+  min_members: z.number().int().default(2),
+  stage_timeout_s: z.number().int().min(1).default(300),
+}).strict().transform((c): CouncilConfig => ({
+  seats: c.seats,
+  judge: c.judge,
+  judgeAllowMember: c.judge_allow_member,
+  judgeBlind: c.judge_blind,
+  minMembers: c.min_members,
+  stageTimeoutS: c.stage_timeout_s,
+}));
+
 export const ConfigSchema = z
   .object({
     server: z
@@ -100,6 +131,9 @@ export const ConfigSchema = z
     }).strict(),
     usage: z.object({ db_path: z.string().default("capitoline.sqlite") }).strict().default({}),
     providers: z.record(z.string().min(1), ProviderSchema),
+    // Virtual models, keyed by the name a client asks for in `model`. Empty by
+    // default: a gateway with no council is the phase-1 gateway, unchanged.
+    council: z.record(z.string().min(1), CouncilSchema).default({}),
   })
   .strict()
   .superRefine((cfg, ctx) => {
@@ -157,6 +191,38 @@ export const ConfigSchema = z
         if (other) ctx.addIssue({ code: "custom", path: ["providers", id, "models", name], message: `duplicate model name "${name}" (also in ${other})` });
         seen.set(name, id);
       }
+    }
+    // The councils, once every provider model is known. Everything checked
+    // here is a mistake that would otherwise surface only in the middle of a
+    // deliberation, nine calls deep, as a seat nobody could fill.
+    for (const [name, c] of Object.entries(cfg.council)) {
+      // A council is asked for in the same `model` field as every other model,
+      // so a name held by both would route to one of them and never the other.
+      const provider = seen.get(name);
+      if (provider) {
+        ctx.addIssue({ code: "custom", path: ["council", name], message: `council name "${name}" is also a model of provider ${provider}` });
+      }
+      // Two seats is the floor for the same reason min_members is: there is
+      // nothing to rank below two answers (design §12.5).
+      if (c.seats.length < 2) {
+        ctx.addIssue({ code: "custom", path: ["council", name, "seats"], message: `council "${name}" must declare at least two seats, not ${c.seats.length}` });
+      }
+      if (c.minMembers < 2) {
+        ctx.addIssue({ code: "custom", path: ["council", name, "min_members"], message: `council "${name}" sets min_members ${c.minMembers}: below two answers there is nothing to rank` });
+      }
+      // Every model of every chain, named against the providers. A chain is
+      // written by hand and read only when a fallback happens, so a typo in it
+      // can sit unnoticed until the day it is needed.
+      const chain = (seat: { family: string; models: string[] }, path: (string | number)[]): void => {
+        for (const m of seat.models) {
+          // A Map, not the models object: `in` would accept "toString".
+          if (!seen.has(m)) {
+            ctx.addIssue({ code: "custom", path, message: `council "${name}" seats "${m}" for family ${seat.family}, which no provider declares` });
+          }
+        }
+      };
+      c.seats.forEach((s, i) => chain(s, ["council", name, "seats", i, "models"]));
+      chain(c.judge, ["council", name, "judge", "models"]);
     }
   });
 

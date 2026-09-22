@@ -39,6 +39,21 @@ const configOf = (providers: Record<string, Fields>, runner = "{ sandbox_root: /
 
 const config = (over: Fields = {}, runner?: string): string => configOf({ x: over }, runner);
 
+// A council over the inline provider, built the same way. The provider gets a
+// second model so the smallest panel the schema accepts — two seats, two
+// models — can be written without repeating the provider block.
+const TWO_MODELS = "{ a: {cli_model: a}, b: {cli_model: b} }";
+const COUNCIL: Fields = {
+  seats: "[{family: f1, models: [a]}, {family: f2, models: [b]}]",
+  judge: "{family: f1, models: [a]}",
+};
+const council = (over: Fields = {}, name = "capitoline"): string => {
+  const fields = Object.entries({ ...COUNCIL, ...over }).filter(([, v]) => v !== null);
+  return `council:\n  ${name}: { ${fields.map(([k, v]) => `${k}: ${v}`).join(", ")} }\n${config({ models: TWO_MODELS })}`;
+};
+
+const BOTH_FILES = ["config/capitoline.yaml", "test/e2e.config.yaml"];
+
 describe("config", () => {
   it("loads the repository config", () => {
     const cfg = loadConfig("config/capitoline.yaml");
@@ -228,6 +243,94 @@ describe("config", () => {
     expect(() => parseConfig(text("capitolineX"))).toThrow(/reserved/);
     expect(() => parseConfig(text("capitoline-council"))).toThrow(/reserved/);
     expect(() => parseConfig(text("capitol"))).not.toThrow();
+  });
+
+  it("loads the council of both configuration files", () => {
+    for (const file of BOTH_FILES) {
+      const cfg = loadConfig(file);
+      expect(Object.keys(cfg.council), file).toEqual(["capitoline"]);
+      const c = cfg.council.capitoline;
+      // One seat per family, and no family twice: models of one lineage share
+      // their blind spots, so two seats of the same family would be one
+      // opinion voting twice (design §12.2).
+      expect(c.seats.map((s) => s.family), file).toEqual(["anthropic", "openai", "google", "open-weights"]);
+      expect(c.seats[0].models, file).toEqual(["claude-fable", "claude-opus", "claude-sonnet"]);
+      expect(c.seats[3].models, file).toEqual(["agy-gpt-oss"]);
+      expect(c.judge, file).toEqual({ family: "anthropic", models: ["claude-opus", "claude-sonnet"] });
+      // The snake_case the operator writes, under the names the code uses.
+      expect([c.judgeAllowMember, c.judgeBlind, c.minMembers, c.stageTimeoutS], file).toEqual([false, true, 2, 300]);
+      // Every seated model is a model of some provider, and no seat is empty.
+      const declared = Object.values(cfg.providers).flatMap((p) => Object.keys(p.models));
+      for (const s of [...c.seats, c.judge]) {
+        expect(s.models.length, `${file} ${s.family}`).toBeGreaterThan(0);
+        for (const m of s.models) expect(declared, `${file} ${s.family}`).toContain(m);
+      }
+    }
+  });
+
+  it("exposes only Antigravity model ids the CLI actually lists", () => {
+    // `agy-gpt-oss` is the council's open-weights seat, and `agy models` lists
+    // that family at one effort only (gpt-oss-120b-medium). With effort_suffix
+    // the effort completes the model id, so every effort the model leaves open
+    // must name an id the CLI knows — otherwise a request asking for `high`
+    // builds `gpt-oss-120b-high` and the run dies on an unknown model.
+    const listed = readFileSync("test/fixtures/antigravity/models.txt", "utf8")
+      .split("\n").map((l) => l.split("\t")[0]).filter(Boolean);
+    for (const file of BOTH_FILES) {
+      const agy = loadConfig(file).providers.antigravity;
+      expect(agy.models["agy-gpt-oss"].cli_model, file).toBe("gpt-oss-120b");
+      expect(agy.models["agy-gpt-oss"].effort_suffix, file).toBe(true);
+      for (const [name, m] of Object.entries(agy.models)) {
+        const efforts = m.effort_suffix ? (m.efforts ?? (Object.keys(agy.effort) as string[])) : [];
+        if (efforts.length === 0) expect(listed, `${file} ${name}`).toContain(m.cli_model);
+        for (const e of efforts) expect(listed, `${file} ${name} @ ${e}`).toContain(`${m.cli_model}-${e}`);
+      }
+    }
+  });
+
+  it("has no council at all unless one is configured", () => {
+    expect(parseConfig(config()).council).toEqual({});
+  });
+
+  it("applies the council defaults and rejects an unknown key in the block", () => {
+    const c = parseConfig(council()).council.capitoline;
+    expect([c.judgeAllowMember, c.judgeBlind, c.minMembers, c.stageTimeoutS]).toEqual([false, true, 2, 300]);
+    expect(c.seats).toEqual([{ family: "f1", models: ["a"] }, { family: "f2", models: ["b"] }]);
+    expect(() => parseConfig(council({ judge_blnd: "true" })))
+      .toThrow(/council\.capitoline: Unrecognized key\(s\) in object: 'judge_blnd'/);
+    expect(() => parseConfig(council({ seats: "[{family: f1, models: [a], judge: true}, {family: f2, models: [b]}]" })))
+      .toThrow(/council\.capitoline\.seats\.0: Unrecognized key\(s\) in object: 'judge'/);
+  });
+
+  it("rejects a seat or a judge naming a model no provider declares", () => {
+    // By name: a chain is written by hand and a typo in it would otherwise
+    // only show up as a seat that can never be filled, at deliberation time.
+    expect(() => parseConfig(council({ seats: "[{family: f1, models: [a, nope]}, {family: f2, models: [b]}]" })))
+      .toThrow(/council\.capitoline\.seats\.0\.models: .*"nope".*no provider/);
+    expect(() => parseConfig(council({ judge: "{family: f1, models: [nope]}" })))
+      .toThrow(/council\.capitoline\.judge\.models: .*"nope".*no provider/);
+    // Not an inherited key of Object.prototype either.
+    expect(() => parseConfig(council({ judge: "{family: f1, models: [toString]}" })))
+      .toThrow(/"toString".*no provider/);
+  });
+
+  it("rejects a council named after a provider model", () => {
+    // The council is served by the same `model` field as every other model, so
+    // a name held by both routes to one of them and never to the other.
+    expect(() => parseConfig(council({}, "a"))).toThrow(/council\.a: .*"a".*provider x/);
+  });
+
+  it("rejects a council that could never rank anything", () => {
+    // Below two answers there is nothing to rank, so a council configured for
+    // one is not a council (design §12.5).
+    expect(() => parseConfig(council({ min_members: "1" }))).toThrow(/council\.capitoline\.min_members/);
+    expect(() => parseConfig(council({ min_members: "0" }))).toThrow(/council\.capitoline\.min_members/);
+    expect(parseConfig(council({ min_members: "3" })).council.capitoline.minMembers).toBe(3);
+    expect(() => parseConfig(council({ seats: "[{family: f1, models: [a]}]" })))
+      .toThrow(/council\.capitoline\.seats: .*at least two seats/);
+    // A seat with an empty chain can never be filled.
+    expect(() => parseConfig(council({ seats: "[{family: f1, models: []}, {family: f2, models: [b]}]" })))
+      .toThrow(/council\.capitoline\.seats\.0\.models/);
   });
 });
 
