@@ -168,7 +168,8 @@ describe("Core", () => {
     ]);
     // Rewritten in the store under the id, with its strikes, so the next start
     // finds the new shape and the translation runs once.
-    expect(usage.pauses(t)).toEqual([{ provider: "agy", model: "gemini-3.1-pro-high", until: t + 3_600_000, strikes: 2 }]);
+    // The column holds a scope: the CLI id qualified by the kind of request.
+    expect(usage.pauses(t)).toEqual([{ provider: "agy", model: "text:gemini-3.1-pro-high", until: t + 3_600_000, strikes: 2 }]);
   });
   it("drops a restored pause whose row names neither a CLI id nor a model still declared", async () => {
     const t = 1_000_000;
@@ -292,7 +293,7 @@ describe("Core", () => {
     expect(await fine).toEqual(OK);                       // done arrives after the model pause was installed
     expect(core.pauseRemainingS("b", "b-1")).toBe(3660);
     // The row stands with it, and carries the strikes the success zeroed.
-    expect(usage.pauses(t)).toEqual([{ provider: "b", model: "b-1", until: t + 3_660_000, strikes: 0 }]);
+    expect(usage.pauses(t)).toEqual([{ provider: "b", model: "text:b-1", until: t + 3_660_000, strikes: 0 }]);
     await expect(drain(core.execute(req("b-1"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited" });
     usage.close();
   });
@@ -340,7 +341,7 @@ describe("Core", () => {
     const { core, a } = make({ now: () => t, usage });
     a.script = [{ type: "error", kind: "rate_limited", detail: "reached your a-1 limit", scope: "model" }];
     await drain(core.execute(req("a-1"), { source: "http" }));
-    expect(usage.pauses(t)).toEqual([{ provider: "a", model: "a-1", until: t + 60_000, strikes: 1 }]);
+    expect(usage.pauses(t)).toEqual([{ provider: "a", model: "text:a-1", until: t + 60_000, strikes: 1 }]);
     t += 61_000;
     a.script = OK;
     expect(await drain(core.execute(req("a-1"), { source: "http" }))).toEqual(OK);
@@ -490,6 +491,38 @@ function makeImages(opts: { now?: () => number; imageQuotas?: Record<string, num
 }
 
 describe("Core images", () => {
+  it("does not take a text model down with an exhausted image quota on the same id", async () => {
+    // `agy-image` and `agy-gemini-flash-low` are one CLI id,
+    // `gemini-3.8-flash-low`, and two different quotas: image generation has
+    // its own 12-per-5-hours and 58-per-7-days windows while the text models
+    // answer from another allowance (spike §8). Keyed by the id alone, the
+    // five-day image refusal of 2026-09-22 took the text model with it on the
+    // restart of the 23rd, and with it the third rung of `capitoline-gemini`.
+    const t = 1_000_000;
+    const c = new FakeProvider("c", ["c-text", { name: "c-image", kind: "image" }], OK, 1);
+    c.aliases = { "c-text": "gemini-3.8-flash-low", "c-image": "gemini-3.8-flash-low" };
+    c.imageScript = [{ type: "error", kind: "rate_limited", detail: "exhausted your capacity", scope: "model", retryAfterS: 432_000 }];
+    const usage = new UsageStore(":memory:");
+    const core = new Core([c], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
+
+    await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    expect(core.listModels().map((m) => [m.name, m.available])).toEqual([["c-text", true], ["c-image", false]]);
+    // And the text model really answers, rather than merely being listed.
+    expect(await drain(core.execute(req("c-text"), { source: "http" }))).toEqual(OK);
+    expect(core.providerStates()[0]).toMatchObject({ pausedUntil: null, strikes: 0 });
+    // The stored scope says which quota it was, so a restart keeps them apart.
+    expect(usage.pauses(t)).toEqual([{ provider: "c", model: "image:gemini-3.8-flash-low", until: t + 432_060_000, strikes: 1 }]);
+  });
+  it("brings an image pause back across a restart without touching the text model", () => {
+    const t = 1_000_000;
+    const usage = new UsageStore(":memory:");
+    usage.setPause("c", "image:gemini-3.8-flash-low", t + 432_000_000, 1, t);
+    const c = new FakeProvider("c", ["c-text", { name: "c-image", kind: "image" }], OK, 1);
+    c.aliases = { "c-text": "gemini-3.8-flash-low", "c-image": "gemini-3.8-flash-low" };
+    const core = new Core([c], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
+    core.restorePauses();
+    expect(core.listModels().map((m) => [m.name, m.available])).toEqual([["c-text", true], ["c-image", false]]);
+  });
   it("reports the kind of every model", () => {
     const { core } = makeImages();
     expect(core.listModels().map((m) => [m.name, m.kind])).toEqual([["c-text", "text"], ["c-image", "image"]]);

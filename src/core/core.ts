@@ -84,20 +84,41 @@ export type VirtualAvailability = (models: ModelInfo[]) => { available: boolean;
 
 interface Virtual { run: VirtualRun; availability?: VirtualAvailability }
 
+/**
+ * What a model pause is about: one provider's quota for one CLI id **at one
+ * kind of request**.
+ *
+ * The kind is part of it because the two quotas are different pools, measured
+ * so (`docs/spike-2026-09.md` §8): Antigravity's image generation has its own
+ * 12-per-5-hours and 58-per-7-days windows, and its text models answer from
+ * another allowance entirely. One id sits in both — `agy-image` and
+ * `agy-gemini-flash-low` are both `gemini-3.8-flash-low` — so a pause keyed by
+ * the id alone let an exhausted image quota take a working text model down
+ * with it, and with it the third rung of `capitoline-gemini` (observed in
+ * production 2026-09-23, the first restart after the pause key moved onto the
+ * CLI id). It is the same mistake as pausing the whole provider over one
+ * model's refusal, one level down.
+ *
+ * The value is what the `pauses` table stores in its `model` column, so the
+ * column holds a scope and not a model name. `restorePauses()` absorbs the two
+ * older shapes that column has held.
+ */
+const scopeOf = (kind: ModelKind, cliId: string): string => `${kind}:${cliId}`;
+
 export class Core {
   private readonly states = new Map<string, State>();
   private readonly modelIndex = new Map<string, Entry>();
   /**
    * The pause installed by a refusal that named one model alone, keyed by
-   * `pauseKey`: the provider and the id the CLI was actually given, never the
-   * gateway name. Several gateway names can resolve to one id — a ladder's
-   * rungs are aliases of ids the reference panel already reaches — and keyed
-   * by the name, a refusal on one left the others to rediscover the same
+   * `pauseKey`: the provider and a `scopeOf` scope — the id the CLI was
+   * actually given, qualified by the kind of request it was given for. Never
+   * the gateway name: several gateway names can resolve to one id, and keyed
+   * by the name a refusal on one left the others to rediscover the same
    * exhausted model by spending a call apiece.
    */
   private readonly modelPauses = new Map<string, ModelPause>();
-  /** Every CLI id reachable through the configuration, by provider: what a restored row must name. */
-  private readonly knownCliIds = new Map<string, Set<string>>();
+  /** Every pause scope reachable through the configuration, by provider: what a restored row must name. */
+  private readonly knownScopes = new Map<string, Set<string>>();
   /** Virtual models by the name a client asks for: the councils main.ts registers. */
   private readonly virtuals = new Map<string, Virtual>();
   /** Health checks still running; awaited by idle() before the usage store is closed. */
@@ -112,17 +133,18 @@ export class Core {
         provider: p, sem: new Semaphore(p.concurrencyLimit), health: null, pausedUntil: null, strikes: 0,
         imageLimit: opts.imageQuotas?.[p.id] ?? null, imageResetAt: null, hasImageModels: models.some((m) => m.kind === "image"),
       });
-      const ids = new Set<string>();
+      const scopes = new Set<string>();
       for (const m of models) {
         this.modelIndex.set(m.name, { provider: p, model: m });
         // Every effort, not just the default: a request naming `low` resolves
         // to a different id, and a pause installed under it has to survive a
         // restart like any other.
-        ids.add(p.cliId(m));
-        for (const e of EffortSchema.options) ids.add(p.cliId(m, e));
+        scopes.add(scopeOf(m.kind, p.cliId(m)));
+        for (const e of EffortSchema.options) scopes.add(scopeOf(m.kind, p.cliId(m, e)));
       }
-      if (p.healthCliId !== undefined) ids.add(p.healthCliId);
-      this.knownCliIds.set(p.id, ids);
+      // The probe is a chat request, whatever the model it names.
+      if (p.healthCliId !== undefined) scopes.add(scopeOf("text", p.healthCliId));
+      this.knownScopes.set(p.id, scopes);
     }
   }
 
@@ -138,7 +160,7 @@ export class Core {
   // well serve an id of the same name (`claude-sonnet-4-6` is both Anthropic's
   // and Antigravity's), so the provider is part of the key. The separator is a
   // NUL, which no provider id or model id can contain.
-  private pauseKey(providerId: string, cliId: string): string { return `${providerId}\u0000${cliId}`; }
+  private pauseKey(providerId: string, scope: string): string { return `${providerId}\u0000${scope}`; }
 
   // The id this request will actually be sent under, which is what its pause
   // is keyed by. Image requests carry no effort and take the default.
@@ -173,7 +195,7 @@ export class Core {
     const s = this.states.get(providerId);
     const provider = s && this.isPaused(s) ? this.remainingS(s) : undefined;
     const entry = model === undefined ? undefined : this.modelIndex.get(model);
-    const own = entry === undefined ? undefined : this.keyRemainingS(this.pauseKey(providerId, this.cliIdOf(entry)));
+    const own = entry === undefined ? undefined : this.keyRemainingS(this.pauseKey(providerId, scopeOf(entry.model.kind, this.cliIdOf(entry))));
     if (provider === undefined) return own;
     return own === undefined ? provider : Math.max(provider, own);
   }
@@ -221,7 +243,7 @@ export class Core {
         // this list is the only place that difference can be read.
         // By the resolved id, so one refusal darkens every gateway name that
         // resolves to the refused model instead of only the one that called.
-        const modelReason = reason ?? (this.keyRemainingS(this.pauseKey(id, s.provider.cliId(m))) !== undefined ? "rate_limited" : undefined);
+        const modelReason = reason ?? (this.keyRemainingS(this.pauseKey(id, scopeOf(m.kind, s.provider.cliId(m)))) !== undefined ? "rate_limited" : undefined);
         out.push({ name: m.name, provider: id, kind: m.kind, available: modelReason === undefined, reason: modelReason, overBudget, ...(m.kind === "image" && quota ? { quota } : {}) });
       }
     }
@@ -416,7 +438,8 @@ export class Core {
   private async *guarded(entry: Entry, modelName: string, cliId: string, ctx: Context, produce: () => AsyncIterable<ProviderEvent>): AsyncIterable<ProviderEvent> {
     const kind = entry.model.kind;
     const id = entry.provider.id;
-    const key = this.pauseKey(id, cliId);
+    const scope = scopeOf(kind, cliId);
+    const key = this.pauseKey(id, scope);
     const s = this.states.get(id)!;
     if (this.isPaused(s)) throw this.pausedError(id, s);
     const ownPause = this.keyRemainingS(key);
@@ -438,8 +461,8 @@ export class Core {
     let phase: "running" | "ended" | "threw" = "running";
     try {
       for await (const ev of produce()) {
-        if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; this.onSuccess(id, s, key, cliId); }
-        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, key, cliId, ev, kind); }
+        if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; this.onSuccess(id, s, key, scope); }
+        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, key, scope, ev, kind); }
         else if (ev.type === "rate_limit") this.onRateLimit(id, ev);
         yield ev;
       }
@@ -469,14 +492,14 @@ export class Core {
   // Nothing is written when there is no pause to clear: this runs on every
   // successful request, and an unconditional pair of DELETEs would open a write
   // transaction on the WAL database for each one of them.
-  private onSuccess(id: string, s: State, key: string, cliId: string) {
+  private onSuccess(id: string, s: State, key: string, scope: string) {
     s.strikes = 0;
     if (this.isPaused(s)) this.usage.setPause(id, null, s.pausedUntil!, 0, this.now());
     else if (s.pausedUntil !== null) { s.pausedUntil = null; this.usage.clearPause(id, null); }
     const own = this.modelPauses.get(key);
     if (own === undefined) return;
-    if (this.keyRemainingS(key) !== undefined) { own.strikes = 0; this.usage.setPause(id, cliId, own.pausedUntil, 0, this.now()); }
-    else { this.modelPauses.delete(key); this.usage.clearPause(id, cliId); }
+    if (this.keyRemainingS(key) !== undefined) { own.strikes = 0; this.usage.setPause(id, scope, own.pausedUntil, 0, this.now()); }
+    else { this.modelPauses.delete(key); this.usage.clearPause(id, scope); }
   }
 
   // An explicit retry-after (the quota reset the CLI reported) replaces the
@@ -489,7 +512,7 @@ export class Core {
   // a bare 429) must not cut a multi-day quota pause down to a minute. A
   // negative retry-after (a reset already in the past, or a provider clock
   // ahead of ours) is treated as zero so the minute of slack still applies.
-  private onError(id: string, s: State, key: string, cliId: string, ev: Extract<ProviderEvent, { type: "error" }>, modelKind: ModelKind = "text") {
+  private onError(id: string, s: State, key: string, scope: string, ev: Extract<ProviderEvent, { type: "error" }>, modelKind: ModelKind = "text") {
     const { kind, retryAfterS } = ev;
     if (kind === "rate_limited") {
       // Only an image run says anything about the image quota, and only the
@@ -506,7 +529,7 @@ export class Core {
       // A refusal the CLI attributed to the model that was asked for: pausing
       // the provider would take down the models that still answer, which is
       // what the Fable capture of 2026-09-21 showed happening.
-      if (ev.scope === "model") { this.pauseModel(id, cliId, retryAfterS, key); return; }
+      if (ev.scope === "model") { this.pauseModel(id, scope, retryAfterS, key); return; }
       const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** s.strikes) * 60_000;
       s.strikes++;
       s.pausedUntil = Math.max(s.pausedUntil ?? 0, this.now() + waitMs);
@@ -523,15 +546,15 @@ export class Core {
   // pause that only ever grows while it stands. Its strikes are the model's,
   // so a second model of the same provider starts its own count, and a
   // successful run of this model clears both (guarded(), on `done`).
-  private pauseModel(providerId: string, cliId: string, retryAfterS?: number, precomputed?: string) {
-    const key = precomputed ?? this.pauseKey(providerId, cliId);
+  private pauseModel(providerId: string, scope: string, retryAfterS?: number, precomputed?: string) {
+    const key = precomputed ?? this.pauseKey(providerId, scope);
     const p = this.modelPauses.get(key) ?? { pausedUntil: 0, strikes: 0 };
     const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** p.strikes) * 60_000;
     p.strikes++;
     p.pausedUntil = Math.max(p.pausedUntil, this.now() + waitMs);
     this.modelPauses.set(key, p);
-    this.usage.setPause(providerId, cliId, p.pausedUntil, p.strikes, this.now());
-    this.opts.log.warn({ provider: providerId, model: cliId, seconds: Math.round((p.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: p.strikes }, "model paused after a rate limit");
+    this.usage.setPause(providerId, scope, p.pausedUntil, p.strikes, this.now());
+    this.opts.log.warn({ provider: providerId, model: scope, seconds: Math.round((p.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: p.strikes }, "model paused after a rate limit");
   }
 
   private onRateLimit(id: string, ev: Extract<ProviderEvent, { type: "rate_limit" }>) {
@@ -556,6 +579,26 @@ export class Core {
    * disappears without a line anywhere after an NTP step or a restored
    * snapshot. Logged, so the journal says what went.
    */
+  /**
+   * What a stored `model` column means as a scope, or null when it names
+   * nothing this configuration can reach. Takes the current shape unchanged
+   * and translates the two older ones; see restorePauses() for the history.
+   */
+  private scopeOfRow(providerId: string, stored: string): string | null {
+    const known = this.knownScopes.get(providerId);
+    if (known === undefined) return null;
+    if (known.has(stored)) return stored;
+    // A bare CLI id, written on 2026-09-22: text, which is the only kind that
+    // shape was ever used for — the image pause of that day still carried the
+    // gateway name below.
+    if (known.has(scopeOf("text", stored))) return scopeOf("text", stored);
+    // A gateway name, written before that: resolved through this
+    // configuration, which is also where the kind comes from.
+    const entry = this.modelIndex.get(stored);
+    if (entry === undefined || entry.provider.id !== providerId) return null;
+    return scopeOf(entry.model.kind, this.cliIdOf(entry));
+  }
+
   restorePauses(): void {
     const rows = this.usage.pauses(this.now());
     const removed = this.usage.prunePauses(this.now());
@@ -567,36 +610,36 @@ export class Core {
         s.pausedUntil = row.until;
         s.strikes = row.strikes;
       } else {
-        // The column holds a CLI id since the key moved off the gateway name.
-        // Three cases, and only the last is a skip.
+        // The column holds a `scopeOf` scope. It has held two older shapes,
+        // and both are translated rather than dropped: restored under the
+        // scope they mean, and rewritten in the store, so the translation
+        // happens once and the next start finds the current shape.
         //
-        // A row already naming a CLI id is restored as it is. A row naming a
-        // **gateway name this configuration still declares** was written by a
-        // build from before 2026-09-22 and is translated: restored under the
-        // id that name resolves to, and rewritten in the store so the next
-        // start finds the new shape and this branch stops being reached.
-        // Dropping it instead was a real loss — the five-day image pause of
-        // 2026-09-22, the very case the doc comment above names, went with the
-        // first restart after the key changed, and the next image request
-        // would have spent one generation of a weekly quota of 58 to
-        // rediscover a refusal written in the table.
+        //   before 2026-09-22  the gateway name        `agy-image`
+        //   2026-09-22         the bare CLI id         `gemini-3.8-flash-low`
+        //   since 2026-09-23   the scope               `image:gemini-3.8-flash-low`
         //
-        // A row that is neither is a model the configuration no longer
-        // declares: skipped rather than restored under a key nothing will ever
-        // look up, and pruned once it expires.
+        // Dropping instead of translating was a real loss the first time:
+        // the five-day image pause of 2026-09-22, the very case the doc
+        // comment above names, went with the restart after the key first
+        // moved, and the next image request would have spent one generation
+        // of a weekly quota of 58 to rediscover a refusal written in the
+        // table.
         //
-        // The translation is a one-transition step and can be deleted once no
-        // deployed database can still hold a legacy row.
-        let cliId = row.model;
-        if (!this.knownCliIds.get(row.provider)?.has(cliId)) {
-          const entry = this.modelIndex.get(row.model);
-          if (entry === undefined || entry.provider.id !== row.provider) continue;
-          cliId = this.cliIdOf(entry);
+        // A row that means none of the three is a model the configuration no
+        // longer declares: skipped rather than restored under a key nothing
+        // will ever look up, and pruned once it expires.
+        //
+        // Both translations are one-transition steps and can be deleted once
+        // no deployed database can still hold an older row.
+        const scope = this.scopeOfRow(row.provider, row.model);
+        if (scope === null) continue;
+        if (scope !== row.model) {
           this.usage.clearPause(row.provider, row.model);
-          this.usage.setPause(row.provider, cliId, row.until, row.strikes, this.now());
-          this.opts.log.info({ provider: row.provider, from: row.model, to: cliId }, "pause row translated from a gateway name");
+          this.usage.setPause(row.provider, scope, row.until, row.strikes, this.now());
+          this.opts.log.info({ provider: row.provider, from: row.model, to: scope }, "pause row translated to the current shape");
         }
-        this.modelPauses.set(this.pauseKey(row.provider, cliId), { pausedUntil: row.until, strikes: row.strikes });
+        this.modelPauses.set(this.pauseKey(row.provider, scope), { pausedUntil: row.until, strikes: row.strikes });
       }
       this.opts.log.info({ provider: row.provider, model: row.model, seconds: Math.round((row.until - this.now()) / 1000), strikes: row.strikes }, "pause restored");
     }
@@ -640,7 +683,7 @@ export class Core {
       // ones that answer.
       const probed = s.provider.healthModel;
       const probedId = s.provider.healthCliId;
-      const modelPaused = probedId === undefined ? undefined : this.keyRemainingS(this.pauseKey(s.provider.id, probedId));
+      const modelPaused = probedId === undefined ? undefined : this.keyRemainingS(this.pauseKey(s.provider.id, scopeOf("text", probedId)));
       if (modelPaused !== undefined) {
         this.opts.log.info({ provider: s.provider.id, model: probed, seconds: modelPaused }, "health check skipped: health model paused");
         return;
@@ -658,7 +701,7 @@ export class Core {
       const modelOnly = !status.ok && status.kind === "rate_limited" && status.scope === "model" && status.model !== undefined;
       // By the id the probe sent, which it reports: the probe picks its own
       // effort, so the id is not derivable from the model name out here.
-      if (modelOnly) this.pauseModel(s.provider.id, status.cliId ?? status.model!, undefined);
+      if (modelOnly) this.pauseModel(s.provider.id, scopeOf("text", status.cliId ?? status.model!), undefined);
       else s.health = status;
       this.usage.record({ provider: s.provider.id, model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: status.ok ? "ok" : (status.kind ?? "cli_crashed"), source: "health", ts: this.now() });
       this.opts.log.info({ provider: s.provider.id, ok: status.ok, kind: status.kind, detail: status.detail, ...(modelOnly ? { model: status.model, scope: "model" } : {}) }, "health check");
