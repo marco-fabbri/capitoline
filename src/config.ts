@@ -3,7 +3,14 @@ import { parse } from "yaml";
 import { z } from "zod";
 import type { CouncilConfig } from "./council/types.js";
 
-export const EffortSchema = z.enum(["low", "medium", "high"]);
+// Ascending, and the order is load-bearing: `nearestEffort` reads it as the
+// scale it approximates along. Every level the three CLIs accept is here —
+// `claude --effort` takes low..max, Codex's model cache prices low..ultra per
+// model, and Antigravity carries the level inside the model id and serves only
+// the first three. A provider prices the subset it accepts in its own `effort`
+// table, and a model narrows that further with `efforts`, so a value no CLI
+// would take can be named here without any provider offering it.
+export const EffortSchema = z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]);
 export type Effort = z.infer<typeof EffortSchema>;
 
 export const ModelKindSchema = z.enum(["text", "image"]);

@@ -1,0 +1,12 @@
+# `codex` model cache, captured on the host. Columns: slug, display name,
+# default reasoning level, the levels the model serves.
+# fetched_at 2026-09-22T19:03:00.675964366Z  client_version 0.155.1
+gpt-6-astra	GPT-6-Astra	medium	low,medium,high,xhigh,max,ultra
+gpt-6-sol	GPT-6-Sol	medium	low,medium,high,xhigh,max,ultra
+gpt-6-luna	GPT-6-Luna	medium	low,medium,high,xhigh,max
+gpt-reserve	GPT-Reserve	medium	low,medium,high,xhigh,max
+gpt-5.6-sol	GPT-5.6-Sol	low	low,medium,high,xhigh,max,ultra
+gpt-5.6-terra	GPT-5.6-Terra	medium	low,medium,high,xhigh,max,ultra
+gpt-5.6-luna	GPT-5.6-Luna	medium	low,medium,high,xhigh,max
+gpt-5.5	GPT-5.5	medium	low,medium,high,xhigh
+codex-auto-review	Codex Auto Review	medium	low,medium,high,xhigh,max

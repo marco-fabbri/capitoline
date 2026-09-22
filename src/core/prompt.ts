@@ -1,4 +1,4 @@
-import type { Effort } from "../config.js";
+import { EffortSchema, type Effort } from "../config.js";
 import type { Message } from "./types.js";
 
 export function splitSystem(messages: Message[]): { system: string | null; rest: Message[] } {
@@ -28,7 +28,10 @@ export function flatten(rest: Message[]): string {
   }).join("\n\n");
 }
 
-const ORDER: Effort[] = ["low", "medium", "high"];
+// The scale itself, read off the schema rather than written out again: the two
+// drifting apart would make `nearestEffort` throw on a level the HTTP layer had
+// just accepted, so they are one list.
+const ORDER: readonly Effort[] = EffortSchema.options;
 
 /**
  * The allowed level nearest to the one asked for, ties broken towards the

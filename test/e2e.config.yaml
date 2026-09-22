@@ -31,7 +31,19 @@ providers:
       claude-sonnet: { cli_model: sonnet }
       claude-haiku:  { cli_model: haiku }
       claude-fable:  { cli_model: fable }
-    effort: { low: low, medium: medium, high: high }        # --effort value
+      # The long-context variants the CLI lists beside the plain aliases. Same
+      # models, a different context window, and the brackets are part of the
+      # alias: nothing here goes through a shell, so they reach --model as
+      # written.
+      claude-sonnet-1m: { cli_model: "sonnet[1m]" }
+      claude-opus-1m:   { cli_model: "opus[1m]" }
+      claude-fable-1m:  { cli_model: "fable[1m]" }
+      # Deliberately absent, and they are in the CLI's list: `best`, `default`
+      # and `opusplan` are routing aliases that resolve to a model this table
+      # already names. Exposing them would add a name and no reach, and every
+      # one of them would be a second gateway name for an id another entry
+      # holds — which is a pause the gateway has to reconcile for nothing.
+    effort: { low: low, medium: medium, high: high, xhigh: xhigh, max: max }   # --effort value (claude --help: low, medium, high, xhigh, max)
     model_flag: --model         # <flag> <cli_model>
     effort_flag: --effort       # <flag> <effort value>
     effort_key: null            # the value is passed bare, not as key="value"
@@ -64,10 +76,25 @@ providers:
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: codex-gpt-5.5
     models:
-      codex-gpt-6-astra: { cli_model: gpt-6-astra }
-      codex-gpt-5.6-sol: { cli_model: gpt-5.6-sol }
-      codex-gpt-5.5:     { cli_model: gpt-5.5 }
-    effort: { low: low, medium: medium, high: high }        # -c model_reasoning_effort="<v>"
+      # Every slug in the CLI's own model cache (test/fixtures/codex/models.txt).
+      # `efforts` is pinned wherever the cache says the model serves fewer
+      # levels than the provider's table prices, so a request asking for one it
+      # does not have resolves to the nearest it does instead of being sent a
+      # level the CLI would refuse.
+      codex-gpt-6-astra:   { cli_model: gpt-6-astra }
+      codex-gpt-6-sol:     { cli_model: gpt-6-sol }
+      codex-gpt-6-luna:    { cli_model: gpt-6-luna,    efforts: [low, medium, high, xhigh, max] }
+      codex-gpt-5.6-sol:   { cli_model: gpt-5.6-sol }
+      codex-gpt-5.6-terra: { cli_model: gpt-5.6-terra }
+      codex-gpt-5.6-luna:  { cli_model: gpt-5.6-luna,  efforts: [low, medium, high, xhigh, max] }
+      codex-gpt-5.5:       { cli_model: gpt-5.5,       efforts: [low, medium, high, xhigh] }
+      # The two the cache lists that are not general chat models, exposed
+      # because they are models the subscription serves and named so nobody
+      # reaches for them by accident: `gpt-reserve` is the fallback tier, and
+      # `codex-auto-review` is the model behind the CLI's own review feature.
+      codex-gpt-reserve:   { cli_model: gpt-reserve,   efforts: [low, medium, high, xhigh, max] }
+      codex-auto-review:   { cli_model: codex-auto-review, efforts: [low, medium, high, xhigh, max] }
+    effort: { low: low, medium: medium, high: high, xhigh: xhigh, max: max, ultra: ultra }   # -c model_reasoning_effort="<v>"
     model_flag: -m
     effort_flag: -c
     effort_key: model_reasoning_effort   # -c model_reasoning_effort="<v>"
@@ -122,12 +149,9 @@ providers:
       # at the default effort resolves to gemini-3.1-pro-high (efforts
       # [low, high], and the medium tie breaks upward), `agy-gemini-flash` at
       # high to gemini-3.8-flash-high, and `agy-image` already carries
-      # gemini-3.8-flash-low. A model pause is keyed by the gateway name the
-      # refusal named and not by cli_model, so a quota refusal on one alias
-      # does not cover the other: the reference panel's google seat will spend
-      # one call rediscovering a model this ladder has just seen exhausted,
-      # and then step down. One call per deliberation, not a break; keying the
-      # pause by cli_model is an engine change and sits in docs/backlog.md.
+      # gemini-3.8-flash-low. That costs nothing: a model pause is keyed by
+      # the id the CLI was actually given, so a refusal on any one of these
+      # names darkens every other name that resolves to the same model.
       agy-gemini-pro-high:   { cli_model: gemini-3.1-pro-high,   effort_suffix: false }
       agy-gemini-flash-high: { cli_model: gemini-3.8-flash-high, effort_suffix: false }
       agy-gemini-flash-low:  { cli_model: gemini-3.8-flash-low,  effort_suffix: false }
@@ -140,6 +164,22 @@ providers:
       agy-claude-opus:      { cli_model: claude-opus-4-6-thinking }
       # kind: image → served by /v1/images/generations and the generate_image MCP tool
       agy-image:            { cli_model: gemini-3.8-flash-low, kind: image, timeout_s: 240 }
+      # The remaining fixed ids of `agy models`, each under a name of its own.
+      # Every one is an alias: the effort-driven entries above already reach
+      # them, at whatever level a request asks for. Naming them outright is
+      # what lets a caller pin a rung instead of trusting the resolution — and
+      # it costs nothing now that a model pause is keyed by the id the CLI was
+      # given rather than by the gateway name (docs/backlog.md, Shipped).
+      agy-gemini-flash-medium:  { cli_model: gemini-3.8-flash-medium, effort_suffix: false }
+      agy-gemini-3.7-flash-high:   { cli_model: gemini-3.7-flash-high,   effort_suffix: false }
+      agy-gemini-3.7-flash-medium: { cli_model: gemini-3.7-flash-medium, effort_suffix: false }
+      agy-gemini-3.7-flash-low:    { cli_model: gemini-3.7-flash-low,    effort_suffix: false }
+      agy-gemini-3.6-flash-high:   { cli_model: gemini-3.6-flash-high,   effort_suffix: false }
+      agy-gemini-3.6-flash-medium: { cli_model: gemini-3.6-flash-medium, effort_suffix: false }
+      agy-gemini-3.6-flash-low:    { cli_model: gemini-3.6-flash-low,    effort_suffix: false }
+      agy-gemini-pro-low:          { cli_model: gemini-3.1-pro-low,      effort_suffix: false }
+      # gpt-oss-120b-medium is not repeated here: `agy-gpt-oss` above is pinned
+      # to the one level the family serves, so it is already the fixed rung.
     effort: { low: low, medium: medium, high: high }
     model_flag: --model
     effort_flag: null           # none: the effort is part of the model id (effort_suffix)
@@ -181,11 +221,12 @@ council:
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-5.5] }
       - { family: google,       models: [agy-gemini-pro, agy-gemini-flash] }
       - { family: open-weights, models: [agy-gpt-oss] }
-    # claude-haiku closes the judge's chain because it sits in no seat: with
-    # judge_allow_member: false the judge needs a model the panel cannot take,
-    # and on a day when Fable and Opus are both refused the Anthropic seat
-    # walks down to claude-sonnet and would otherwise leave the chain empty
-    # after eight of the nine calls have been spent.
+    # The top model of each family, descending, and the panel's own heads at
+    # the front: the judge writes the answer the client reads, so it is the one
+    # seat where economising is false economy (the first ladder run measured
+    # what a cheap judge costs — docs/backlog.md). With judge_allow_member:
+    # false, a model a seat has taken is skipped over at seating time, which is
+    # why the chain is long enough to survive the panel taking its first two.
     judge: { family: best-available, models: [claude-fable, claude-opus, codex-gpt-6-astra, agy-gemini-pro, codex-gpt-5.6-sol] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
@@ -259,13 +300,13 @@ council:
     # already known paused is never seated at all and the deliberation degrades
     # honestly — the best-ranked answer is returned unsynthesised — but the
     # first refusal of a window is by definition not in the state yet (design
-    # §12.2), and with nothing after claude-haiku that single refusal throws
-    # away six Gemini calls already spent and hands the client an error instead
-    # of an answer. agy-claude-sonnet is the same lineage through the Google
-    # subscription, so the step down spends no Anthropic window — the reason
-    # this ladder is on Gemini in the first place — it sits in no seat of any
-    # council, and by the time it is reached the members have already released
-    # their Antigravity slots.
+    # §12.2), and with nothing after the head that single refusal throws away
+    # six Gemini calls already spent and hands the client an error instead of
+    # an answer. codex-gpt-5.6-sol closes the chain, and every model in it sits
+    # in no seat of this council, which is what judge_allow_member: false
+    # requires. The head is codex-gpt-6-astra rather than an Anthropic model
+    # because this ladder already spends no Anthropic window on its rungs, and
+    # that window is the scarce one.
     judge: { family: best-available, models: [codex-gpt-6-astra, claude-fable, claude-opus, codex-gpt-5.6-sol] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail

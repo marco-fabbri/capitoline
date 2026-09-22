@@ -372,7 +372,7 @@ is configuration and a restart:
 |---|---|---|
 | `capitoline` | the reference panel: four families answer, rank each other blind, and a judge seated apart synthesizes. The shape to ask when the panel's own verdict on its answers is worth its price | 9 |
 | `capitoline-fast` | the same four families and the same judge with `ranking: false`, so stage 2 never runs: the everyday shape, at half the price and with no panel verdict on the four answers | 5 |
-| `capitoline-gemini` | the first capability ladder: one family at three reasoning levels, all three rungs on Antigravity, judged by `claude-haiku` from outside. A measuring instrument to run over a sample of questions, not a daily mode; `min_members: 3` makes it refuse rather than report a ladder that is missing a rung | 7 |
+| `capitoline-gemini` | the first capability ladder: one family at three reasoning levels, all three rungs on Antigravity, judged from outside by `codex-gpt-6-astra`, with `claude-fable`, `claude-opus` and `codex-gpt-5.6-sol` behind it. A measuring instrument to run over a sample of questions, not a daily mode; `min_members: 3` makes it refuse rather than report a ladder that is missing a rung | 7 |
 
 The price is one call per seat, one more per seat when the ranking stage runs,
 and one for the judge. The reference panel's nine land on three different

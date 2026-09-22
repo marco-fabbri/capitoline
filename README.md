@@ -13,7 +13,8 @@ official Claude Code, Codex and Gemini CLIs, authenticated with the
 subscriptions of whoever hosts it. Three voices, one endpoint.
 
 You can give the floor to a single member: `claude-opus`,
-`codex-gpt-5`, `gemini-pro`. Or the `capitoline` model convenes the
+`codex-gpt-6-astra`, `agy-gemini-pro`, or any other model the three CLIs
+serve, since every one of them is exposed by name. Or the `capitoline` model convenes the
 Triad: every member answers, every member judges the others without knowing
 who wrote what, and a judge synthesizes. As in the Temple, the value is not
 in the agreement but in hearing the dissent before deciding.
@@ -37,7 +38,7 @@ Production deployment on any Debian/Ubuntu host (a Nutanix AHV VM, a Proxmox LXC
     curl -N http://127.0.0.1:8080/v1/chat/completions -H 'content-type: application/json' \
       -d '{"model":"capitoline","stream":true,"messages":[{"role":"user","content":"Is a retry after a refusal worth one more call?"}]}'
 
-Any OpenAI-compatible client works by setting its base URL to `/v1` (Open WebUI, the official SDKs, LiteLLM). Supported: `model`, `messages` (text and base64 image parts), `stream`, `reasoning_effort`. Rejected with 400: `tools`, `n>1`, `logprobs`, `response_format`. Ignored with the `X-Capitoline-Ignored` header: `temperature`, `top_p`, `max_tokens` and other sampling knobs. Responses carry an extra `capitoline` field.
+Any OpenAI-compatible client works by setting its base URL to `/v1` (Open WebUI, the official SDKs, LiteLLM). Supported: `model`, `messages` (text and base64 image parts), `stream`, `reasoning_effort` (`low`, `medium`, `high`, `xhigh`, `max`, `ultra` — each provider prices the levels its CLI accepts and a request asking for one it does not runs at the nearest, never at the CLI's own default). Rejected with 400: `tools`, `n>1`, `logprobs`, `response_format`. Ignored with the `X-Capitoline-Ignored` header: `temperature`, `top_p`, `max_tokens` and other sampling knobs. Responses carry an extra `capitoline` field.
 
 Images: `POST /v1/images/generations` serves the models declared with `kind: image` (the kind is reported by `/v1/models`); omit `model` and the first available image model answers. One image per call, returned inline as `b64_json`, with the real `mime`, `width`, `height` and `bytes` in the `capitoline` field. Rejected with 400: `n` other than 1, a `response_format` other than `b64_json`, an `output_format` other than `jpeg` (the gateway returns the format the CLI produced), a chat request against an image model and an image request against a text model. Ignored with the `X-Capitoline-Ignored` header: `size`, `quality`, `style` and the other style knobs — the CLI's image tool takes only a prompt, so there is nothing to map a size onto. A generation takes 11-45 s and the provider's quota is small: `docs/spike-2026-09.md` §8 has the two windows.
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { start } from "../src/main.js";
+import { loadConfig } from "../src/config.js";
 import type { Deliberation } from "../src/council/council.js";
 import { STRATEGY_VERSION, answerPrompt, rankingPrompt, synthesisPrompt } from "../src/council/prompts.js";
 import { IMAGE_PROMPT } from "../src/providers/antigravity.js";
@@ -27,7 +28,15 @@ describe("end to end with fake CLIs", () => {
     // configured one as a virtual model and each one's seats can all be
     // filled: a client asks for any of them in `model` exactly as for the
     // real ones (design §12).
-    expect(data.map((m) => m.id).sort()).toEqual(["agy-claude-opus", "agy-claude-sonnet", "agy-gemini-3.6-flash", "agy-gemini-3.7-flash", "agy-gemini-flash", "agy-gemini-flash-high", "agy-gemini-flash-low", "agy-gemini-pro", "agy-gemini-pro-high", "agy-gpt-oss", "agy-image", "capitoline", "capitoline-fast", "capitoline-gemini", "claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "codex-gpt-5.5", "codex-gpt-5.6-sol", "codex-gpt-6-astra"]);
+    // Read off the file rather than written out again: what this proves is
+    // that the endpoint serves everything the configuration declares and
+    // nothing else, and a list typed here would only pin the file's contents a
+    // second time — which the CLI-list checks in test/config.test.ts already do
+    // against what the three CLIs actually serve.
+    const cfg = loadConfig("test/e2e.config.yaml");
+    const declared = [...Object.values(cfg.providers).flatMap((p) => Object.keys(p.models)), ...Object.keys(cfg.council)].sort();
+    expect(declared.length).toBeGreaterThan(20);
+    expect(data.map((m) => m.id).sort()).toEqual(declared);
     // Owned by the gateway and of a kind of their own: they are served by no
     // provider, and their calls are accounted under the models that served
     // them (§12.7).

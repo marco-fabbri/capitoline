@@ -424,6 +424,71 @@ describe("config", () => {
     }
   });
 
+  // Every provider's committed list of what its CLI serves, and how to read the
+  // ids out of it. Until now only Antigravity had one, so a typo in a Claude
+  // alias or a Codex slug surfaced at the first call and nowhere earlier.
+  const CLI_LISTS: Record<string, { file: string; ids: (text: string) => string[] }> = {
+    // `agy models`, tab separated: id, display name.
+    antigravity: { file: "test/fixtures/antigravity/models.txt", ids: (t) => t.split("\n").map((l) => l.split("\t")[0]).filter((x) => x && !x.startsWith("#")) },
+    // The CLI's own model cache, dumped on the host: slug, display name, default level, levels.
+    codex: { file: "test/fixtures/codex/models.txt", ids: (t) => t.split("\n").map((l) => l.split("\t")[0]).filter((x) => x && !x.startsWith("#")) },
+    // A real `/model` capture: the aliases are the comma-separated tail of the
+    // usage line, with `or a full model ID` dropped. The brackets of
+    // `sonnet[1m]` are part of the alias.
+    claude: {
+      file: "test/fixtures/claude/slash-model.json",
+      ids: (t) => {
+        const result = (JSON.parse(t) as { result: string }).result;
+        const tail = /Available: (.+?)(?:, or a full model ID)?\.?$/m.exec(result);
+        expect(tail, "the /model capture no longer lists the aliases").not.toBeNull();
+        return tail![1].split(",").map((x) => x.trim()).filter(Boolean);
+      },
+    },
+  };
+
+  it("exposes only model ids the CLIs actually serve, for every provider", () => {
+    // A `cli_model` is the one value nothing else can check: the schema takes
+    // any non-empty string, and a wrong one costs a real call to discover.
+    for (const file of BOTH_FILES) {
+      const cfg = loadConfig(file);
+      for (const [pid, list] of Object.entries(CLI_LISTS)) {
+        const p = cfg.providers[pid];
+        expect(p, `${file} ${pid}`).toBeDefined();
+        const listed = list.ids(readFileSync(list.file, "utf8"));
+        expect(listed.length, list.file).toBeGreaterThan(0);
+        for (const [name, m] of Object.entries(p.models)) {
+          // The same two steps effortValue() takes (src/providers/adapter.ts):
+          // an effort the provider's table does not define is dropped, and the
+          // id carries the table's *value*, not the key.
+          const efforts = m.effort_suffix ? (m.efforts ?? (Object.keys(p.effort) as Effort[])).filter((e) => Object.hasOwn(p.effort, e)) : [];
+          if (efforts.length === 0) expect(listed, `${file} ${name}`).toContain(m.cli_model);
+          for (const e of efforts) expect(listed, `${file} ${name} @ ${e}`).toContain(`${m.cli_model}-${p.effort[e]}`);
+        }
+      }
+    }
+  });
+
+  it("declares, for every Codex model, only the reasoning levels its cache prices", () => {
+    // The cache carries the levels per model — `gpt-5.5` stops at xhigh where
+    // `gpt-6-astra` goes to ultra — and the provider's table prices the union.
+    // A model left open to the whole table would be sent a level the CLI
+    // refuses, which is the same failure the Antigravity suffix check catches
+    // and arrives by a different road.
+    const cache = new Map(readFileSync("test/fixtures/codex/models.txt", "utf8").split("\n")
+      .filter((l) => l && !l.startsWith("#")).map((l) => { const c = l.split("\t"); return [c[0], new Set(c[3].split(","))]; }));
+    for (const file of BOTH_FILES) {
+      const p = loadConfig(file).providers.codex;
+      const priced = Object.keys(p.effort) as Effort[];
+      for (const [name, m] of Object.entries(p.models)) {
+        const served = cache.get(m.cli_model);
+        expect(served, `${file} ${name}: ${m.cli_model} is not in the cache`).toBeDefined();
+        for (const e of m.efforts ?? priced) {
+          expect([...served!], `${file} ${name} @ ${e}`).toContain(p.effort[e]);
+        }
+      }
+    }
+  });
+
   it("exposes only Antigravity model ids the CLI actually lists", () => {
     // `agy-gpt-oss` is the council's open-weights seat, and `agy models` lists
     // that family at one effort only (gpt-oss-120b-medium). With effort_suffix
