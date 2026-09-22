@@ -5,11 +5,11 @@ import type { ProviderEvent } from "../core/types.js";
 import { labels, nextInChain, seat, type ModelState } from "./seating.js";
 import { STRATEGY_VERSION, answerPrompt, rankingPrompt, synthesisPrompt } from "./prompts.js";
 import { aggregate, parseRanking } from "./ranking.js";
-import type { CouncilConfig, Deliberation, DeliberationMember, LostSeat, MemberRanking, Ranking, Seat } from "./types.js";
+import type { Aggregate, CouncilConfig, Deliberation, DeliberationMember, LostSeat, MemberRanking, Ranking, Seat } from "./types.js";
 
 export type { Deliberation, DeliberationMember, LostSeat, MemberRanking } from "./types.js";
 
-/** The three stages of §12.1, named the same way in the progress the client is shown. */
+/** The three stages of §12.1, named the same way in the progress the client is shown. A council without a ranking stage never emits `rankings`. */
 export type CouncilStage = "answers" | "rankings" | "synthesis";
 
 /**
@@ -105,7 +105,7 @@ const RANK: Record<FailureKind, number> = {
 interface Failure { kind: FailureKind; retryAfterS?: number }
 const worstOf = (failures: Failure[]): Failure | undefined => [...failures].sort((a, b) => RANK[a.kind] - RANK[b.kind])[0];
 
-/** A member of a deliberation in flight. Its label is empty until stage 2 assigns one. */
+/** A member of a deliberation in flight. Its label is empty until the panel is known and the labels are handed out, just before stage 2 — or, in a council that runs none, just before the judge. */
 interface RunningMember {
   seat: Seat;
   model: string;
@@ -177,7 +177,10 @@ const byLabel = (a: { label: string }, b: { label: string }): number =>
   a.label.length - b.label.length || a.label.localeCompare(b.label);
 
 /**
- * The three stages of the council (design §12.1), over one `CouncilCore`.
+ * The three stages of the council (design §12.1), over one `CouncilCore` —
+ * two of them for a council configured with `ranking: false`, which skips the
+ * peer ranking and is the only difference between `capitoline` and
+ * `capitoline-fast`.
  *
  * Nothing here knows what a provider or a CLI is: a member is a model name
  * given to `Core.execute()`, which is what makes a member's call queue, pause,
@@ -264,22 +267,33 @@ export class Council {
       return;
     }
 
-    // Stage 2: the anonymous peer ranking, each member shown every answer
-    // including its own.
+    // The labels are assigned whatever the shape: they are what the judge
+    // reads the answers under and what the response is un-blinded against
+    // (§12.4), and only the ranking stage's absence depends on `ranking`.
     this.assignLabels(members, question);
     const answers = [...members].sort(byLabel).map((m) => ({ label: m.label, text: m.answer }));
     const labelList = answers.map((a) => a.label);
-    yield { type: "progress", stage: "rankings", done: 0, total: members.length };
-    const votes = new Array<Ranking[] | null>(members.length).fill(null);
-    let ranked = 0;
-    for await (const { index, value } of settle(members.map((m) => this.rank(run, m, question, answers, labelList, ctx)))) {
-      votes[index] = value;
-      yield { type: "progress", stage: "rankings", done: ++ranked, total: members.length };
-    }
-    if (ctx.signal?.aborted) return;
+
+    // Stage 2: the anonymous peer ranking, each member shown every answer
+    // including its own — unless the council is configured without it, which
+    // is the whole of the `-fast` shape: four seats cost five calls instead of
+    // nine, the judge is given the answers with no aggregate, and no
+    // `rankings` progress is emitted, since a client that renders the stages
+    // must not be shown one that never runs.
     const rankings: MemberRanking[] = [];
-    members.forEach((m, i) => { const v = votes[i]; if (v !== null) rankings.push({ by: m.model, ranking: v }); });
-    const verdict = aggregate(rankings.map((r) => r.ranking), labelList);
+    let verdict: Aggregate[] = [];
+    if (this.cfg.ranking) {
+      yield { type: "progress", stage: "rankings", done: 0, total: members.length };
+      const votes = new Array<Ranking[] | null>(members.length).fill(null);
+      let ranked = 0;
+      for await (const { index, value } of settle(members.map((m) => this.rank(run, m, question, answers, labelList, ctx)))) {
+        votes[index] = value;
+        yield { type: "progress", stage: "rankings", done: ++ranked, total: members.length };
+      }
+      if (ctx.signal?.aborted) return;
+      members.forEach((m, i) => { const v = votes[i]; if (v !== null) rankings.push({ by: m.model, ranking: v }); });
+      verdict = aggregate(rankings.map((r) => r.ranking), labelList);
+    }
 
     // Stage 3: the judge, seated apart from the members and blind by default.
     yield { type: "progress", stage: "synthesis", done: 0, total: 1 };
@@ -288,13 +302,14 @@ export class Council {
     if (ctx.signal?.aborted) return;
     const judge = this.seatJudge(members);
     if (judge === null) {
-      // Eight calls are spent and every one of the answers is real. Failing
-      // here would throw the whole deliberation away because the ninth model
-      // is missing, which is the opposite of what §12.5 does for the members.
-      // So the panel's own best-ranked answer is returned as its member wrote
-      // it, and `judge.model: ""` says plainly that nobody synthesised — the
-      // client reads the whole council in the `capitoline` field. No
-      // `synthesis 1/1` follows: the stage did not happen.
+      // Every call but the synthesis is spent and every one of the answers is
+      // real. Failing here would throw the whole deliberation away because the
+      // last model is missing, which is the opposite of what §12.5 does for
+      // the members. So the panel's own best-ranked answer is returned as its
+      // member wrote it — the first seat's, in a council that ranked nothing —
+      // and `judge.model: ""` says plainly that nobody synthesised: the client
+      // reads the whole council in the `capitoline` field. No `synthesis 1/1`
+      // follows: the stage did not happen.
       this.log.warn({ council: this.name, chain: this.cfg.judge.models }, "no judge could be seated: the best-ranked answer is returned unsynthesised");
       const top = members.find((m) => m.label === verdict[0]?.label) ?? members[0];
       yield { type: "text", delta: top.answer };
@@ -386,6 +401,10 @@ export class Council {
     const detail: Deliberation = {
       deliberationId: run.id,
       strategyVersion: STRATEGY_VERSION,
+      // The configured shape, not what happened: empty rankings mean one
+      // thing here and quite another in a panel whose votes all failed
+      // (§12.5), and only this tells the two apart in the response.
+      shape: this.cfg.ranking ? "ranked" : "fast",
       members: members.map((m): DeliberationMember => ({
         family: m.seat.family, model: m.model, label: m.label, answer: m.answer,
         ...(m.fellBackFrom.length > 0 ? { fellBackFrom: m.fellBackFrom } : {}),

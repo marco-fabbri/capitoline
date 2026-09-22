@@ -63,7 +63,7 @@ const SEATS: Seat[] = [
 // The repository's own judge chain: claude-haiku closes it because it sits in
 // no seat, so a blind judge always has a model of its own left.
 const JUDGE: Seat = { family: "anthropic", models: ["claude-opus", "claude-sonnet", "claude-haiku"] };
-const CFG: CouncilConfig = { seats: SEATS, judge: JUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, stageTimeoutS: 5 };
+const CFG: CouncilConfig = { seats: SEATS, judge: JUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, ranking: true, stageTimeoutS: 5 };
 
 const fail = (kind: "rate_limited" | "cli_crashed" | "auth_expired", scope?: "model", retryAfterS?: number): ProviderEvent[] =>
   [{ type: "error", kind, detail: `${kind} from the fake`, ...(scope ? { scope } : {}), ...(retryAfterS !== undefined ? { retryAfterS } : {}) }];
@@ -151,6 +151,7 @@ describe("Council", () => {
       { label: "Response A", averageRank: 4, votes: 4 },
     ]);
     expect(d.judge).toEqual({ model: "claude-opus", blind: true });
+    expect(d.shape).toBe("ranked");
     expect(d.strategyVersion).toBeGreaterThanOrEqual(1);
 
     // Nine calls, nine rows: the accounting of §12.7 only holds because every
@@ -167,6 +168,78 @@ describe("Council", () => {
       ["rankings", 0, 4], ["rankings", 1, 4], ["rankings", 2, 4], ["rankings", 3, 4], ["rankings", 4, 4],
       ["synthesis", 0, 1], ["synthesis", 1, 1],
     ]);
+  });
+
+  // The `-fast` shape: the same four seats, stage 2 skipped. Five calls
+  // instead of nine for a question that does not need the panel's own verdict
+  // on its answers, which is a flag and not another strategy (plan
+  // 2026-09-22-council-variants, design §12.1).
+  it("runs five calls in two stages when the council is configured without a ranking", async () => {
+    const p = panel({ cfg: { ranking: false } });
+    const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
+    const d = detailOf(events);
+
+    expect(textOf(events)).toBe(SYNTHESIS);
+    expect(d.members.map((m) => m.model)).toEqual(["claude-fable", "codex-astra", "agy-pro", "agy-oss"]);
+    // Four answers and the synthesis: five calls, five rows. The accounting of
+    // §12.7 is the whole point of the shape.
+    expect(d.calls).toBe(5);
+    expect(p.calls()).toHaveLength(5);
+    expect(p.rows()).toBe(5);
+    expect(p.promptsOf("rankings")).toEqual([]);
+    expect(d.rankings).toEqual([]);
+    expect(d.aggregate).toEqual([]);
+    // No ranking progress either: a client that renders the stages must not be
+    // shown one that never runs.
+    expect(events.filter((e) => e.type === "progress").map((e) => [e.stage, e.done, e.total])).toEqual([
+      ["answers", 0, 4], ["answers", 1, 4], ["answers", 2, 4], ["answers", 3, 4], ["answers", 4, 4],
+      ["synthesis", 0, 1], ["synthesis", 1, 1],
+    ]);
+    // The labels are still assigned and the judge is still blind: anonymity is
+    // what the judge reads the answers under, and it does not depend on stage 2.
+    expect([...d.members.map((m) => m.label)].sort()).toEqual(["Response A", "Response B", "Response C", "Response D"]);
+    expect(d.judge).toEqual({ model: "claude-opus", blind: true });
+  });
+
+  it("says which shape ran, so an empty aggregate is not read as a panel whose rankings all failed", async () => {
+    const fast = detailOf(await run(panel({ cfg: { ranking: false } }).council.deliberate(QUESTION, { source: "http" })));
+    expect(fast.shape).toBe("fast");
+    // The same two empty lists, reached the other way: every member of a full
+    // panel answered the ranking with something no parser can trust. Without
+    // the shape the two deliberations are indistinguishable in the response.
+    const broken = panel({ badRanking: ["claude-fable", "codex-astra", "agy-pro", "agy-oss"] });
+    const d = detailOf(await run(broken.council.deliberate(QUESTION, { source: "http" })));
+    expect(d.shape).toBe("ranked");
+    expect(d.rankings).toEqual([]);
+    expect(d.calls).toBe(9);
+  });
+
+  it("gives the judge of a fast council the answers with no ranking section at all", async () => {
+    const p = panel({ cfg: { ranking: false } });
+    const d = detailOf(await run(p.council.deliberate(QUESTION, { source: "http" })));
+    const synthesis = p.promptsOf("synthesis")[0];
+    for (const m of d.members) { expect(synthesis).toContain(m.label); expect(synthesis).toContain(m.answer); }
+    // Not an empty ranking, and not a word about one: no ranking happened, and
+    // a judge told the panel ranked the answers would weigh a vote that was
+    // never cast.
+    expect(synthesis).not.toContain("The panel's ranking");
+    expect(synthesis).not.toMatch(/rank/i);
+  });
+
+  it("keeps the quorum in a fast council: one answer is returned as it is, unsynthesised", async () => {
+    // min_members keeps its meaning without stage 2: below it there is still
+    // nothing to synthesize, so the single answer is returned as its member
+    // wrote it and no judge is called.
+    const p = panel({ cfg: { ranking: false }, overrides: {
+      "codex-astra": fail("cli_crashed"), "codex-sol": fail("cli_crashed"),
+      "agy-pro": fail("cli_crashed"), "agy-oss": fail("cli_crashed"),
+    } });
+    const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
+    const d = detailOf(events);
+    expect(textOf(events)).toBe(ANSWERS["claude-fable"]);
+    expect(d.shape).toBe("fast");
+    expect(d.judge.model).toBe("");
+    expect(p.promptsOf("synthesis")).toEqual([]);
   });
 
   it("keeps the deliberation blind: no prompt names a model, and only the others' labels are shown", async () => {

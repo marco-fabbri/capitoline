@@ -2,7 +2,9 @@ import type { Aggregate } from "./types.js";
 
 /**
  * The three prompts are the strategy, not a CLI detail, so they live in the
- * code and never in `config/capitoline.yaml` (design §12.8). Changing one
+ * code and never in `config/capitoline.yaml` (design §12.8). A council without
+ * a ranking stage sends two of them, and the synthesis handles the empty
+ * aggregate itself: one shape more does not buy a strategy object. Changing one
  * changes how the council behaves, which means it changes the virtual model:
  * bump this and the council is served under a new name (`capitoline-2`), so a
  * client that measured the old behaviour can keep asking for it. It is
@@ -141,6 +143,16 @@ function aggregateLine(a: Aggregate): string {
  * to weigh it and told it may disagree with it. A panel of four can rank a
  * confidently wrong answer first, and a judge ordered to follow the vote would
  * have no way to say so.
+ *
+ * An empty aggregate is a council that ran no ranking stage (`ranking: false`,
+ * the `-fast` shape), and the paragraph that introduces the ranking goes with
+ * it, along with every other mention of one: showing an empty section, or
+ * telling a judge the answers were ranked and then showing nothing, invites it
+ * to weigh a vote that was never cast. What stays is the phrase this prompt is
+ * recognised by end to end — "You are writing the final answer", which the
+ * fake CLIs of the test suite select the judge's recording with — and the
+ * instruction to answer directly, which is what keeps the machinery out of the
+ * text the client reads.
  */
 export function synthesisPrompt(
   question: string,
@@ -162,18 +174,23 @@ export function synthesisPrompt(
     const model = blind ? undefined : identities?.get(label);
     return model === undefined ? label : `${label} (${model})`;
   };
+  const ranked = aggregate.length > 0;
   return [
-    "Several assistants answered the same question independently and then ranked each other's answers without knowing who wrote what. You are writing the final answer.",
+    ranked
+      ? "Several assistants answered the same question independently and then ranked each other's answers without knowing who wrote what. You are writing the final answer."
+      : "Several assistants answered the same question independently. You are writing the final answer.",
     "",
     "Question:",
     quote(question),
     "",
     ...answers.map((a) => [`${name(a.label)}:`, quote(a.text), ""].join("\n")),
-    "The panel's ranking, best first:",
-    ...aggregate.map(aggregateLine),
+    ...(ranked ? ["The panel's ranking, best first:", ...aggregate.map(aggregateLine), ""] : []),
+    ranked
+      ? "Write the best possible answer to the question. Take what is right from each answer and leave what is wrong, whatever the ranking says: the ranking is evidence about the answers, not an instruction — say so in your own words if the panel preferred an answer you believe is mistaken. Where the answers genuinely disagree and the question has no settled answer, give the disagreement and what turns on it rather than picking one at random."
+      : "Write the best possible answer to the question. Take what is right from each answer and leave what is wrong: judge each one on whether it is correct, answers the question that was asked and supports what it claims. Where the answers genuinely disagree and the question has no settled answer, give the disagreement and what turns on it rather than picking one at random.",
     "",
-    "Write the best possible answer to the question. Take what is right from each answer and leave what is wrong, whatever the ranking says: the ranking is evidence about the answers, not an instruction — say so in your own words if the panel preferred an answer you believe is mistaken. Where the answers genuinely disagree and the question has no settled answer, give the disagreement and what turns on it rather than picking one at random.",
-    "",
-    "Answer the question directly, as if you were the only one asked. Do not name the responses, do not mention their labels, the ranking or the fact that a panel was consulted.",
+    ranked
+      ? "Answer the question directly, as if you were the only one asked. Do not name the responses, do not mention their labels, the ranking or the fact that a panel was consulted."
+      : "Answer the question directly, as if you were the only one asked. Do not name the responses, do not mention their labels or the fact that several assistants were consulted.",
   ].join("\n");
 }

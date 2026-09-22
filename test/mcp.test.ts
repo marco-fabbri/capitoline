@@ -145,6 +145,7 @@ describe("MCP", () => {
     const DETAIL: Deliberation = {
       deliberationId: "d-1",
       strategyVersion: 1,
+      shape: "ranked",
       members: [
         { family: "anthropic", model: "claude-opus", label: "Response A", answer: "the first answer" },
         { family: "openai", model: "codex-gpt-5.5", label: "Response B", answer: "the second answer", fellBackFrom: ["codex-gpt-6-astra (rate_limited)"] },
@@ -199,6 +200,10 @@ describe("MCP", () => {
         council: "capitoline",
         deliberation_id: "d-1",
         strategy_version: 1,
+        // The shape travels where the individual rankings do not: an empty
+        // aggregate is a fast council here and a panel whose votes all failed
+        // there, and the caller reads only this field to tell them apart.
+        shape: "ranked",
         members: DETAIL.members,
         // §12.5: a member that was dropped is declared, here as everywhere else.
         lost: DETAIL.lost,

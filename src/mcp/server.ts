@@ -141,6 +141,12 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       council: z.string(),
       deliberation_id: z.string(),
       strategy_version: z.number(),
+      // Which shape deliberated. It travels even though the individual
+      // rankings do not: `aggregate` is empty both for a council that runs no
+      // ranking stage and for a panel whose every vote failed (§12.5), and
+      // without this the caller cannot tell the cheap answer it asked for from
+      // a degraded one.
+      shape: z.enum(["ranked", "fast"]),
       members: z.array(z.object({ family: z.string(), model: z.string(), label: z.string(), answer: z.string(), fellBackFrom: z.array(z.string()).optional() })),
       lost: z.array(z.object({ family: z.string(), model: z.string().optional(), reason: z.string(), fellBackFrom: z.array(z.string()).optional() })),
       aggregate: z.array(z.object({ label: z.string(), averageRank: z.number(), votes: z.number() })),
@@ -224,7 +230,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       await progress("done");
       const structured = {
         council: name, deliberation_id: detail.deliberationId, strategy_version: detail.strategyVersion,
-        members: detail.members, lost: detail.lost, aggregate: detail.aggregate, judge: detail.judge,
+        shape: detail.shape, members: detail.members, lost: detail.lost, aggregate: detail.aggregate, judge: detail.judge,
         usage: { prompt_tokens: usage?.input ?? 0, completion_tokens: usage?.output ?? 0 }, calls: detail.calls,
       };
       return { content: [{ type: "text", text }], structuredContent: structured };

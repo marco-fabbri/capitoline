@@ -101,12 +101,19 @@ const SeatSchema = z.object({
 // design's: a judge seated apart (§12.3) and blind, two members at the very
 // least (§12.5). `stage_timeout_s` is per member and per stage, not for the
 // whole deliberation, which runs nine calls across three subscriptions.
+//
+// `ranking` is the one thing that changes the *sequence* of stages, which is
+// why it is a flag here and not a second strategy in the code: with false the
+// peer ranking does not run, and a four-seat council costs five calls instead
+// of nine (the `-fast` shape). It defaults to true, so a council that says
+// nothing is the panel of §12.1 exactly as before.
 const CouncilSchema = z.object({
   seats: z.array(SeatSchema),
   judge: SeatSchema,
   judge_allow_member: z.boolean().default(false),
   judge_blind: z.boolean().default(true),
   min_members: z.number().int().default(2),
+  ranking: z.boolean().default(true),
   stage_timeout_s: z.number().int().min(1).default(300),
 }).strict().transform((c): CouncilConfig => ({
   seats: c.seats,
@@ -114,6 +121,7 @@ const CouncilSchema = z.object({
   judgeAllowMember: c.judge_allow_member,
   judgeBlind: c.judge_blind,
   minMembers: c.min_members,
+  ranking: c.ranking,
   stageTimeoutS: c.stage_timeout_s,
 }));
 
@@ -226,6 +234,9 @@ export const ConfigSchema = z
       if (c.seats.length < 2) {
         ctx.addIssue({ code: "custom", path: ["council", name, "seats"], message: `council "${name}" must declare at least two seats, not ${c.seats.length}` });
       }
+      // The floor holds with `ranking: false` too: below two answers there is
+      // nothing to synthesize either, and the deliberation would return the
+      // single answer it has and declare no council (§12.5).
       if (c.minMembers < 2) {
         ctx.addIssue({ code: "custom", path: ["council", name, "min_members"], message: `council "${name}" sets min_members ${c.minMembers}: below two answers there is nothing to rank` });
       }
@@ -274,8 +285,9 @@ export const ConfigSchema = z
       };
       c.seats.forEach((s, i) => chain(s, ["council", name, "seats", i, "models"]));
       chain(c.judge, ["council", name, "judge", "models"]);
-      // The members answer, and later rank, in parallel, so every provider
-      // must offer one concurrency slot per seat it serves (design §12.1): a
+      // The members answer, and (unless `ranking` is off) later rank, in
+      // parallel, so every provider must offer one concurrency slot per seat
+      // it serves (design §12.1) whatever the shape: a
       // family is not a provider, and the default panel puts Google and open
       // weights on the same Antigravity subscription. The judge is not
       // counted: it is seated alone, after the members are done.

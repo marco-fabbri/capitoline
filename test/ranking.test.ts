@@ -302,4 +302,22 @@ describe("prompts", () => {
     const p = synthesisPrompt(QUESTION, ANSWERS, AGG, true);
     expect(p).not.toMatch(/Response C[^\n]*\b0(?:\.0+)?\b/);
   });
+
+  it("omits the ranking paragraph entirely for a council that has no ranking stage", () => {
+    // The `-fast` shape (plan 2026-09-22-council-variants): stage 2 never ran,
+    // so there is no aggregate to show. An empty ranking section would be a
+    // judge told the panel ranked the answers and produced nothing, which is
+    // not what happened; the paragraph goes, and with it every mention of a
+    // vote the judge must not weigh.
+    const p = synthesisPrompt(QUESTION, ANSWERS, [], true);
+    expect(p).toContain(QUESTION);
+    for (const a of ANSWERS) { expect(p).toContain(a.label); expect(p).toContain(a.text); }
+    expect(p).not.toContain("The panel's ranking, best first:");
+    expect(p).not.toMatch(/rank/i);
+    // The phrase the fake CLIs select the judge's recording by (test/e2e.test.ts
+    // and test/fake-cli/fake-claude.sh), and the instruction that keeps the
+    // machinery out of the answer: both shapes carry them.
+    expect(p).toContain("You are writing the final answer");
+    expect(p).toMatch(/not (?:name|mention|refer)/i);
+  });
 });

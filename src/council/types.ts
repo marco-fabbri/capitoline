@@ -17,8 +17,9 @@ export interface Seat {
 }
 
 /** A member of a running deliberation: which seat, which model of its chain, and
- * the label the ranking stage knows it by. The label is assigned in stage 2 and
- * never appears in a prompt as anything but "Response X" (design §12.4). */
+ * the label the ranking stage knows it by. The label is assigned once the panel
+ * is known — before the ranking, and before the judge in a council that runs no
+ * ranking — and never appears in a prompt as anything but "Response X" (§12.4). */
 export interface SeatedMember {
   seat: Seat;
   model: string;
@@ -40,6 +41,13 @@ export interface CouncilConfig {
   judgeBlind: boolean;
   /** Fewer answers than this and no ranking happens at all; never below 2. */
   minMembers: number;
+  /**
+   * false: stage 2 does not run at all — the judge synthesises the answers
+   * with no aggregate, and the deliberation costs one call per seat plus the
+   * synthesis instead of two plus one (the `-fast` shape). `minMembers` keeps
+   * its meaning: below it there is still nothing to synthesize.
+   */
+  ranking: boolean;
   /** Per member, per stage. A member that overruns loses its seat, the deliberation continues. */
   stageTimeoutS: number;
 }
@@ -142,14 +150,30 @@ export interface MemberRanking {
  * a judge chain with no model left, where the best-ranked answer is returned
  * instead of throwing away eight calls that already answered.
  *
- * `calls` counts every call the deliberation attempted, retries included. A
- * call the gateway refuses at its own gates — a standing pause, a model the
- * state has already taken down — spends no provider call and writes no usage
- * row, so `calls` is an upper bound on the rows of §12.7 and not an identity.
+ * `calls` counts every call the deliberation attempted, retries included: nine
+ * for the default panel of four seats, five for the same panel without the
+ * ranking stage. A call the gateway refuses at its own gates — a standing
+ * pause, a model the state has already taken down — spends no provider call
+ * and writes no usage row, so `calls` is an upper bound on the rows of §12.7
+ * and not an identity.
  */
 export interface Deliberation {
   deliberationId: string;
   strategyVersion: number;
+  /**
+   * How the council deliberated: `"ranked"` for the three stages of §12.1,
+   * `"fast"` for a council configured with `ranking: false`, which skips the
+   * peer ranking.
+   *
+   * It is stated rather than inferred because `rankings` and `aggregate` are
+   * both empty in two quite different deliberations: the fast one, where the
+   * stage never ran, and a full panel where every ranking failed or could not
+   * be parsed (§12.5) — the second is a degraded run worth an operator's
+   * attention, the first is what was asked for. The name is the shape word of
+   * the model name (§12.8), so a response says which `capitoline-*` behaviour
+   * produced it even when the request has been forgotten.
+   */
+  shape: "ranked" | "fast";
   members: DeliberationMember[];
   lost: LostSeat[];
   rankings: MemberRanking[];

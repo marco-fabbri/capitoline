@@ -268,7 +268,7 @@ describe("config", () => {
   it("loads the council of both configuration files", () => {
     for (const file of BOTH_FILES) {
       const cfg = loadConfig(file);
-      expect(Object.keys(cfg.council), file).toEqual(["capitoline"]);
+      expect(Object.keys(cfg.council), file).toEqual(["capitoline", "capitoline-fast"]);
       const c = cfg.council.capitoline;
       // One seat per family, and no family twice — a rule the schema enforces
       // ("rejects two seats of the same family"), because models of one
@@ -303,6 +303,29 @@ describe("config", () => {
     }
   });
 
+  it("ships capitoline-fast as the reference panel without its ranking stage", () => {
+    for (const file of BOTH_FILES) {
+      const cfg = loadConfig(file);
+      const full = cfg.council.capitoline;
+      const fast = cfg.council["capitoline-fast"];
+      expect(full.ranking, file).toBe(true);
+      expect(fast.ranking, file).toBe(false);
+      // The same four families, the same chains and the same judge: the shape
+      // word after `capitoline-` says how it deliberates, not who sits (the
+      // naming rule of design §12.8). Five calls instead of nine is the whole
+      // difference, so anything else diverging here is a drift between the
+      // two, not a decision.
+      expect(fast.seats, file).toEqual(full.seats);
+      expect(fast.judge, file).toEqual(full.judge);
+      expect([fast.judgeAllowMember, fast.judgeBlind, fast.minMembers], file).toEqual([false, true, 2]);
+      expect(fast.stageTimeoutS, file).toBe(full.stageTimeoutS);
+      // Two councils on one Antigravity subscription, each seating it twice:
+      // the rule is per council, so the two slots the reference panel needs
+      // are the two this one needs (task 1 of the variants plan).
+      expect(cfg.providers.antigravity.concurrency, file).toBeGreaterThanOrEqual(2);
+    }
+  });
+
   it("exposes only Antigravity model ids the CLI actually lists", () => {
     // `agy-gpt-oss` is the council's open-weights seat, and `agy models` lists
     // that family at one effort only (gpt-oss-120b-medium). With effort_suffix
@@ -334,11 +357,30 @@ describe("config", () => {
   it("applies the council defaults and rejects an unknown key in the block", () => {
     const c = parseConfig(council()).council.capitoline;
     expect([c.judgeAllowMember, c.judgeBlind, c.minMembers, c.stageTimeoutS]).toEqual([false, true, 2, 300]);
+    // The ranking stage is the default shape: a council that says nothing is
+    // the panel of design §12.1, nine calls and all three stages.
+    expect(c.ranking).toBe(true);
     expect(c.seats).toEqual([{ family: "f1", models: ["a"] }, { family: "f2", models: ["b"] }]);
     expect(() => parseConfig(council({ judge_blnd: "true" })))
       .toThrow(/council\.capitoline: Unrecognized key\(s\) in object: 'judge_blnd'/);
     expect(() => parseConfig(council({ seats: "[{family: f1, models: [a], judge: true}, {family: f2, models: [b]}]" })))
       .toThrow(/council\.capitoline\.seats\.0: Unrecognized key\(s\) in object: 'judge'/);
+  });
+
+  it("takes a council that declares the ranking stage off, and keeps the quorum meaning it had", () => {
+    // The `-fast` shape is one flag, not another strategy: the seats, the
+    // judge and the quorum are read exactly as for the full panel. Below
+    // min_members there is still nothing to synthesize, so the floor of two
+    // holds with the stage off.
+    expect(parseConfig(council({ ranking: "false" })).council.capitoline.ranking).toBe(false);
+    expect(() => parseConfig(council({ ranking: "false", min_members: "1" })))
+      .toThrow(/council\.capitoline\.min_members/);
+    expect(() => parseConfig(council({ ranking: "false", seats: "[{family: f1, models: [a]}]" })))
+      .toThrow(/council\.capitoline\.seats: .*at least two seats/);
+    // The members still answer in parallel, so the slots-per-seat rule of
+    // §12.1 is untouched: the stage that goes is the second parallel one.
+    expect(() => parseConfig(council({ ranking: "false" }, "capitoline", { concurrency: "1" })))
+      .toThrow(/providers\.x\.concurrency/);
   });
 
   it("rejects a seat or a judge naming a model no provider declares", () => {
@@ -451,6 +493,7 @@ describe("the end-to-end configuration tracks the repository one", () => {
   // decision: it says this key is deliberately not the same on a developer
   // machine as on the host.
   const INTENDED = [
+    "council.capitoline-fast.stageTimeoutS",     // the same, for the fast shape
     "council.capitoline.stageTimeoutS",          // seconds, not minutes, so a suspended member fails fast
     "providers.antigravity.binary",              // the fake CLIs replay fixtures
     "providers.antigravity.image.collect",       //   and so does the collect helper
@@ -496,8 +539,10 @@ describe("the end-to-end configuration tracks the repository one", () => {
       expect(p.timeout_s, id).toBeLessThanOrEqual(30);
       expect(repo.providers[id].timeout_s, id).toBeGreaterThanOrEqual(600);
     }
-    expect(e2e.council.capitoline.stageTimeoutS).toBeLessThanOrEqual(30);
-    expect(repo.council.capitoline.stageTimeoutS).toBeGreaterThanOrEqual(300);
+    for (const name of ["capitoline", "capitoline-fast"]) {
+      expect(e2e.council[name].stageTimeoutS, name).toBeLessThanOrEqual(30);
+      expect(repo.council[name].stageTimeoutS, name).toBeGreaterThanOrEqual(300);
+    }
     expect(e2e.providers.antigravity.image.collect).toEqual(["test/fake-cli/fake-collect-image.sh"]);
     expect(repo.providers.antigravity.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
   });

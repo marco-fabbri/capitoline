@@ -453,7 +453,7 @@ describe("GET /health", () => {
 const COUNCIL_SEATS: Seat[] = [{ family: "anthropic", models: ["claude-opus"] }, { family: "openai", models: ["codex-astra"] }];
 const THREE_SEATS: Seat[] = [...COUNCIL_SEATS, { family: "google", models: ["agy-pro"] }];
 const COUNCIL_JUDGE: Seat = { family: "anthropic", models: ["claude-haiku"] };
-const COUNCIL_CFG: CouncilConfig = { seats: COUNCIL_SEATS, judge: COUNCIL_JUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, stageTimeoutS: 5 };
+const COUNCIL_CFG: CouncilConfig = { seats: COUNCIL_SEATS, judge: COUNCIL_JUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, ranking: true, stageTimeoutS: 5 };
 
 // The panel's answers, one per model and none of them naming a model: they are
 // pasted into the ranking and synthesis prompts, and the first test below
@@ -491,7 +491,7 @@ function makeCouncil(seats: Seat[] = COUNCIL_SEATS, agyScript: Script = councilR
 
 /** A deliberation detail with nothing in it: these tests carry it, none of them reads it. */
 const DETAIL: Deliberation = {
-  deliberationId: "d-1", strategyVersion: 1, members: [], lost: [], rankings: [], aggregate: [],
+  deliberationId: "d-1", strategyVersion: 1, shape: "ranked", members: [], lost: [], rankings: [], aggregate: [],
   judge: { model: "claude-haiku", blind: true }, calls: 2,
 };
 const SYNTHESIS: CouncilEvent[] = [{ type: "text", delta: "the synthesis" }, { type: "done", usage: { input: 6, output: 2 }, detail: DETAIL }];

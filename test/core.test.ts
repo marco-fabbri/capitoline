@@ -599,11 +599,11 @@ const VSEATS: Seat[] = [
   { family: "openai", models: ["codex-astra"] },
 ];
 const VJUDGE: Seat = { family: "anthropic", models: ["claude-haiku"] };
-const VCFG: CouncilConfig = { seats: VSEATS, judge: VJUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, stageTimeoutS: 5 };
+const VCFG: CouncilConfig = { seats: VSEATS, judge: VJUDGE, judgeAllowMember: false, judgeBlind: true, minMembers: 2, ranking: true, stageTimeoutS: 5 };
 
 /** A deliberation detail with nothing in it: the routing carries it whole and never reads it. */
 const DETAIL: Deliberation = {
-  deliberationId: "d-1", strategyVersion: 1, members: [], lost: [], rankings: [], aggregate: [],
+  deliberationId: "d-1", strategyVersion: 1, shape: "ranked", members: [], lost: [], rankings: [], aggregate: [],
   judge: { model: "a-2", blind: true }, calls: 2,
 };
 const answered: CouncilEvent[] = [{ type: "text", delta: "the synthesis" }, { type: "done", usage: { input: 6, output: 2 }, detail: DETAIL }];
