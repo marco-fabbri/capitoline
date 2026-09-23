@@ -762,6 +762,7 @@ describe("the end-to-end configuration tracks the repository one", () => {
     "providers.claude.binary",
     "providers.claude.timeout_s",
     "providers.codex.binary",
+    "providers.codex.image.collect",             //   the same helper, in its Codex mode
     "providers.codex.timeout_s",
     "runner.sandbox_root",                       // under the repository, git-ignored
     "runner.user",                               // null: no sudo on a developer machine
@@ -806,6 +807,10 @@ describe("the end-to-end configuration tracks the repository one", () => {
     }
     expect(e2e.providers.antigravity.image.collect).toEqual(["test/fake-cli/fake-collect-image.sh"]);
     expect(repo.providers.antigravity.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
+    // One helper, two modes: the path is the one the sudoers rule names, and
+    // `codex` selects where to look. No second sudoers entry was needed.
+    expect(e2e.providers.codex.image.collect).toEqual(["test/fake-cli/fake-collect-image.sh", "codex"]);
+    expect(repo.providers.codex.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image", "codex"]);
   });
 });
 

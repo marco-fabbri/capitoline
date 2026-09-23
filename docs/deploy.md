@@ -493,6 +493,16 @@ only way across that boundary: it checks that its argument is a UUID,
 prints the newest `image_*` file of that conversation to stdout and removes
 the conversation directory.
 
+`codex` does the same with its built-in image generation, which runs on the
+ChatGPT subscription and needs no API key: the file lands in
+`/home/runner/.codex/generated_images/<thread-id>/call_<id>.png`, named after
+the thread id Codex announces at the start of the run, and nothing in the
+stream says it was made. The same helper serves both, as
+`capitoline-collect-image codex <thread-id>`. The sudoers rule of §5 allows
+any arguments to this path, so the script's own check is what bounds them —
+an optional literal `codex` and one UUID, nothing else — and adding Codex
+needed no change to sudoers, only this reinstall.
+
 ```sh
 install -o root -g root -m 0755 \
   /var/lib/capitoline/app/scripts/capitoline-collect-image \

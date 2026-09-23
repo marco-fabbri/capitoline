@@ -1,13 +1,28 @@
 #!/bin/bash
-# capitoline-collect-image <conversation-uuid>
-# Prints the newest image_* file of that Antigravity conversation to stdout, then removes the
-# conversation directory. Run as `runner` through sudo; the only argument must be a UUID.
+# capitoline-collect-image <conversation-uuid>           Antigravity
+# capitoline-collect-image codex <thread-uuid>           Codex
+# Prints the newest image of that conversation to stdout, then removes the
+# conversation's image directory. Run as `runner` through sudo; the sudoers rule
+# allows any arguments to this path, so this script is what bounds them: an
+# optional literal `codex` and one UUID, nothing else.
+#
+# Both CLIs write a generated image into their own home, never into the sandbox,
+# under a directory named after the id they announce at the start of the run:
+#   Antigravity  ~/.gemini/antigravity-cli/brain/<conversation_id>/image_*
+#   Codex        ~/.codex/generated_images/<thread_id>/call_*.png
 set -euo pipefail
-cid="${1:-}"
-[[ "$cid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "bad conversation id" >&2; exit 2; }
-dir="$HOME/.gemini/antigravity-cli/brain/$cid"
+uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+if [[ "${1:-}" == "codex" ]]; then
+  cid="${2:-}"; [[ $# -eq 2 ]] || { echo "usage: $0 codex <thread-uuid>" >&2; exit 2; }
+  dir="$HOME/.codex/generated_images/$cid"; pattern="call_*"
+else
+  cid="${1:-}"; [[ $# -eq 1 ]] || { echo "usage: $0 [codex] <uuid>" >&2; exit 2; }
+  dir="$HOME/.gemini/antigravity-cli/brain/$cid"; pattern="image_*"
+fi
+[[ "$cid" =~ $uuid ]] || { echo "bad conversation id" >&2; exit 2; }
 [ -d "$dir" ] || { echo "no such conversation" >&2; exit 3; }
-img=$(ls -t "$dir"/image_* 2>/dev/null | head -1 || true)
+# shellcheck disable=SC2086  # the pattern is ours, and globbing it is the point
+img=$(ls -t "$dir"/$pattern 2>/dev/null | head -1 || true)
 [ -n "$img" ] || { rm -rf "$dir"; echo "no image produced" >&2; exit 4; }
 cat "$img"
 rm -rf "$dir"

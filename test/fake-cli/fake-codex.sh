@@ -8,6 +8,9 @@ set -euo pipefail
 dir="$(cd "$(dirname "$0")" && pwd)"
 stdin="$(cat)"
 case "$stdin" in
+  # The image run: a real capture (2026-09-23) of Codex's built-in image
+  # generation, whose thread id the fake collect helper recognises.
+  *"Use the image generation tool exactly once"*) fixture="$dir/../fixtures/codex/image-run.jsonl" ;;
   *"Reply with JSON only"*)             fixture="$dir/../fixtures/codex/council-ranking.jsonl" ;;
   *"You are writing the final answer"*) fixture="$dir/../fixtures/codex/council-synthesis.jsonl" ;;
   *)                                    fixture="$dir/../fixtures/codex/exec-json-locked.jsonl" ;;

@@ -379,14 +379,16 @@ describe("buildProviders", () => {
     expect(() => buildProviders({ ...config, providers: { unknown: base } }, runner, createLogger("t"))).toThrow(/no adapter/);
   });
   it("throws when a provider has image models but its adapter cannot generate images", () => {
-    const codex = config.providers.codex;
+    // Claude's CLI has no image path. Codex was the example here until it
+    // gained one (2026-09-23).
+    const claude = config.providers.claude;
     const withImage = {
-      ...codex,
-      models: { ...codex.models, "codex-image": { cli_model: "gpt-image", effort_suffix: false, kind: "image" as const } },
-      image: { ...codex.image, collect: ["/usr/local/bin/capitoline-collect-image"] },
+      ...claude,
+      models: { ...claude.models, "claude-image": { cli_model: "opus", effort_suffix: false, kind: "image" as const } },
+      image: { ...claude.image, collect: ["/usr/local/bin/capitoline-collect-image"] },
     };
-    expect(() => buildProviders({ ...config, providers: { codex: withImage } }, runner, createLogger("t")))
-      .toThrow(/provider "codex" has image models but its adapter cannot generate images/);
+    expect(() => buildProviders({ ...config, providers: { claude: withImage } }, runner, createLogger("t")))
+      .toThrow(/provider "claude" has image models but its adapter cannot generate images/);
   });
   it("throws when a provider has image models but no image.collect command", () => {
     const agy = config.providers.antigravity;

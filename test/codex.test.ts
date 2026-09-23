@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { codexAdapter } from "../src/providers/codex.js";
+import { CODEX_IMAGE_PROMPT, codexAdapter } from "../src/providers/codex.js";
 import { loadConfig } from "../src/config.js";
 import { modelSpecs } from "../src/providers/adapter.js";
 import type { AdapterEvent } from "../src/core/types.js";
@@ -11,6 +11,39 @@ async function* linesOf(path: string) { for (const l of readFileSync(path, "utf8
 async function events(src: AsyncIterable<string>) { const out: AdapterEvent[] = []; for await (const e of codexAdapter.parse(src)) out.push(e); return out; }
 
 describe("codex adapter", () => {
+  it("builds the image command with the lockdown first and image generation switched back on after it", () => {
+    const image = modelSpecs("codex", cfg).find((m) => m.name === "codex-image")!;
+    const c = codexAdapter.buildImageCommand!(cfg, image, { model: "codex-image", prompt: "a fox in the snow" });
+    // Later overrides of one key win, so the image run's `true` must come
+    // after the text lockdown's `false` — checked on the host with this order.
+    const off = c.args.indexOf("features.image_generation=false");
+    const on = c.args.indexOf("features.image_generation=true");
+    expect(off).toBeGreaterThan(0);
+    expect(on).toBeGreaterThan(off);
+    // The agent is gpt-5.5 at its lowest effort; the prompt is the fixed one.
+    expect(c.args[c.args.indexOf("-m") + 1]).toBe("gpt-5.5");
+    expect(c.args).toContain('model_reasoning_effort="low"');
+    expect(c.args.at(-1)).toBe("-");
+    expect(c.stdin).toBe(CODEX_IMAGE_PROMPT("a fox in the snow"));
+  });
+  it("reports the thread id of an image run, and no tool step, from the real capture", async () => {
+    // 2026-09-23: the stream of a generation holds the thread id, "done" and
+    // the usage, and nothing for the tool. The thread id names the directory
+    // the image lands in.
+    const ev = await events(linesOf("test/fixtures/codex/image-run.jsonl"));
+    expect(ev[0]).toEqual({ type: "meta", conversationId: "01a0ccba-58c9-7980-9b15-63528791112c" });
+    expect(ev.some((e) => e.type === "tool")).toBe(false);
+  });
+  it("reports every step that is not the model's own words as a tool step, and a Codex warning as none", async () => {
+    async function* l() {
+      yield JSON.stringify({ type: "item.completed", item: { id: "item_0", type: "error", message: "Codex is ignoring 1 unrecognized configuration setting." } });
+      yield JSON.stringify({ type: "item.started", item: { id: "item_1", type: "mcp_tool_call", tool: "list_mcp_resources", status: "in_progress" } });
+      yield JSON.stringify({ type: "item.completed", item: { id: "item_1", type: "mcp_tool_call", tool: "list_mcp_resources", status: "completed" } });
+      yield JSON.stringify({ type: "item.completed", item: { id: "item_2", type: "file_change", status: "failed" } });
+    }
+    const ev = (await events(l())).map((e) => (e.type === "tool" ? [e.phase, e.name] : e.type));
+    expect(ev).toEqual([["call", "list_mcp_resources"], ["done", "list_mcp_resources"], ["call", "file_change"], ["error", "file_change"]]);
+  });
   it("honours a standing preamble when one is configured, before the client's system prompt", () => {
     const withPre = { ...cfg, system_preamble: "P" };
     const c = codexAdapter.buildCommand(withPre, astra, { model: "codex-gpt-6-astra", stream: false, messages: [{ role: "system", text: "S" }, { role: "user", text: "hi" }] });
@@ -63,7 +96,10 @@ describe("codex adapter", () => {
   });
   it("parses exec --json output into one text event and done with usage", async () => {
     const ev = await events(linesOf("test/fixtures/codex/exec-json-locked.jsonl"));
-    expect(ev).toEqual([{ type: "text", delta: "OK" }, { type: "done", usage: { input: 10566, output: 5 } }]);
+    // The thread id comes first, as meta: the image path needs it to find the
+    // generated file, and the text path drops it (CliProvider.execute).
+    expect(ev[0]).toMatchObject({ type: "meta" });
+    expect(ev.slice(1)).toEqual([{ type: "text", delta: "OK" }, { type: "done", usage: { input: 10566, output: 5 } }]);
   });
   it("maps turn.failed to a typed error", async () => {
     async function* l() { yield JSON.stringify({ type: "turn.failed", error: { message: "429 Too Many Requests" } }); }
@@ -82,7 +118,7 @@ describe("codex adapter", () => {
     expect(await events(blank())).toEqual([{ type: "error", kind: "cli_crashed", detail: "codex error" }]);
   });
   it("maps the real expired-credential capture to auth_expired", async () => {
-    const ev = await events(linesOf("test/fixtures/codex/auth-expired.jsonl"));
+    const ev = (await events(linesOf("test/fixtures/codex/auth-expired.jsonl"))).filter((e) => e.type !== "meta");
     expect(ev).toHaveLength(1);                      // the first error ends the stream
     expect(ev[0]).toMatchObject({ type: "error", kind: "auth_expired" });
     expect((ev[0] as any).detail).toContain("401 Unauthorized");

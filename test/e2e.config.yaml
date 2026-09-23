@@ -96,6 +96,13 @@ providers:
       # `codex-auto-review` is the model behind the CLI's own review feature.
       codex-gpt-reserve:   { cli_model: gpt-reserve,   efforts: [low, medium, high, xhigh, max] }
       codex-auto-review:   { cli_model: codex-auto-review, efforts: [low, medium, high, xhigh, max] }
+      # kind: image -> served by /v1/images/generations and the generate_image
+      # MCP tool. The cli_model is the agent, not the image model: the agent
+      # calls Codex's built-in image generation, which runs on the ChatGPT
+      # subscription with no API key and whose own model the image declares in
+      # its signed C2PA manifest ("ChatGPT", "gpt-image"). The agent only has
+      # to decide to call one tool, so it runs at the lowest effort.
+      codex-image:         { cli_model: gpt-5.5, kind: image, efforts: [low], timeout_s: 300 }
     effort: { low: low, medium: medium, high: high, xhigh: xhigh, max: max, ultra: ultra }   # -c model_reasoning_effort="<v>"
     model_flag: -m
     effort_flag: -c
@@ -169,6 +176,23 @@ providers:
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"
     system_prompt_flag_prefix: -c                    # the flag that carries key="value" configuration overrides
     prompt_via: stdin                                # codex exec -
+    image:
+      # The one feature the text-run lockdown above switches off, back on for
+      # image runs only. Later overrides of one key win, so this undoes
+      # features.image_generation=false and nothing else.
+      args: [-c, features.image_generation=true]
+      # Codex reports no tool step for its image generation — the stream holds
+      # the thread id, the answer "done" and the usage — so there is nothing to
+      # allow: any tool step an image run reports is one the prompt forbade,
+      # and the run is aborted on it.
+      allowed_tools: []
+      # The image lands in ~/.codex/generated_images/<thread_id>/, outside the
+      # sandbox; the helper takes `codex` and the thread id (docs/deploy.md §7.1).
+      collect: [test/fake-cli/fake-collect-image.sh, codex]   # relative to the repo; the runner resolves it
+      min_bytes: 200000       # a real generation is over a megabyte; this rejects a placeholder
+      # No quota_per_window: OpenAI publishes no image limit for Codex, and it
+      # depends on the plan. It is learned from the first refusal, as the
+      # Antigravity one was.
 
   antigravity:
     binary: test/fake-cli/fake-agy.sh

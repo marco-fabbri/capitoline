@@ -9,16 +9,26 @@
 #              fixtures/antigravity/image-run.jsonl; any other id exits 4. End-to-end runs use
 #              this so that a dispatch falling back to the chat recording fails loudly instead
 #              of being handed an image the run never produced.
+#
+# `codex <thread-uuid>` selects the Codex mode, as with the real helper: the
+# recorded thread is the one in fixtures/codex/image-run.jsonl, and its image is
+# fixtures/images/sample-codex.png (512x512 PNG, a downscaled real generation).
 set -euo pipefail
+provider=antigravity
+if [[ "${1:-}" == "codex" ]]; then provider=codex; shift; fi
 cid="${1:-}"
 [[ "$cid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "bad conversation id" >&2; exit 2; }
 fixtures="$(cd "$(dirname "$0")/../fixtures/images" && pwd)"
-recorded="40fc0b5c-042f-453a-9eaf-6162913de55e"
+if [[ "$provider" == "codex" ]]; then
+  recorded="01a0ccba-58c9-7980-9b15-63528791112c"; sample="$fixtures/sample-codex.png"
+else
+  recorded="40fc0b5c-042f-453a-9eaf-6162913de55e"; sample="$fixtures/sample.jpg"
+fi
 case "${FAKE_COLLECT:-sample}" in
   none) echo "no image produced" >&2; exit 4 ;;
   tiny) cat "$fixtures/tiny.png" ;;
   image-run)
     [[ "$cid" == "$recorded" ]] || { echo "no image produced for conversation $cid" >&2; exit 4; }
-    cat "$fixtures/sample.jpg" ;;
-  *)    cat "$fixtures/sample.jpg" ;;
+    cat "$sample" ;;
+  *)    cat "$sample" ;;
 esac

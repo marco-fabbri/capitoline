@@ -136,20 +136,38 @@ describe("image generation end to end", () => {
   const post = (body: unknown, path = "/v1/images/generations") =>
     fetch(`http://127.0.0.1:${app.port}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
-  it("generates an image with the default image model and returns it inline", async () => {
+  const SAMPLE_CODEX = readFileSync(fileURLToPath(new URL("./fixtures/images/sample-codex.png", import.meta.url)));
+
+  it("generates an image with the default image model, which is Codex's, and returns it inline", async () => {
+    // The default is the first image model a client would see available, and
+    // Codex's comes before Antigravity's since 2026-09-23. On purpose: it runs
+    // on the larger ChatGPT allowance, and Antigravity's 58 a week stay for the
+    // callers that name that model, as app-one does.
     const r = await post({ prompt: "a lighthouse on a cliff at dawn, watercolour" });
     expect(r.status).toBe(200);
     const body = (await r.json()) as { data: { b64_json: string }[]; capitoline: Record<string, unknown> };
     const bytes = Buffer.from(body.data[0].b64_json, "base64");
-    // FF D8: the bytes really are the JPEG the collect helper handed over.
+    // 89 50 4E 47: the PNG the collect helper handed over for the recorded thread.
+    expect(bytes.subarray(0, 4).toString("hex")).toBe("89504e47");
+    expect(bytes.equals(SAMPLE_CODEX)).toBe(true);
+    // Exact, not partial: no provider detail (stderr, thread id, host paths)
+    // may leak into the response, here or in the body's top level.
+    expect(body.capitoline).toEqual({
+      provider: "codex", model: "codex-image", mime: "image/png", width: 512, height: 512, bytes: SAMPLE_CODEX.length, ignored: [],
+    });
+    expect(Object.keys(body).sort()).toEqual(["capitoline", "created", "data"]);
+  });
+  it("generates an image with Antigravity's model when a client names it", async () => {
+    const r = await post({ model: "antigravity-image", prompt: "a lighthouse on a cliff at dawn, watercolour" });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { data: { b64_json: string }[]; capitoline: Record<string, unknown> };
+    const bytes = Buffer.from(body.data[0].b64_json, "base64");
+    // FF D8: the JPEG the collect helper handed over for the recorded conversation.
     expect(bytes.subarray(0, 2).toString("hex")).toBe("ffd8");
     expect(bytes.equals(SAMPLE)).toBe(true);
-    // Exact, not partial: no provider detail (stderr, conversation id, host
-    // paths) may leak into the response, here or in the body's top level.
     expect(body.capitoline).toEqual({
       provider: "antigravity", model: "antigravity-image", mime: "image/jpeg", width: 1376, height: 768, bytes: SAMPLE.length, ignored: [],
     });
-    expect(Object.keys(body).sort()).toEqual(["capitoline", "created", "data"]);
   });
   it("ignores size and says so in the header", async () => {
     const r = await post({ prompt: "a lighthouse", size: "1024x1024" });
