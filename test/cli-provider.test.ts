@@ -43,6 +43,21 @@ async function run(p: CliProvider, r: InternalRequest = req, signal?: AbortSigna
 }
 
 describe("CliProvider", () => {
+  it("reports bad_output, with what the run spent, when the model answers nothing", async () => {
+    // A real capture (host, 2026-09-23): gemini-3.8-flash-high asked about
+    // Linux keepalive defaults tried run_command with sysctl, the runner's
+    // strict permission soft-denied it, and Antigravity ended the run with an
+    // empty response after 608 output tokens. Before this a direct request
+    // answered 200 with empty content.
+    const agyCfg = config.providers.antigravity;
+    const fixture = join(process.cwd(), "test/fixtures/antigravity/stream-json-tool-denied.jsonl");
+    const p = new CliProvider("antigravity", { ...agyCfg, binary: FAKE, args: ["--mode", "replay", "--file", fixture], timeout_s: 5 }, antigravityAdapter, runner, createLogger("t"));
+    const m = p.models().find((x) => x.name === "antigravity-gemini-flash-high")!;
+    const out: ProviderEvent[] = [];
+    for await (const e of p.execute({ model: m.name, stream: false, messages: [{ role: "user", text: "q" }] }, m)) out.push(e);
+    // The failure, and the tokens the quota was charged for it.
+    expect(out).toEqual([{ type: "error", kind: "bad_output", detail: "the model answered with nothing", usage: { input: 12659, output: 608 } }]);
+  });
   it("replays fixture output through the adapter", async () => {
     const ev = await run(provider("replay"));
     expect(ev.map((e) => e.type)).toEqual(["text", "rate_limit", "done"]);

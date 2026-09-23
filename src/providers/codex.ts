@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { InternalRequest, ProviderEvent } from "../core/types.js";
-import { effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ModelSpec } from "./adapter.js";
+import { withPreamble, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
 // What the CLI said, from an event whose `error` is an object with a message,
@@ -21,7 +21,8 @@ function errorDetail(o: Record<string, unknown>): string {
 
 export const codexAdapter: Adapter = {
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
-    const { system, rest } = splitSystem(req.messages);
+    const { system: sent, rest } = splitSystem(req.messages);
+    const system = withPreamble(cfg, sent);
     const args = [...cfg.args, ...cfg.args_extra, cfg.model_flag, model.cliModel];
     args.push(...effortArgs(cfg, effortValue(cfg, model, req.effort)));
     let prompt = flatten(rest);

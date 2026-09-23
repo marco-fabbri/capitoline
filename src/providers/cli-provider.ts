@@ -125,11 +125,28 @@ export class CliProvider implements Provider {
     const files = (req.attachments ?? []).map((a, i) => ({ name: `attachment-${i + 1}.${extensionFor(a.mime)}`, bytes: a.bytes }));
     const run = await this.start(args, stdin, this.cfg.timeout_s * 1000, signal, files);
     let terminal = false;
+    // Whether the run has produced anything a client could read. A run that
+    // ends in `done` without it is a failure, not an empty answer: measured on
+    // 2026-09-23, when two Gemini models tried a tool, the runner's strict
+    // permission denied it, and Antigravity ended the run with no response.
+    // The council already treated that as `bad_output`; a direct request
+    // answered 200 with empty content, a failure marked as a success. Said
+    // once here, so both paths agree and no client has to check for it.
+    let sawText = false;
     try {
       for await (const ev of this.adapter.parse(run.handle.lines)) {
         // Adapter-internal events stay here: a text run has no use for them and
         // the Provider contract (AsyncIterable<ProviderEvent>) forbids forwarding them.
         if (ev.type === "meta" || ev.type === "tool") continue;
+        if (ev.type === "text" && ev.delta.trim() !== "") sawText = true;
+        if (ev.type === "done" && !sawText) {
+          terminal = true;
+          this.log.warn({ model: model.name, usage: ev.usage }, "cli run ended without an answer");
+          // Nothing was yielded before this, so a stream has not started and
+          // the client gets a proper error status rather than a broken stream.
+          yield { type: "error", kind: "bad_output", detail: "the model answered with nothing", ...(ev.usage ? { usage: ev.usage } : {}) };
+          return;
+        }
         if (ev.type === "done" || ev.type === "error") terminal = true;
         yield ev;
         if (terminal) return; // do not wait for the process: the answer is complete

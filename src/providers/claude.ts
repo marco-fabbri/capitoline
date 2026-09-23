@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { ErrorKind, InternalRequest, ProviderEvent, RateLimitWindow } from "../core/types.js";
-import { effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ModelSpec } from "./adapter.js";
+import { withPreamble, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ModelSpec } from "./adapter.js";
 import { classifyError, isModelScoped } from "./errors.js";
 
 // The HTTP status the CLI puts in the result when the API refused the call.
@@ -28,7 +28,8 @@ function window(w: unknown): RateLimitWindow | undefined {
 
 export const claudeAdapter: Adapter = {
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
-    const { system, rest } = splitSystem(req.messages);
+    const { system: sent, rest } = splitSystem(req.messages);
+    const system = withPreamble(cfg, sent);
     const args = [...cfg.args, ...cfg.args_extra, cfg.model_flag, model.cliModel];
     args.push(...effortArgs(cfg, effortValue(cfg, model, req.effort)));
     let prompt = flatten(rest);

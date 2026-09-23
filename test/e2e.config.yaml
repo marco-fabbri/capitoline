@@ -63,6 +63,7 @@ providers:
       - --permission-prompts
       - none
     args_extra: []            # what this host adds; only an overlay ever sets it
+    system_preamble: null     # this CLI's tools are switched off by flag, so there is nothing to tell it
     system_prompt_flag: --system-prompt
     system_prompt_flag_prefix: null                  # none: the flag carries the text, not a key="value" override
     prompt_via: stdin
@@ -112,6 +113,7 @@ providers:
       - -c
       - web_search="disabled"
     args_extra: []            # what this host adds; only an overlay ever sets it
+    system_preamble: null     # this CLI's tools are switched off by flag, so there is nothing to tell it
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"
     system_prompt_flag_prefix: -c                    # the flag that carries key="value" configuration overrides
     prompt_via: stdin                                # codex exec -
@@ -195,6 +197,19 @@ providers:
       - --sandbox
       - -p=
     args_extra: []            # what this host adds; only an overlay ever sets it
+    # Put in front of every text run. Antigravity's tools cannot be switched
+    # off by flag; the runner's strict permission denies them, and since 1.2.8
+    # a denied tool ends the run with no answer. The high-reasoning models
+    # reached for run_command to check what they were asked (measured
+    # 2026-09-23). This tells them before they plan, and gives them the
+    # behaviour to use instead of checking: say what they are unsure of.
+    system_preamble: >-
+      You are answering one question in a non-interactive session. You have no
+      tools: you cannot run commands, read or write files, search the web or
+      call any function, and any attempt will fail and leave the question
+      unanswered. Answer directly and completely from what you already know.
+      Where you are unsure of a fact, say so plainly instead of trying to
+      check it.
     system_prompt_flag: null                         # none: prepended to the prompt with a role marker
     system_prompt_flag_prefix: null
     prompt_via: stdin                                # {"event":"user","message":{"role":"user","content":...}}

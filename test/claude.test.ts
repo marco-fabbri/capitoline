@@ -50,6 +50,16 @@ describe("claude adapter", () => {
     const c = claudeAdapter.buildCommand(noEffort, opus, { model: "claude-opus", stream: false, effort: "high", messages: [{ role: "user", text: "hi" }] });
     expect(c.args.slice(cfg.args.length)).toEqual(["--model", "opus"]);
   });
+  it("honours a standing preamble when one is configured, before the client's system prompt", () => {
+    // Only Antigravity sets system_preamble today, but the key is on every
+    // provider block, so every adapter has to mean the same thing by it.
+    const withPre = { ...cfg, system_preamble: "P" };
+    const bare = claudeAdapter.buildCommand(withPre, opus, { model: "claude-opus", stream: false, messages: [{ role: "user", text: "hi" }] });
+    expect(bare.args[bare.args.indexOf("--system-prompt") + 1]).toBe("P");
+    const sys = claudeAdapter.buildCommand(withPre, opus, { model: "claude-opus", stream: false, messages: [{ role: "system", text: "S" }, { role: "user", text: "hi" }] });
+    expect(sys.args[sys.args.indexOf("--system-prompt") + 1]).toBe("P\n\nS");
+    expect(cfg.system_preamble).toBeNull();
+  });
   it("appends what the host adds, after the repository's own command line", () => {
     // `args_extra` is how a host adds an argument without copying the
     // repository's list into its overlay to append to it: a list replaces and

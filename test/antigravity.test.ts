@@ -6,7 +6,10 @@ import { loadConfig } from "../src/config.js";
 import { modelSpecs } from "../src/providers/adapter.js";
 import type { AdapterEvent } from "../src/core/types.js";
 
-const cfg = loadConfig("config/capitoline.yaml").providers.antigravity;
+const repoCfg = loadConfig("config/capitoline.yaml").providers.antigravity;
+// Without the standing preamble, so the tests about how a prompt is encoded
+// see only the prompt; the preamble has its own tests below.
+const cfg = { ...repoCfg, system_preamble: null };
 const models = modelSpecs("antigravity", cfg);
 const flash = models.find((m) => m.name === "antigravity-gemini-flash")!;
 const pro = models.find((m) => m.name === "antigravity-gemini-pro")!;
@@ -29,6 +32,25 @@ describe("antigravity adapter", () => {
     const c = antigravityAdapter.buildCommand(cfg, opus, { model: "antigravity-claude-opus", stream: true, messages: [{ role: "system", text: "S" }, { role: "user", text: "q" }] });
     expect(c.args[c.args.indexOf("--model") + 1]).toBe("claude-opus-4-6-thinking");
     expect(JSON.parse(c.stdin).message.content).toBe("System instructions:\nS\n\nq");
+  });
+  it("puts the standing preamble in front of every text run, and in front of the client's own system prompt", () => {
+    // Antigravity's tools cannot be switched off by flag, and since 1.2.8 a
+    // denied tool ends the run with no answer: the high-reasoning models
+    // reached for run_command and answered nothing (2026-09-23). The preamble
+    // tells them before they plan. Read from the repository's configuration,
+    // so a preamble that loses its point fails here.
+    expect(repoCfg.system_preamble).toMatch(/no\s+tools/);
+    expect(repoCfg.system_preamble).toMatch(/cannot run commands/);
+    const bare = antigravityAdapter.buildCommand(repoCfg, flash, { model: "antigravity-gemini-flash", stream: true, messages: [{ role: "user", text: "q" }] });
+    expect(JSON.parse(bare.stdin).message.content).toBe(`System instructions:\n${repoCfg.system_preamble}\n\nq`);
+    // The client's system prompt follows the preamble, so it can still narrow it.
+    const sys = antigravityAdapter.buildCommand(repoCfg, opus, { model: "antigravity-claude-opus", stream: true, messages: [{ role: "system", text: "S" }, { role: "user", text: "q" }] });
+    expect(JSON.parse(sys.stdin).message.content).toBe(`System instructions:\n${repoCfg.system_preamble}\n\nS\n\nq`);
+  });
+  it("never puts the preamble on an image run, whose one job is to call a tool", () => {
+    const image = models.find((m) => m.name === "antigravity-image")!;
+    const c = antigravityAdapter.buildImageCommand!(repoCfg, image, { model: "antigravity-image", prompt: "a red bicycle" });
+    expect(JSON.parse(c.stdin).message.content).toBe(IMAGE_PROMPT("a red bicycle"));
   });
   it("builds an image command with the image args, no effort suffix and a fixed tool prompt", () => {
     const image = models.find((m) => m.name === "antigravity-image")!;

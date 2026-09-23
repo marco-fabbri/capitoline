@@ -11,6 +11,12 @@ async function* linesOf(path: string) { for (const l of readFileSync(path, "utf8
 async function events(src: AsyncIterable<string>) { const out: AdapterEvent[] = []; for await (const e of codexAdapter.parse(src)) out.push(e); return out; }
 
 describe("codex adapter", () => {
+  it("honours a standing preamble when one is configured, before the client's system prompt", () => {
+    const withPre = { ...cfg, system_preamble: "P" };
+    const c = codexAdapter.buildCommand(withPre, astra, { model: "codex-gpt-6-astra", stream: false, messages: [{ role: "system", text: "S" }, { role: "user", text: "hi" }] });
+    expect(c.args).toContain(`developer_instructions=${JSON.stringify("P\n\nS")}`);
+    expect(cfg.system_preamble).toBeNull();
+  });
   it("builds the command with model, effort override, developer instructions and stdin prompt", () => {
     const c = codexAdapter.buildCommand(cfg, astra, {
       model: "codex-gpt-6-astra", stream: false, effort: "low",

@@ -473,7 +473,7 @@ export class Core {
     try {
       for await (const ev of produce()) {
         if (ev.type === "done") { sawTerminal = true; outcome = "ok"; usage = ev.usage ?? usage; cliModelId = ev.cliModelId; this.onSuccess(id, s, key, scope); }
-        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; this.onError(id, s, key, scope, ev, kind); }
+        else if (ev.type === "error") { sawTerminal = true; outcome = ev.kind; usage = ev.usage ?? usage; this.onError(id, s, key, scope, ev, kind); }
         else if (ev.type === "rate_limit") this.onRateLimit(id, ev);
         yield ev;
       }

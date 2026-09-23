@@ -176,6 +176,19 @@ function tomlString(s: string): string {
  * answering. A bare flag carries the text as it is and no TOML parser ever
  * sees it.
  */
+/**
+ * The system prompt a text run is given: the provider's standing preamble,
+ * then whatever the client sent, in that order so the client can still narrow
+ * what the preamble says. Null when there is neither. Shared by the three
+ * adapters for the reason systemPromptArgs is: a key every provider block
+ * carries must mean the same thing for all three, or the file says one thing
+ * and the process does another.
+ */
+export function withPreamble(cfg: ProviderConfig, system: string | null): string | null {
+  if (cfg.system_preamble === null) return system;
+  return system === null ? cfg.system_preamble : `${cfg.system_preamble}\n\n${system}`;
+}
+
 export function systemPromptArgs(cfg: ProviderConfig, system: string): string[] {
   if (!cfg.system_prompt_flag) return [];
   if (cfg.system_prompt_flag_prefix === null) return [cfg.system_prompt_flag, system];

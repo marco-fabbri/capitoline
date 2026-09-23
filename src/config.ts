@@ -72,6 +72,23 @@ const ProviderSchema = z.object({
    * rather than inherit a default and change the command line in silence.
    */
   args_extra: z.array(z.string()),
+  /**
+   * An instruction put in front of every text run's system prompt, or null.
+   *
+   * For a CLI whose tools cannot be switched off by flag. Antigravity's agent
+   * sees 57 tools whatever it is told on the command line (spike §3); the
+   * runner's `strict` permission denies every one of them, and since 1.2.8 a
+   * denied tool ends the run at once. The high-reasoning Gemini models, asked
+   * something they could check on a machine, reached for `run_command` and
+   * answered nothing (measured 2026-09-23). The denial is the safety; this is
+   * what stops the attempt, by telling the model what it is before it plans.
+   *
+   * Never used by the image path, whose one job is to call a tool.
+   *
+   * Required and without a default, like the other keys of this block: every
+   * adapter honours it, so a provider that should not have one says null.
+   */
+  system_preamble: z.string().min(1).nullable(),
   // The flag that names the model to the CLI: `<model_flag> <cli_model>`.
   // Required, with no default on purpose: a configuration file written before
   // these keys existed — the hand-edited copy in /etc on the host — would

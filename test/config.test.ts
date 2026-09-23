@@ -25,6 +25,7 @@ const PROVIDER: Fields = {
   effort_key: "null",
   args: "[]",
   args_extra: "[]",
+  system_preamble: "null",
   system_prompt_flag: "null",
   system_prompt_flag_prefix: "null",
   prompt_via: "stdin",

@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.js";
-import { cliId, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
+import { withPreamble, cliId, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
 // The CLI is an agent: the prompt names the one tool it may use and forbids
@@ -12,7 +12,8 @@ export const IMAGE_PROMPT = (prompt: string): string =>
 
 export const antigravityAdapter: Adapter = {
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
-    const { system, rest } = splitSystem(req.messages);
+    const { system: sent, rest } = splitSystem(req.messages);
+    const system = withPreamble(cfg, sent);
     const eff = effortValue(cfg, model, req.effort);
     // The id comes from the shared resolver, which is also what Core keys a
     // model pause by: the id refused and the id recorded cannot drift apart.

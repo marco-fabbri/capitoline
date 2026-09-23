@@ -46,7 +46,11 @@ export type ProviderEvent =
   // "model" is set only when the CLI attributed the refusal to the model that
   // was asked for (Claude's per-model limits, real capture 2026-09-21): pausing
   // the provider would then take down models that still answer.
-  | { type: "error"; kind: ErrorKind; detail: string; retryAfterS?: number; scope?: "model" }
+  // usage: what a failed run still spent, when the CLI said. A run the model
+  // spent hundreds of tokens on and then answered with nothing is a failure
+  // for the client and a cost for the quota, and the usage row should carry
+  // both.
+  | { type: "error"; kind: ErrorKind; detail: string; retryAfterS?: number; scope?: "model"; usage?: Usage }
   | { type: "rate_limit"; fiveHour?: RateLimitWindow; sevenDay?: RateLimitWindow }
   | { type: "image"; mime: ImageMime; bytes: Buffer; width: number; height: number };
 
