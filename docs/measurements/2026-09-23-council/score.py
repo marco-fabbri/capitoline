@@ -7,6 +7,10 @@ directory. The three Nutanix questions are printed for reading rather than
 scored here: their correct answers are prose, and the owner is the better
 judge of them (README.md). Nothing in this file decides a verdict that the
 registered questions.json does not already state.
+
+Under every synthesis it also lists the numbers and code spans no member
+wrote: candidates for the invented classes of README.md, to be classified by
+reading.
 """
 import json, pathlib, re, sys
 
@@ -77,6 +81,28 @@ def score_keepalive(text):
 
 SCORERS = {"ipv4-regex": score_regex, "subnet-27": score_subnet, "tcp-keepalive": score_keepalive}
 
+
+# Figures a synthesis states that no member's answer contains: candidates for
+# the invented classes in README.md (amendment of 2026-09-23), not a verdict.
+# Prose claims can only be found by reading; figures and code can be counted,
+# and this would have flagged the 37.5% on the ladder at once. A number counts
+# as present if any member wrote the same number, anywhere; a code span if any
+# member's text contains it verbatim. Numbers spelled as words are not seen.
+NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def numbers(text):
+    # Thousands separators dropped, so "7,875" and "7875" are one figure.
+    return {n.replace(",", "") for n in NUMBER.findall(text)}
+
+
+def candidates(synthesis, answers):
+    members = " ".join(answers)
+    new_numbers = sorted(numbers(synthesis) - numbers(members), key=lambda n: (len(n), n))
+    new_code = [c for c in dict.fromkeys(re.findall(r"`([^`\n]+)`", synthesis)) if c not in members]
+    return new_numbers + [f"`{c}`" for c in new_code]
+
+
 for f in sorted(RESULTS.glob("*__*.json")):
     council, qid = f.stem.split("__", 1)
     d = json.loads(f.read_text())
@@ -92,3 +118,5 @@ for f in sorted(RESULTS.glob("*__*.json")):
         print(f"  member  rank {rank.get(m['label'], '-'):<5}  {m['model']:<24} {verdict[0]:<8} {verdict[1]}")
     verdict = scorer(d["choices"][0]["message"]["content"]) if scorer else ("read", "")
     print(f"  SYNTHESIS                                 {verdict[0]:<8} {verdict[1]}")
+    new = candidates(d["choices"][0]["message"]["content"], [m["answer"] for m in c["members"]])
+    print(f"  not in any member: {', '.join(new) if new else 'nothing'}")

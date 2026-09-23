@@ -10,6 +10,10 @@
 # longer gap a model can run out of quota and a seat step down between two
 # runs that are meant to differ only in their shape.
 #
+# Each run's one-line summary, wall time included, is also appended to
+# run.log in the output directory: the response itself does not carry the
+# time, and a measurement's reading counts it.
+#
 # The Cloudflare Access headers come from the same variables smoke.sh reads.
 set -euo pipefail
 [[ $# -ge 4 ]] || { echo "usage: $0 <base-url> <questions.json> <out-dir> <council>..." >&2; exit 2; }
@@ -35,9 +39,11 @@ for qid in $(jq -r '.questions[].id' "$QUESTIONS"); do
     seconds=$(( $(date +%s) - started ))
     if [[ "$code" == "200" ]]; then
       jq -r --arg c "$council" --arg q "$qid" --arg s "$seconds" \
-        '"\($c)  \($q)  \($s)s  calls=\(.capitoline.council.calls)  tokens=\(.usage.total_tokens)  judge=\(.capitoline.council.judge.model)"' "$file"
+        '"\($c)  \($q)  \($s)s  calls=\(.capitoline.council.calls)  tokens=\(.usage.total_tokens)  judge=\(.capitoline.council.judge.model)"' "$file" \
+        | tee -a "$OUT/run.log"
     else
-      printf '%s  %s  %ss  HTTP %s  %s\n' "$council" "$qid" "$seconds" "$code" "$(jq -r '.error.message // empty' "$file" 2>/dev/null)"
+      printf '%s  %s  %ss  HTTP %s  %s\n' "$council" "$qid" "$seconds" "$code" "$(jq -r '.error.message // empty' "$file" 2>/dev/null)" \
+        | tee -a "$OUT/run.log"
     fi
   done
 done

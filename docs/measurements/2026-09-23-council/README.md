@@ -37,6 +37,64 @@ members' answers. That is the failure strategy 2 exists to prevent.
 lists. `subnet-27` and `tcp-keepalive` have single figures. The three Nutanix
 questions are scored against the Nutanix Bible and marked for review by someone who works with the product.
 
+### Amendment of 2026-09-23: what counts as invented
+
+Written after the `capitoline-gemini` runs and before the `capitoline` and
+`capitoline-fast` runs, and committed before them. The ladder's results below
+were scored under the original rule and stay next to it; this amendment
+applies to every run from Friday 25 September on.
+
+The original rule counted as invented any claim no member made. On the ladder
+that put a correct piece of arithmetic in the same column as the failure
+strategy 2 was written against, which was a new fact and a false one ("both
+replicas survive"). The column is the measurement's headline number, so it
+has to count that failure and not something else.
+
+Every factual claim in a synthesis that no member's answer contains goes into
+one of three classes:
+
+- **Derived** — it follows from what the members said, by arithmetic or
+  strict logic, and the derivation checks out. Not invented. A derivation that
+  does not check out counts as an error, like any wrong claim.
+- **Unsourced, correct** — a fact no member gave, true against the registered
+  answer or its source. Invented, because the strategy-2 prompt tells the
+  judge to assert nothing the answers do not support; not an error. This
+  column measures whether the judge follows its instruction.
+- **Unsourced, wrong** — a fact no member gave, and false. Invented and an
+  error: the failure strategy 2 exists to prevent, and the number this
+  measurement leads with.
+
+Two conventions, so every synthesis is read the same way:
+
+- When it is unclear whether a claim follows from the members, it is
+  **unsourced**. The default is the strict reading.
+- A synthesis that sides with one member against another is choosing between
+  sources, not inventing — as the ladder's judge did when it rejected
+  flash-low's claim that RF2 cannot rebuild on two nodes.
+
+`score.py` lists, under each synthesis, every number and every code span that
+appears in no member's answer. That is a list of candidates to classify by
+the rule above, not a verdict: prose claims can only be found by reading, and
+a number spelled as a word is not seen.
+
+## How Friday's result is read
+
+Written before the runs, so the comparison cannot be fitted to them. For each
+question and each council: the synthesis correct, partial or wrong; its claims
+in the three classes above; calls, tokens and wall time
+(`scripts/measure-council.sh` keeps the last in `run.log` next to the
+results).
+
+- **The four ranking calls buy something** if, across the six questions,
+  `capitoline`'s syntheses are correct more often than `capitoline-fast`'s,
+  or contain fewer unsourced wrong claims. The ranking then stays in the
+  default council.
+- **They do not** if the two are equal on both counts. `capitoline-fast` is
+  then the better everyday council, at about half the calls, and
+  `docs/backlog.md` says so.
+- Six questions is a small sample. A difference of one question either way is
+  recorded and not acted on.
+
 ## Order and timing
 
 `scripts/measure-council.sh` runs question-major, so councils compared on one
@@ -90,6 +148,11 @@ the 1.25x two members gave, (2 − 1.25) / 2, it is correct, and it corrects
 flash-low's "30–35%". By the rule as registered it counts as invented, and it
 is recorded here as such rather than excused; the rule should separate a
 derivation from a claim with no source, and will for the next measurement.
+
+Read under the amendment above, it is **derived**, and the ladder's
+syntheses have no invented claim. Both readings stand: the first is the one
+registered for these runs. `score.py` run over `results/` and
+`results-after-fix/` lists this figure and nothing else.
 
 **Two runs of six lost two rungs, and it is a defect, not a result.** On
 `tcp-keepalive` and `ipv4-regex` the two high-reasoning rungs did not answer:
