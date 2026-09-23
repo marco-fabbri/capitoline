@@ -106,3 +106,50 @@ that shape of question. See `docs/backlog.md`.
 whether this instrument measures something. On the four complete runs it
 does: the ranking is consistent and it follows correctness. That is four
 runs, and two question shapes are unmeasured until the tool defect is fixed.
+
+## After the fix, same day
+
+Two changes went in (`docs/backlog.md`, Shipped): a run that ends with no text
+is now `bad_output` on every path, and Antigravity's text runs carry a
+standing instruction that they have no tools and should say what they are
+unsure of instead of checking it. The two questions that had lost their best
+rungs were then run again, into `results-after-fix/`; the first results stay
+in `results/` so the before and the after can both be read.
+
+| Question | pro-high | flash-high | flash-low | Ranked first | Synthesis |
+|---|---|---|---|---|---|
+| `tcp-keepalive` | correct | correct | correct | flash-high and flash-low, tied | correct |
+| `ipv4-regex` | correct | correct | correct | flash-high | correct |
+
+No rung was lost. Both runs went the full seven calls.
+
+**A correction to the instrument, stated because it came after the results.**
+The first scoring of `ipv4-regex` in `results-after-fix/` marked flash-high,
+pro-high and the synthesis wrong, each rejecting every valid address. The
+answers were right; `score.py` was not. They had written the expression as a
+Python raw string, `r"(?:...)"`, which is the form the question asked for, and
+the scorer tested the `r"` and the quotes as part of the pattern. It now strips
+a string literal's wrapper (`unquote`). The criterion in `questions.json` did
+not change, and re-scoring `results/` with the corrected scorer changes
+nothing there, since the one answer it held was written bare.
+
+**The six questions together:**
+
+| | Correct | First or tied first |
+|---|---|---|
+| pro-high | 6 of 6 | 1 of 6, tied |
+| flash-high | 6 of 6 | 6 of 6 |
+| flash-low | 4 of 6 | 3 of 6, each time tied |
+| synthesis | 6 of 6 | — |
+
+flash-low's `tcp-keepalive` is counted from the second run, where it was
+right; it was wrong in the first run and in a direct call made while chasing
+the defect, so on that question it is inconsistent rather than reliable.
+
+**What it says.** On these six shapes of question the middle rung is as
+correct as the top one and the peers prefer it; the cheap rung costs
+correctness on a third of them, and the blind ranking put it last every time
+it was wrong. Where all three rungs are right, as on `ipv4-regex`, the order
+reflects something other than correctness — explanation, presentation — and
+should not be read as a verdict. The instrument measures what it was built to
+measure, which is the condition the backlog set for the other two ladders.

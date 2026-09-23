@@ -1,0 +1,23 @@
+[
+  {
+    "model": "claude-haiku",
+    "cliModelId": "claude-haiku-4-5-20251001",
+    "calls": 3,
+    "firstAt": 1790117824234,
+    "lastAt": 1790120295613
+  },
+  {
+    "model": "claude-opus",
+    "cliModelId": "claude-opus-5",
+    "calls": 2,
+    "firstAt": 1790117690013,
+    "lastAt": 1790117703094
+  },
+  {
+    "model": "claude-opus",
+    "cliModelId": "claude-opus-5-5",
+    "calls": 29,
+    "firstAt": 1790117766964,
+    "lastAt": 1790124402341
+  }
+]

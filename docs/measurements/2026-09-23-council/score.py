@@ -15,6 +15,20 @@ QUESTIONS = {q["id"]: q for q in json.loads((HERE / "questions.json").read_text(
 RESULTS = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "results"
 
 
+def unquote(expr):
+    """The expression inside a Python string literal, when an answer wrote it as one.
+
+    Added after the first scoring run, and said so in README.md: an answer that
+    gives `r"(?:...)"` has written the expression the way the question asked
+    for it -- usable with re.fullmatch -- and the first version of this file
+    tested the `r"` and the quotes as part of the pattern, which rejects every
+    address and scored three correct answers wrong. The criterion registered in
+    questions.json is unchanged; this only stops the instrument misreading it.
+    """
+    m = re.fullmatch(r"[rR]?(['\"])(.*)\1", expr.strip(), re.S)
+    return m.group(2) if m else expr
+
+
 def regex_candidates(text):
     """The expression an answer gives: its first fenced code block, else its first inline code span."""
     blocks = re.findall(r"```[a-zA-Z]*\n(.*?)```", text, re.S)
@@ -22,8 +36,8 @@ def regex_candidates(text):
         line = next((l.strip() for l in b.splitlines() if l.strip()), "")
         # A block may hold a Python snippet rather than the bare expression.
         m = re.search(r"r?['\"](\^?.*?\$?)['\"]", line) if ("re." in line or "=" in line) else None
-        return [m.group(1) if m else line]
-    return re.findall(r"`([^`]+)`", text)[:1]
+        return [m.group(1) if m else unquote(line)]
+    return [unquote(x) for x in re.findall(r"`([^`]+)`", text)[:1]]
 
 
 def score_regex(text):
