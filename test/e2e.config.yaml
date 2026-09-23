@@ -112,6 +112,58 @@ providers:
       - features.shell_tool=false
       - -c
       - web_search="disabled"
+      # Every other tool the CLI switches on by default, off. Measured on
+      # 0.156.0 (2026-09-23): with only the shell and web search disabled a
+      # session still offered thirteen tools — image generation (which ran,
+      # from a text request, and wrote a PNG into the runner's home), plugin
+      # installation, sub-agents, view_image, goals, MCP resource reads, tool
+      # search — and carried the skills, sub-agent and plugin instructions in
+      # every prompt. Off, a one-line question costs about 3,000 input tokens
+      # fewer (9,166 against 6,180), which is quota on every call.
+      #
+      # Two tools survive because no setting removes them. apply_patch comes
+      # from the model catalogue, not the configuration; the read-only sandbox
+      # rejects it, checked with a marker file that does not exist afterwards.
+      # request_user_input has no user to ask in a non-interactive run.
+      #
+      # A CLI update can switch new tools on without a word, and the smoke test
+      # would not notice: docs/update-clis.md has the check to run.
+      - -c
+      - features.image_generation=false
+      - -c
+      - features.view_image=false
+      - -c
+      - features.goals=false
+      - -c
+      - features.plugins=false
+      - -c
+      - features.remote_plugin=false
+      - -c
+      - features.apps=false
+      - -c
+      - features.tool_suggest=false
+      - -c
+      - features.skill_search=false
+      - -c
+      - features.skill_mcp_dependency_install=false
+      - -c
+      - features.multi_agent=false
+      - -c
+      - features.browser_use=false
+      - -c
+      - features.browser_use_external=false
+      - -c
+      - features.browser_use_full_cdp_access=false
+      - -c
+      - features.in_app_browser=false
+      - -c
+      - features.computer_use=false
+      - -c
+      - features.sleep_tool=false
+      - -c
+      - features.tool_call_mcp_elicitation=false
+      - -c
+      - features.collaboration_modes=false
     args_extra: []            # what this host adds; only an overlay ever sets it
     system_preamble: null     # this CLI's tools are switched off by flag, so there is nothing to tell it
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"

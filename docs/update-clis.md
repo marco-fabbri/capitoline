@@ -17,6 +17,38 @@ and every update is followed by the smoke test. Never auto-update.
 
 Add a row for every update, newest last.
 
+## After updating Codex: the tool surface
+
+The smoke test proves a model answers. It cannot see that a new version
+switched a tool on, and Codex does that by default: on 2026-09-23 a text
+request through the gateway generated an image, because 0.155 and 0.156 had
+turned on image generation, plugins, sub-agents and nine more tools that the
+configuration of 0.154 had no reason to name. So after every Codex update,
+as `runner`:
+
+```sh
+cd /tmp && codex features list | awk '$NF == "true" {print $1}'
+```
+
+Compare that list with the `features.*=false` entries under
+`providers.codex.args` in `config/capitoline.yaml`. A feature that is on and
+not named there is either harmless — a terminal or app-UI feature, which
+`codex exec` never uses — or a tool that has just been handed to every client.
+To tell which, see what the model is actually offered, which costs one call
+on the subscription and executes nothing:
+
+```sh
+echo "Do not call any tool. List the exact names of every tool or function you are able to call in this session, one per line, and nothing else. If there are none, reply NONE." \
+  | codex <the args of providers.codex.args> -m gpt-5.5 - | grep agent_message
+```
+
+With the configuration of 2026-09-23 the answer is `apply_patch`,
+`request_user_input` and `multi_tool_use.parallel`, and nothing else:
+`apply_patch` because no setting removes it (the read-only sandbox rejects
+it), `request_user_input` because a non-interactive run has nobody to ask.
+Anything more is a tool to switch off, and `test/config.test.ts` pins the
+list so it cannot shrink by accident.
+
 ## Procedure
 
 On the host, as root:

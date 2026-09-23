@@ -501,6 +501,25 @@ describe("config", () => {
     }
   });
 
+  it("switches off every tool Codex turns on by default, on text runs", () => {
+    // Measured on 0.156.0 (2026-09-23): with only the shell and web search off,
+    // a text request generated an image and a session offered thirteen tools.
+    // The features that expose them are named here one by one, so dropping one
+    // from the file fails rather than reopening a tool in silence.
+    const MUST_BE_OFF = ["image_generation", "view_image", "goals", "plugins", "remote_plugin", "apps", "tool_suggest",
+      "skill_search", "skill_mcp_dependency_install", "multi_agent", "browser_use", "browser_use_external",
+      "browser_use_full_cdp_access", "in_app_browser", "computer_use", "sleep_tool", "tool_call_mcp_elicitation",
+      "collaboration_modes", "shell_tool"];
+    for (const file of BOTH_FILES) {
+      const args = loadConfig(file).providers.codex.args;
+      for (const f of MUST_BE_OFF) {
+        const at = args.indexOf(`features.${f}=false`);
+        expect(at, `${file}: features.${f} is not switched off`).toBeGreaterThan(0);
+        expect(args[at - 1], `${file}: features.${f}=false is not passed as a -c override`).toBe("-c");
+      }
+    }
+  });
+
   it("declares, for every Codex model, only the reasoning levels its cache prices", () => {
     // The cache carries the levels per model — `gpt-5.5` stops at xhigh where
     // `gpt-6-astra` goes to ultra — and the provider's table prices the union.
