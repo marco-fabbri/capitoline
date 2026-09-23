@@ -48,3 +48,61 @@ weekly window. `capitoline` and `capitoline-fast` run after that window
 resets, on Friday 25 September after 21:00, for two reasons: not to spend the
 owner's working allowance, and because until then `claude-fable` is
 exhausted and the reference panel would be measured in its degraded form.
+
+## Results: `capitoline-gemini`, 2026-09-23
+
+Scored against `questions.json` as registered. `ipv4-regex`, `subnet-27` and
+`tcp-keepalive` by `score.py`; the three Nutanix questions by reading, and
+marked for the owner's review.
+
+| Question | pro-high | flash-high | flash-low | Ranked first | Synthesis |
+|---|---|---|---|---|---|
+| `rf2-node-failure` | correct | correct | **wrong** | pro-high and flash-high, tied | correct |
+| `subnet-27` | correct | correct | correct | flash-high and flash-low, tied | correct |
+| `tcp-keepalive` | lost | lost | **wrong** | — | none, one answer returned |
+| `ipv4-regex` | lost | lost | correct | — | none, one answer returned |
+| `ec-backup-6-nodes` | correct | correct | **wrong** | flash-high | correct |
+| `rf3-min-nodes` | correct | correct | correct | flash-high | correct |
+
+Judge: `codex-gpt-6-astra` on every run that reached one. Calls and tokens per
+run are in the result files.
+
+**The ranking tracks correctness.** In both complete runs where one rung was
+wrong, that rung was ranked last: on `rf2-node-failure` flash-low claimed the
+cluster cannot rebuild RF2 on two nodes, and on `ec-backup-6-nodes` it offered
+a 4:2 strip and a 1.33x footprint as options for an RF2 container. The peers
+put it third both times, blind.
+
+**How far down you can go: to flash-high, not to flash-low.** flash-high was
+ranked first or tied for first on all four complete runs, and pro-high never
+beat it. flash-low was wrong on three of the six questions. On these
+questions the expensive rung buys nothing over the middle one, and the cheap
+rung costs correctness.
+
+**The judge held.** Correct on all four syntheses, and on `rf2-node-failure`
+it met a member's wrong claim and rejected it in so many words — "it does not
+need a third running node simply to place those two copies on separate nodes"
+— which is strategy 2 doing what it was written for.
+
+**On invention.** One figure in the syntheses appears in no member's answer:
+the 37.5% of raw space EC-X saves on `ec-backup-6-nodes`. It is arithmetic on
+the 1.25x two members gave, (2 − 1.25) / 2, it is correct, and it corrects
+flash-low's "30–35%". By the rule as registered it counts as invented, and it
+is recorded here as such rather than excused; the rule should separate a
+derivation from a claim with no source, and will for the next measurement.
+
+**Two runs of six lost two rungs, and it is a defect, not a result.** On
+`tcp-keepalive` and `ipv4-regex` the two high-reasoning rungs did not answer:
+they tried to *check* — `run_command` with `sysctl` for the keepalive
+defaults — the runner's `strict` tool permission denied the call, and the CLI
+ended the run with an empty response. Confirmed on the host that nothing ran:
+a harmless marker file the model was asked to create does not exist, and the
+CLI's log reads `Print mode: soft-denying tool confirmation "RunCommand"`. The
+sandbox holds. What it costs is that a question a model thinks it can verify
+on a machine loses its best rungs, so the instrument cannot yet be trusted on
+that shape of question. See `docs/backlog.md`.
+
+**What this says about the other two ladders.** The backlog makes them wait on
+whether this instrument measures something. On the four complete runs it
+does: the ranking is consistent and it follows correctness. That is four
+runs, and two question shapes are unmeasured until the tool defect is fixed.
