@@ -3,6 +3,14 @@
 The CLIs change almost monthly. They are updated by hand, one at a time,
 and every update is followed by the smoke test. Never auto-update.
 
+That rule was written down and not enforced, and it was broken without
+anyone noticing: `agy` updates itself every fifteen minutes unless told not
+to, and moved from 1.2.7 to 1.2.9 in three days. It is enforced since
+2026-09-23 through `/etc/capitoline/runner.env` (`docs/deploy.md` §6), for
+`agy` and for Claude Code; Codex never installs updates by itself. Updating
+by hand is not updating less: it is knowing when a CLI changed, so that the
+checks below run at that moment and a failure after it has a known cause.
+
 ## Versions in use
 
 | CLI | version | date | notes |
@@ -13,6 +21,7 @@ and every update is followed by the smoke test. Never auto-update.
 | Codex CLI (`codex`) | 0.155.1 | 2026-09-20 | first host deployment (a Proxmox LXC); same flags as 0.154.0, smoke test pending |
 | Antigravity CLI (`agy`) | 1.2.8 | 2026-09-22 | on the host before the model lists were first committed; `agy models` unchanged from 1.2.7 |
 | Claude Code (`claude`) | 2.1.280 | 2026-09-23 | Opus 5.5. The alias list is unchanged, so nothing was configured: `opus` simply resolves to the new model, and `GET /v1/usage` `.models` is what records that it did (`docs/deploy.md` §9). Fixture `slash-model.json` re-captured |
+| Antigravity CLI (`agy`) | 1.2.9 | 2026-09-23 | **installed by its own updater** at 05:14 UTC, as 1.2.8 had been before it; `agy models` unchanged; self-update disabled the same morning |
 | Codex CLI (`codex`) | 0.156.0 | 2026-09-23 | same flags; the model cache is unchanged slug for slug, only its version line moved. Fixture `models.txt` re-captured after one `codex exec`, which is what refreshes the cache |
 
 Add a row for every update, newest last.

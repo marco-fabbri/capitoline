@@ -217,6 +217,8 @@ RUNNER_UID=$(id -u runner)
 cat > /etc/capitoline/runner.env <<ENV
 XDG_RUNTIME_DIR=/run/user/$RUNNER_UID
 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$RUNNER_UID/bus
+AGY_CLI_DISABLE_AUTO_UPDATE=true
+DISABLE_AUTOUPDATER=1
 ENV
 chmod 0644 /etc/capitoline/runner.env
 cat > /etc/sudoers.d/capitoline-env <<'SUDO'
@@ -229,6 +231,23 @@ sudo -Hu runner env | grep DBUS      # must print the bus address
 
 (`/etc/capitoline` is created in §7; create it first if you are following
 this section before that one.)
+
+The last two lines stop the CLIs updating themselves. `agy` checks for a new
+version every fifteen minutes and installs it in the background: it went from
+1.2.7 to 1.2.8 and then to 1.2.9 on this host without anyone running an
+update, and 1.2.8 changed how it refuses a tool, which cost the Gemini ladder
+two of its rungs before anyone knew the version had moved. Claude Code has an
+updater of its own. Codex does not install updates by itself. The rule is in
+`docs/update-clis.md`: update by hand, one CLI at a time, and run the checks.
+
+The values matter and were measured, not assumed. `agy` ignores
+`AGY_CLI_DISABLE_AUTO_UPDATE=1` in silence and honours `true`; to see it,
+delete `~/.gemini/antigravity-cli/last_check.timestamp` as `runner`, run any
+`agy` command, and look for `Auto-update disabled via environment variable`
+in the newest file under `~/.gemini/antigravity-cli/log/`. Without deleting
+the timestamp the updater skips its check anyway and proves nothing. For
+Claude Code, `claude doctor` as `runner` prints `Auto-updates: disabled (set
+by env: DISABLE_AUTOUPDATER)`.
 
 **d. Login, once, over SSH, by the owner.** The CLI prints a URL; open it
 on the Mac, sign in, paste the code back. Do this from an interactive SSH
