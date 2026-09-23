@@ -1,0 +1,55 @@
+{
+  "registered": "2026-09-23, committed before any of these questions was sent to a council",
+  "questions": [
+    {
+      "id": "rf2-node-failure",
+      "shape": "factual trap, the anchor already run three times",
+      "question": "In a three-node Nutanix cluster running RF2, one node fails. What happens to the data redundancy, and what is the cluster able to do about it? Answer in about 150 words.",
+      "truth": "Every extent that had a replica on the failed node is left with one copy: the data stays accessible but is unprotected until rebuilt. A Curator scan finds the under-replicated data and the rebuild starts, with all remaining nodes taking part, provided the two survivors have the free capacity to hold the second copies. Even once the rebuild completes, the cluster cannot tolerate a second node failure, because two of three nodes is the floor for metadata and Zookeeper quorum.",
+      "disqualifying": "Saying both replicas survive on the remaining nodes, or that redundancy is unaffected.",
+      "sources": ["https://www.nutanixbible.com/4i-book-of-aos-data-resilience-and-ha.html"]
+    },
+    {
+      "id": "subnet-27",
+      "shape": "calculation with one answer",
+      "question": "What is the broadcast address of the network 10.23.96.64/27, and how many usable host addresses does it have? Show the calculation briefly.",
+      "truth": "Broadcast 10.23.96.95. Usable hosts 30, from 10.23.96.65 to 10.23.96.94.",
+      "disqualifying": "32 usable hosts, or any broadcast address other than 10.23.96.95.",
+      "sources": ["python3 ipaddress.ip_network('10.23.96.64/27')"]
+    },
+    {
+      "id": "tcp-keepalive",
+      "shape": "widespread wrong answer",
+      "question": "On a stock Linux system, a TCP socket has SO_KEEPALIVE enabled and no per-socket overrides of the keepalive parameters. The peer machine loses power and never sends anything again, and there is no application traffic. After how long does the kernel declare the connection dead? Give the figure and the parameters it comes from.",
+      "truth": "7875 seconds, about 2 h 11 min 15 s: tcp_keepalive_time 7200 of idle before the first probe, then tcp_keepalive_probes 9 unanswered probes tcp_keepalive_intvl 75 seconds apart.",
+      "disqualifying": "A figure in minutes, or leaving out the two hours of idle time before the first probe.",
+      "sources": ["sysctl on the Capitoline host, Debian kernel 7.0.14: tcp_keepalive_time 7200, tcp_keepalive_intvl 75, tcp_keepalive_probes 9"]
+    },
+    {
+      "id": "ipv4-regex",
+      "shape": "code, scored mechanically",
+      "question": "Write one regular expression that matches a whole string only if it is a valid dotted-decimal IPv4 address: exactly four octets, each 0 to 255, with no leading zeros (so 01.2.3.4 and 1.2.3.04 must be rejected) and nothing else in the string. Give the expression in a code block, usable with Python's re.fullmatch.",
+      "truth": "Any expression that, under Python re.fullmatch, accepts every string in accept and rejects every string in reject.",
+      "accept": ["0.0.0.0", "255.255.255.255", "10.23.96.76", "192.168.1.1", "1.2.3.4", "100.200.250.199"],
+      "reject": ["256.1.1.1", "01.2.3.4", "1.2.3.04", "1.2.3", "1.2.3.4.5", "999.1.1.1", "", " 1.2.3.4", "1.2.3.4 ", "a.b.c.d", "1..2.3", "300.300.300.300", "00.0.0.0"],
+      "disqualifying": "Failing any case of either list.",
+      "sources": ["the two lists above"]
+    },
+    {
+      "id": "ec-backup-6-nodes",
+      "shape": "an answer that depends on conditions",
+      "question": "A six-node Nutanix cluster running RF2 will store backup data. Should the backup container use erasure coding (EC-X) or plain RF2? Explain what the answer depends on and what each choice costs. Answer in about 200 words.",
+      "truth": "EC-X suits write-cold backup data and six nodes is exactly the recommended size for the default RF2-like 4/1 strip, which wants one node more than its width to allow a rebuild. The saving is 1.25x of raw capacity against the 2x of RF2. It is post-process: data lands at RF2 and is encoded by Curator once it has gone write-cold, so fresh backups get no saving at first. Costs: degraded reads during a failure must decode, and rebuilds are heavier; it is not suited to write or overwrite intensive data, so a backup pattern that rewrites in place weakens the case.",
+      "disqualifying": "Wrong strip or overhead figures, calling EC-X inline, or claiming six nodes is too few for a 4/1 strip.",
+      "sources": ["https://www.nutanixbible.com/4h-book-of-aos-data-efficiency.html"]
+    },
+    {
+      "id": "rf3-min-nodes",
+      "shape": "widespread wrong answer, Nutanix",
+      "question": "What is the minimum number of nodes a Nutanix cluster needs to run with redundancy factor 3, so that it tolerates two simultaneous node failures, and why that number?",
+      "truth": "Five nodes. Redundancy factor 3 puts the metadata at replication factor 5 in Cassandra, and surviving two failures needs a majority of five, three, still standing; Zookeeper runs five instances for the same reason.",
+      "disqualifying": "Three nodes, the common wrong answer, or four.",
+      "sources": ["https://www.nutanixbible.com/4i-book-of-aos-data-resilience-and-ha.html"]
+    }
+  ]
+}
