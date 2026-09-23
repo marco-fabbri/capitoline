@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 import type { AddressInfo } from "node:net";
@@ -285,7 +286,9 @@ describe("POST /v1/chat/completions", () => {
     const script: ProviderEvent[] = Array.from({ length: 20 }, () => ({ type: "text", delta: "x" } as ProviderEvent)).concat([{ type: "done", usage: { input: 1, output: 20 } }]);
     const { app, p, outcomes } = make(script);
     p.delayMs = 20;
-    const server = app.listen(0);
+    // Loopback, as every test server: see test/setup/http-diagnostics.ts.
+    const server = app.listen(0, "127.0.0.1");
+    await once(server, "listening");
     try {
       const port = (server.address() as AddressInfo).port;
       const ac = new AbortController();
@@ -460,7 +463,9 @@ describe("POST /v1/images/generations", () => {
     p.delayMs = 100;
     const outcomes = () => (core as unknown as { usage: { db: { prepare(q: string): { all(): { outcome: string }[] } } } }).usage.db
       .prepare("SELECT outcome FROM calls WHERE source = 'http' ORDER BY id").all().map((r) => r.outcome);
-    const server = app.listen(0);
+    // Loopback, as every test server: see test/setup/http-diagnostics.ts.
+    const server = app.listen(0, "127.0.0.1");
+    await once(server, "listening");
     try {
       const port = (server.address() as AddressInfo).port;
       const ac = new AbortController();
@@ -727,7 +732,9 @@ describe("a council over HTTP", () => {
       await held;                     // the panel is thinking, and says nothing
       yield* SYNTHESIS;
     });
-    const server = app.listen(0);
+    // Loopback, as every test server: see test/setup/http-diagnostics.ts.
+    const server = app.listen(0, "127.0.0.1");
+    await once(server, "listening");
     try {
       const port = (server.address() as AddressInfo).port;
       const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
@@ -773,7 +780,9 @@ describe("a council over HTTP", () => {
       await held;                     // the judge is reading four long answers
       yield* SYNTHESIS;
     });
-    const server = app.listen(0);
+    // Loopback, as every test server: see test/setup/http-diagnostics.ts.
+    const server = app.listen(0, "127.0.0.1");
+    await once(server, "listening");
     try {
       const port = (server.address() as AddressInfo).port;
       const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {

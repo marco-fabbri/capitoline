@@ -42,7 +42,7 @@ beforeEach(async () => {
   const identity: Identity = { sub: "", type: "service", name: "claude-code" };
   const access: RequestHandler = (_req, res, next) => { res.locals.identity = identity; next(); };
   const app = createApp(core, { log: createLogger("t"), access, mcp: createMcpHandler(core, mcpLog, { progressIntervalMs: 20 }) });
-  await new Promise<void>((r) => { server = app.listen(0, () => r()); });
+  await new Promise<void>((r) => { server = app.listen(0, "127.0.0.1", () => r()); }); // loopback: see test/setup/http-diagnostics.ts
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
 });
 // closeAllConnections: a test that hangs up mid-call leaves a socket the
