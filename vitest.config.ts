@@ -10,6 +10,9 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     testTimeout: 15000,
+    // Records every HTTP parse error and every server a test starts, into
+    // tmp/http-diagnostics.jsonl: see the file for why.
+    setupFiles: ["test/setup/http-diagnostics.ts"],
     reporters: ["default", "json"],
     outputFile: { json: "tmp/vitest-last-run.json" },
   },
