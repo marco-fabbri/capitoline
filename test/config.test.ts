@@ -473,6 +473,34 @@ describe("config", () => {
     }
   });
 
+  it("exposes every model each CLI lists, except the routing aliases left out on purpose", () => {
+    // The owner's requirement, 2026-09-22: every model the three CLIs serve
+    // is callable by name. The test above checks the other direction — that
+    // every exposed id is one the CLI lists — so without this one a model a
+    // CLI update adds would go unnoticed. When a re-captured list gains an id,
+    // this fails and names it.
+    //
+    // Left out, and said here so the list cannot grow silently: Claude's
+    // routing aliases resolve to a model the table already names, so they
+    // add a name and no reach (config/capitoline.yaml says why).
+    const LEFT_OUT: Record<string, string[]> = { claude: ["best", "default", "opusplan"] };
+    for (const file of BOTH_FILES) {
+      const cfg = loadConfig(file);
+      for (const [pid, list] of Object.entries(CLI_LISTS)) {
+        const p = cfg.providers[pid];
+        const reachable = new Set<string>();
+        for (const m of Object.values(p.models)) {
+          if (!m.effort_suffix) { reachable.add(m.cli_model); continue; }
+          const efforts = (m.efforts ?? (Object.keys(p.effort) as Effort[])).filter((e) => Object.hasOwn(p.effort, e));
+          for (const e of efforts) reachable.add(`${m.cli_model}-${p.effort[e]}`);
+        }
+        const listed = list.ids(readFileSync(list.file, "utf8"));
+        const missing = listed.filter((id) => !reachable.has(id) && !(LEFT_OUT[pid] ?? []).includes(id));
+        expect(missing, `${file} ${pid}: listed by the CLI and not exposed`).toEqual([]);
+      }
+    }
+  });
+
   it("declares, for every Codex model, only the reasoning levels its cache prices", () => {
     // The cache carries the levels per model — `gpt-5.5` stops at xhigh where
     // `gpt-6-astra` goes to ultra — and the provider's table prices the union.
