@@ -335,8 +335,12 @@ council:
     # Every rung or nothing, unlike the two panels above. A ladder missing one
     # of its rungs measures nothing: "how far down can I go" needs the
     # expensive rung present to compare the cheap ones against, and flash-high
-    # against flash-low on its own answers no question. So the instrument
-    # refuses rather than spending five calls on a run nobody can read, and
-    # /v1/models says plainly that it cannot be run today.
+    # against flash-low on its own answers no question. Two cases, and they
+    # behave differently. A rung already known unavailable keeps the ladder
+    # from being seated at all: /v1/models says plainly it cannot run today.
+    # A rung lost *during* the run — measured 2026-09-23, two rungs soft-denied
+    # a tool they tried to use — stops the deliberation after its first stage:
+    # three calls, not seven, and the surviving answer returned as it was
+    # written and declared as no council, never dressed as a synthesis.
     min_members: 3
     stage_timeout_s: 20         # seconds, not minutes, so a hung member fails fast in the suite
