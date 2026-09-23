@@ -50,7 +50,12 @@ export type ProviderEvent =
   // spent hundreds of tokens on and then answered with nothing is a failure
   // for the client and a cost for the quota, and the usage row should carry
   // both.
-  | { type: "error"; kind: ErrorKind; detail: string; retryAfterS?: number; scope?: "model"; usage?: Usage }
+  //
+  // cliModelId: the model the refusal came from, when the CLI named it. For an
+  // image this is the one time it is named at all: a successful generation
+  // names only the agent, while the quota refusal's body names the model
+  // inside the generate_image tool.
+  | { type: "error"; kind: ErrorKind; detail: string; retryAfterS?: number; scope?: "model"; usage?: Usage; cliModelId?: string }
   | { type: "rate_limit"; fiveHour?: RateLimitWindow; sevenDay?: RateLimitWindow }
   | { type: "image"; mime: ImageMime; bytes: Buffer; width: number; height: number };
 

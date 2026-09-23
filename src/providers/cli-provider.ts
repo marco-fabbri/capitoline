@@ -300,7 +300,12 @@ export class CliProvider implements Provider {
     // here took every Antigravity text model down for five days over an image
     // refusal (observed in production 2026-09-22) — and that pause outlives
     // the quota it came from, because the image window is the longer one.
-    return { type: "error", kind: "rate_limited", detail, retryAfterS: hit.retryAfterS, scope: "model" };
+    // The backend's own name for the exhausted model travels too. A successful
+    // generation never says which model drew the image — it names only the
+    // agent — so a refusal is the one moment the CLI states it, and recording
+    // it is what lets /v1/usage date a change of image model: at the next
+    // refusal, roughly once a week given the 58-per-week quota.
+    return { type: "error", kind: "rate_limited", detail, retryAfterS: hit.retryAfterS, scope: "model", ...(hit.model ? { cliModelId: hit.model } : {}) };
   }
 
   async health(): Promise<HealthStatus> {

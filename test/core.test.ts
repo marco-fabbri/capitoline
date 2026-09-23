@@ -513,6 +513,18 @@ describe("Core images", () => {
     // The stored scope says which quota it was, so a restart keeps them apart.
     expect(usage.pauses(t)).toEqual([{ provider: "c", model: "image:gemini-3.8-flash-low", until: t + 432_060_000, strikes: 1 }]);
   });
+  it("records the image model a refusal names, so /v1/usage can date a change of it", async () => {
+    // A successful generation names only the agent; the quota refusal's body
+    // names the model inside the tool. Recorded on the refused row, it shows
+    // in the model identities under the gateway name that asked.
+    const t = 1_000_000;
+    const c = new FakeProvider("c", ["c-text", { name: "c-image", kind: "image" }], OK, 1);
+    c.imageScript = [{ type: "error", kind: "rate_limited", detail: "quota", scope: "model", retryAfterS: 3600, cliModelId: "gemini-3.1-flash-image" }];
+    const usage = new UsageStore(":memory:");
+    const core = new Core([c], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
+    await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
+    expect(usage.modelIdentities(3600_000, t)).toEqual([{ model: "c-image", cliModelId: "gemini-3.1-flash-image", calls: 1, firstAt: t, lastAt: t }]);
+  });
   it("brings an image pause back across a restart without touching the text model", () => {
     const t = 1_000_000;
     const usage = new UsageStore(":memory:");

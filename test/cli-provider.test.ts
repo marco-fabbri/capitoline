@@ -231,6 +231,10 @@ describe("CliProvider.generateImage", () => {
     // provider-wide pause here would take every Antigravity text model down for
     // as long as the image window lasts.
     expect(ev[0]).toMatchObject({ type: "error", kind: "rate_limited", retryAfterS: 442209, scope: "model", detail: expect.stringContaining("gemini-3.1-flash-image") });
+    // The model inside the image tool, as the backend names it. A successful
+    // generation never names it — only the agent, gemini-3.8-flash-low — so
+    // the refusal is the one moment it can be recorded.
+    expect(ev[0]).toMatchObject({ cliModelId: "gemini-3.1-flash-image" });
     expect(await spy.handles[0]!.result).toMatchObject({ aborted: true, timedOut: false });
     expect(spy.captures).toHaveLength(1);
     expect(spy.captures[0]).toMatchObject({ args: ["b4f58dc5-779c-4b5e-85a3-2fbbce1c9a15"] });
