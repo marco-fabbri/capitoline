@@ -113,7 +113,22 @@ On the host, as root:
      hand-made copy and every changed key has to be retyped into it
      (`docs/deploy.md` §7, last paragraph).
 
-4. Update the table above with the new version, the date and what changed.
+4. Measure what one run of the new version costs, since a CLI can grow with
+   an update and the host is sized from that figure (design §4.1). Start the
+   sampler, send a few requests through the updated CLI — the smoke test is
+   enough — and stop it:
+
+   ```sh
+   python3 /var/lib/capitoline/app/scripts/measure-cli-resources.py --seconds 300
+   ```
+
+   If the peak it prints for that CLI is above the provider's `memory_mb` in
+   `config/capitoline.yaml`, raise `memory_mb` there (rounded up to the next
+   50 MB), update the table of design §4.1, and check that the host still
+   holds `server.memory_mb + Σ concurrency × memory_mb` — the service's
+   startup log says so after the restart.
+
+5. Update the table above with the new version, the date and what changed.
 
 If only the `image` line of the smoke test fails, the CLI flags are not the
 place to look: that line exercises the sudoers entry of `docs/deploy.md` §5,

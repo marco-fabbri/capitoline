@@ -9,6 +9,7 @@ import { createMcpHandler } from "./mcp/server.js";
 import { buildProviders } from "./providers/index.js";
 import type { Provider } from "./providers/adapter.js";
 import { createRunner } from "./runner/runner.js";
+import { hostMemoryMb, sizing } from "./sizing.js";
 import { createAccessMiddleware } from "./server/access.js";
 import { createApp } from "./server/app.js";
 import { UsageStore } from "./usage/store.js";
@@ -70,6 +71,12 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // set — the keys only. `server.access.audience` is not a secret, but a log
   // line that prints the overlay's values is a habit this one does not start.
   log.info({ config: configPath, overlay: overlayPath ?? null, overlayKeys }, "configuration loaded");
+  // Whether every slot of every provider busy at once fits in this host's
+  // memory (design §4.1). Figures, not values from the overlay: the same
+  // arithmetic an operator would do with the configuration in hand.
+  const size = sizing(cfg, hostMemoryMb());
+  if (size.fits) log.info({ requiredMb: size.requiredMb, availableMb: size.availableMb }, "sizing: the configured concurrency fits in memory");
+  else log.warn({ requiredMb: size.requiredMb, availableMb: size.availableMb, providers: size.providers }, "sizing: the configured concurrency does not fit in memory; with every slot busy the kernel would kill CLI processes (design §4.1)");
   // Named and always built, even when providers are injected: it is the one
   // instance that knows sandbox_root, and the startup sweep of stale run-*
   // directories hangs off it. Constructing it touches nothing.

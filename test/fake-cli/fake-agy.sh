@@ -12,9 +12,9 @@ set -euo pipefail
 dir="$(cd "$(dirname "$0")" && pwd)"
 stdin="$(cat)"
 # The council's ranking stage is chosen the same way (see fake-claude.sh): this
-# CLI seats two of the four members of the panels, all three rungs of
-# capitoline-gemini, and it wraps the array in an object, the third shape
-# parseRanking tolerates. It is never asked to synthesize: every judge chain
+# CLI seats two of the four members of the panels and all three rungs of the
+# Gemini ladder (docs/measure-a-model.md), and it wraps the array in an
+# object, the third shape parseRanking tolerates. It is never asked to synthesize: every judge chain
 # reaches an Anthropic model first.
 #
 # Two ranking recordings, because parseRanking refuses a ballot that names a

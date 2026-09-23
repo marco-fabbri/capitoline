@@ -371,9 +371,9 @@ describe("CliProvider.generateImage", () => {
 describe("buildProviders", () => {
   it("builds one provider per configured id with its concurrency", () => {
     const ps = buildProviders(config, runner, createLogger("t"));
-    // Antigravity holds three slots since capitoline-gemini: three rungs of
-    // one ladder, all on that one subscription, all starting together.
-    expect(ps.map((p) => [p.id, p.concurrencyLimit]).sort()).toEqual([["antigravity", 3], ["claude", 2], ["codex", 1]]);
+    // Ten runs per CLI, sized from memory (design §4.1): the limit a provider
+    // enforces is the configured one, whatever it is.
+    expect(ps.map((p) => [p.id, p.concurrencyLimit]).sort()).toEqual([["antigravity", 10], ["claude", 10], ["codex", 10]]);
   });
   it("throws on a provider id without an adapter", () => {
     expect(() => buildProviders({ ...config, providers: { unknown: base } }, runner, createLogger("t"))).toThrow(/no adapter/);

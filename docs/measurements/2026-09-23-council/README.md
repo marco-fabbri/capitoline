@@ -13,6 +13,12 @@ questions the backlog holds open:
   ranked consistently and the ranking tracks correctness, the instrument
   works; if not, one ladder is enough.
 
+`capitoline-gemini` is no longer in the shipped configuration (2026-09-23):
+a capability ladder is an instrument to add to a host's overlay for as long
+as a measurement runs, and `docs/measure-a-model.md` has it, as it was run
+here, with a Claude and a Codex ladder beside it. Re-running this
+measurement's ladder means adding that block first.
+
 ## Registered before running
 
 `questions.json` holds every question verbatim, the correct answer, what

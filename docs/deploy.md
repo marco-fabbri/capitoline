@@ -15,8 +15,17 @@ Three steps need the owner with a browser on the Mac: `claude setup-token`
 
 ## 1. Host
 
-Debian 13 or Ubuntu 24.04, 2 cores, 4 GB RAM, 20 GB disk, outbound
-internet, no inbound ports. Where the variants differ:
+Debian 13 or Ubuntu 24.04, 4 cores, 8 GB RAM, 20 GB disk, outbound
+internet, no inbound ports.
+
+The memory is what the shipped concurrency needs — ten runs per CLI, each a
+whole CLI process — and not a round number: design §4.1 has the measured cost
+of one run and the formula, `server.memory_mb + Σ concurrency × memory_mb`,
+6,650 MB for the shipped file. A smaller host works with lower `concurrency`
+in the overlay; the gateway checks the arithmetic at startup and logs
+`sizing: the configured concurrency does not fit in memory` when it does not
+hold, rather than let the kernel find out under load. Where the variants
+differ:
 
 - Proxmox LXC: unprivileged, with `features: nesting=1`. Without nesting,
   systemd 257 on Debian 13 does not start cleanly in an unprivileged
@@ -382,16 +391,15 @@ though they are not host-specific, all under `providers.antigravity.image`:
 | `allowed_tools` | `[generate_image]` — do not extend: any other tool call aborts the run, which is what keeps an image request from turning into an agent session |
 
 **The council block.** `council:` is in the repository file too, and it is the
-one block that changes what a request costs. It holds three councils, each a
-virtual model of its own name, and they differ only in who sits and whether
-the ranking stage runs — nothing in the code tells them apart, so a fourth one
-is configuration and a restart:
+one block that changes what a request costs. It holds two councils, each a
+virtual model of its own name, and they differ only in whether the ranking
+stage runs — nothing in the code tells them apart, so a third one is
+configuration and a restart:
 
 | Council | What it convenes | Calls |
 |---|---|---|
 | `capitoline` | the reference panel: four families answer, rank each other blind, and a judge seated apart synthesizes. The shape to ask when the panel's own verdict on its answers is worth its price | 9 |
 | `capitoline-fast` | the same four families and the same judge with `ranking: false`, so stage 2 never runs: the everyday shape, at half the price and with no panel verdict on the four answers | 5 |
-| `capitoline-gemini` | the first capability ladder: one family at three reasoning levels, all three rungs on Antigravity, judged from outside by `codex-gpt-6-astra`, with `claude-fable`, `claude-opus` and `codex-gpt-5.6-sol` behind it. A measuring instrument to run over a sample of questions, not a daily mode; `min_members: 3` makes it refuse rather than report a ladder that is missing a rung | 7 |
 
 The price is one call per seat, one more per seat when the ranking stage runs,
 and one for the judge. The reference panel's nine land on three different
@@ -400,41 +408,43 @@ each of the two member stages, Antigravity twice over because the Google seat
 and the open-weights seat sit on that same subscription, and the ninth call
 spends the Anthropic window again for the judge. So one question costs about
 what nine direct requests cost, on windows this host does not replenish, and
-takes as long as the slowest member of each stage in turn. `capitoline-gemini`
-is the opposite shape: six of its seven calls are one Antigravity
-subscription, and only the judge's is spent elsewhere. Nothing rations any of
-it but the per-provider `concurrency`: a client looping over councils empties
-three windows at the same time.
+takes as long as the slowest member of each stage in turn. Nothing rations
+any of it but the per-provider `concurrency`: a client looping over councils
+empties three windows at the same time.
 
-Every key below is read from each of the three blocks; the values are the
-shipped `capitoline`'s.
+A capability ladder — three models of one family ranking each other, to find
+out which is enough for a task — is a council too, but a measuring instrument
+rather than one to use, so none ships: `docs/measure-a-model.md` has three
+ready to add to the overlay for as long as a measurement runs.
+
+Every key below is read from both blocks; the values are the shipped
+`capitoline`'s.
 
 | Key | Why it reads as it does |
 |---|---|
-| `seats` | four families, each a **chain** and never one model: the first model the health and quota state reports available takes the seat, and an unforeseen refusal steps down the chain once. `antigravity-claude-*` is deliberately not seated — it is the Anthropic seat's opinion through another channel, and a panel of four wants four judgments. `capitoline-gemini` is the exception, and deliberately: its three seats are single models, because a rung that steps down is no longer the rung whose capability was being measured, so a refused rung is a lost seat (design §12.5) and, with `min_members: 3`, the ladder does not run at all |
-| `judge` | The top model of each family, descending: `claude-fable`, `claude-opus`, `codex-gpt-6-astra`, `antigravity-gemini-pro`, `codex-gpt-5.6-sol`. The judge writes the answer the client reads, so it is the one seat where economising is false economy — a cheap judge was measured on 2026-09-22 merging three answers into a claim none of them made. No weak model closes the chain either: when no judge can be seated the council returns the best-ranked answer unsynthesised and says so (design §12.5), which is a better floor than a weak synthesis. The chain has one more model than the panel has seats, so the `judge_allow_member: false` filter alone can never empty it. `capitoline-gemini` opens on `codex-gpt-6-astra` instead and ends on `codex-gpt-5.6-sol`, with no Gemini anywhere: a Claude judge would spend back, on one call in seven, the Anthropic window that ladder was put on Gemini to spare, and a Gemini judge would synthesize its own measurement |
+| `seats` | four families, each a **chain** and never one model: the first model the health and quota state reports available takes the seat, and an unforeseen refusal steps down the chain once. `antigravity-claude-*` is deliberately not seated — it is the Anthropic seat's opinion through another channel, and a panel of four wants four judgments |
+| `judge` | `claude-opus`, `antigravity-claude-opus`, `codex-gpt-6-sol`, `codex-gpt-5.6-terra`: strong models built around what the seats cannot take. `judge_allow_member: false` strikes out a model seated in the same deliberation, and until 2026-09-23 every entry of the chain was one a seat could hold, so the judge was whatever the panel had no use for; now only the head can also be a seat, and the three behind it never are. The judge writes the answer the client reads, so it is the one seat where economising is false economy — a cheap judge was measured on 2026-09-22 merging three answers into a claim none of them made. No weak model closes the chain either: when no judge can be seated the council returns the best-ranked answer unsynthesised and says so (design §12.5), which is a better floor than a weak synthesis. |
 | `judge_allow_member` | `false` — the judge is seated apart, so no synthesizer weighs an answer it wrote itself. `true` reproduces karpathy/llm-council's shape, where the chairman is also a member |
 | `judge_blind` | `true` — the judge sees the labels, never the real model names, so the deliberation is blind end to end. The transparency is not lost, it moves: the client's `capitoline.council` field carries the un-blinded record |
-| `min_members` | `2` — below two answers there is nothing to rank. With one the gateway returns that answer and says no council took place, rather than dressing a single opinion as a synthesis. `capitoline-gemini` sets `3`, its whole seating: a ladder missing a rung has nothing to compare against and measures nothing, so it refuses and `/v1/models` says it cannot be run today |
-| `ranking` | `true` here and for the ladder, `false` for `capitoline-fast`: with `false` stage 2 does not run, the judge is given the answers with no aggregate to weigh, and a four-seat council costs five calls instead of nine. It is the one setting that changes the *sequence* of stages, which is why it is a flag in the engine and not a fourth prompt (design §12.9) |
+| `min_members` | `2` — below two answers there is nothing to rank. With one the gateway returns that answer and says no council took place, rather than dressing a single opinion as a synthesis |
+| `ranking` | `true` here, `false` for `capitoline-fast`: with `false` stage 2 does not run, the judge is given the answers with no aggregate to weigh, and a four-seat council costs five calls instead of nine. It is the one setting that changes the *sequence* of stages, which is why it is a flag in the engine and not a fourth prompt (design §12.9) |
 | `stage_timeout_s` | `300` — per member and per stage, not for the whole deliberation. A council can therefore run for a quarter of an hour on paper, which is why it is asked for streaming through the tunnel (§9) and with a raised tool timeout over MCP (§10) |
 
-`providers.antigravity.concurrency` is `3` for these blocks' sake, measured
-against the **largest** council the provider is seated in: `capitoline` and
-`capitoline-fast` seat two chains there each, Google and open weights, while
-`capitoline-gemini` is three rungs and every one of them is Antigravity. All
-three start in the same instant, and with fewer slots the last of them would
-sit on that provider's queue until `server.queue.max_wait_s` and lose its seat
-— in every parallel stage, every time. It is not three subscriptions, only
-three processes against the same one, which is one more than `claude` already
-runs; the quota is accounted per model, not per slot.
+`providers.antigravity.concurrency` is `10`, as for every CLI: concurrency is
+sized from the host's memory (design §4.1), not from the councils. What the
+councils add is a floor, measured against the **largest** council the provider
+is seated in: `capitoline` and `capitoline-fast` seat two chains there each,
+Google and open weights, and both start in the same instant. With fewer slots
+than that the second would sit on that provider's queue until
+`server.queue.max_wait_s` and lose its seat — in every parallel stage, every
+time. A ladder added from `docs/measure-a-model.md` needs three.
 
 The slots belong to the subscription and not to one council, so the check
 reads every block and measures each provider against the largest council it is
 seated in, never the sum of them: the sum would make the slots grow with the
-number of names declared — these three councils would ask this one Antigravity
-subscription for seven parallel `agy` processes, a number nobody has measured
-— and, since the gateway validates at startup, would leave a file the service
+number of names declared — the two shipped councils would ask this one
+Antigravity subscription for four parallel `agy` processes, and every ladder
+added for a measurement for three more — and, since the gateway validates at startup, would leave a file the service
 cannot restart with under `Restart=always`. Two councils asked for at the same
 moment do draw on the same slots, but that is contention between two
 deliberations: load, answered by the queue and `server.queue.max_wait_s`, not
@@ -771,8 +781,8 @@ before this column no record said so, which made every measurement in
 and an Antigravity id are the model itself, so those rows carry no id and are
 left out rather than listed as unchanged.
 
-A council is nine of those rows for the reference panel, five for
-`capitoline-fast` and seven for `capitoline-gemini`, under as many models as
+A council is nine of those rows for the reference panel and five for
+`capitoline-fast` (seven for a ladder), under as many models as
 the seats and the judge resolved to, and they are tied
 together by the identifier the deliberation minted — the same one the client
 reads back in `capitoline.council.deliberationId`. That is what answers "what
@@ -790,12 +800,11 @@ at all: every member is answering, or ranking, and nothing is written until
 the judge starts the synthesis. `capitoline-fast` skips the ranking stage
 and is no better off — one silent stage of four answers is still minutes of
 nothing. Each stage is bounded per member by each council's
-`stage_timeout_s` (300 s in all three shipped blocks), so the wait before
+`stage_timeout_s` (300 s in both shipped blocks), so the wait before
 the first byte is minutes, not seconds — while Cloudflare's edge gives up on
 an origin that has sent nothing for 100 s and answers the client `524`. The
 deliberation does not stop with it: its calls carry on — nine for the
-reference panel, five for `capitoline-fast`, seven for `capitoline-gemini`,
-six of those on the one Antigravity subscription — spending the
+reference panel, five for `capitoline-fast` — spending the
 subscriptions for a client that is already gone.
 
 So through the tunnel a council is asked for with `stream: true`, which opens
@@ -846,12 +855,12 @@ export MCP_TOOL_TIMEOUT=1200000
 
 Twenty minutes, and the figure is `ask_council`'s: a deliberation has no
 deadline of its own, only each member of each stage has one — each council's
-`stage_timeout_s`, 300 s in all three shipped blocks (§9) — and the three
+`stage_timeout_s`, 300 s in both shipped blocks (§9) — and the three
 stages run in sequence, so the worst case is above 900 s with nothing wrong.
 The timeout has to stay larger than three times `stage_timeout_s`; re-derive
 it whenever that value changes. Below it Claude Code drops a call the
 gateway keeps running, and the deliberation's calls carry on — nine for the
-reference panel, five for `capitoline-fast`, seven for `capitoline-gemini` —
+reference panel, five for `capitoline-fast` —
 spending the subscriptions for a client that is already gone: the MCP twin
 of the `524` of §9.
 

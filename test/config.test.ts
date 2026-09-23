@@ -15,6 +15,7 @@ type Fields = Record<string, string | null>;
 const PROVIDER: Fields = {
   binary: "x",
   concurrency: "1",
+  memory_mb: "100",
   timeout_s: "1",
   budget: "{window_5h_tokens: 0, window_7d_tokens: 0}",
   health_model: "a",
@@ -270,7 +271,7 @@ describe("config", () => {
   it("loads the council of both configuration files", () => {
     for (const file of BOTH_FILES) {
       const cfg = loadConfig(file);
-      expect(Object.keys(cfg.council), file).toEqual(["capitoline", "capitoline-fast", "capitoline-gemini"]);
+      expect(Object.keys(cfg.council), file).toEqual(["capitoline", "capitoline-fast"]);
       const c = cfg.council.capitoline;
       // One seat per family, and no family twice — a rule the schema enforces
       // ("rejects two seats of the same family"), because models of one
@@ -346,58 +347,41 @@ describe("config", () => {
     }
   });
 
-  it("ships capitoline-gemini as one capability ladder on Antigravity", () => {
-    for (const file of BOTH_FILES) {
-      const cfg = loadConfig(file);
-      const ladder = cfg.council["capitoline-gemini"];
-      // Three rungs of one lineage, best first: the big model, the small one
-      // trying, the small one not trying. `-gemini` is a family name and not a
-      // shape word (design §12.8), so the shape is the reference panel's —
-      // here the blind ranking is the measurement itself, since what the
-      // instrument asks is whether the cheap rung's answer is judged as good
-      // as the expensive one's.
-      expect(ladder.ranking, file).toBe(true);
-      // One model per seat and no chain: a rung that steps down to another
-      // model stops being the rung it was declared to measure.
-      expect(ladder.seats.map((s) => s.models), file).toEqual([["antigravity-gemini-pro-high"], ["antigravity-gemini-flash-high"], ["antigravity-gemini-flash-low"]]);
-      // The reasoning level is part of the model id and not a request-time
-      // choice, which is what makes a seat a rung: effort_suffix is off, so
-      // the id reaches the CLI exactly as written here.
-      const agy = cfg.providers.antigravity;
-      for (const [name, cli] of [["antigravity-gemini-pro-high", "gemini-3.1-pro-high"], ["antigravity-gemini-flash-high", "gemini-3.8-flash-high"], ["antigravity-gemini-flash-low", "gemini-3.8-flash-low"]]) {
-        expect(agy.models[name], `${file} ${name}`).toMatchObject({ cli_model: cli, effort_suffix: false, kind: "text" });
-      }
-      // The judge is neither a rung nor Gemini at all: the ladder under test
-      // must not synthesize its own measurement. claude-haiku is the cheapest
-      // model of another family, and antigravity-claude-sonnet stands behind it for
-      // the reason every chain exists — the refusal that is not in the state
-      // yet. A rung already known paused is simply not seated and the
-      // deliberation degrades honestly, but a first refusal at the judge with
-      // an empty chain ends six spent calls in an error (design §12.2).
-      // The chain opens on OpenAI and not on Anthropic, unlike the panels':
-      // this ladder was put on Gemini to spare the Anthropic window, and a
-      // Claude judge would spend it back on one call in seven. No Gemini
-      // anywhere in the chain — the ladder must not synthesize its own
-      // measurement.
-      expect(ladder.judge, file).toEqual({ family: "best-available", models: ["codex-gpt-6-astra", "claude-fable", "claude-opus", "codex-gpt-5.6-sol"] });
-      // Every rung or nothing: a ladder missing one has nothing to compare the
-      // cheap rungs against, so the quorum is the whole panel and a lost rung
-      // makes the instrument refuse instead of spending five uninterpretable
-      // calls. The schema allows min_members == seats.length; only more is
-      // rejected.
-      expect([ladder.judgeAllowMember, ladder.judgeBlind, ladder.minMembers], file).toEqual([false, true, 3]);
-      expect(ladder.minMembers, file).toBe(ladder.seats.length);
-      // judge_allow_member is false, so no model of the judge's chain may be a
-      // seat of THIS council — seatJudge() filters the chain against the models
-      // of the deliberation it is seating (src/council/council.ts), and a chain
-      // whose every entry is a rung would leave nothing to seat. Being a member
-      // of another council is irrelevant: that is a different deliberation, and
-      // claude-opus heads this chain while also sitting in the reference
-      // panel's Anthropic seat.
-      const seatedHere = new Set(ladder.seats.flatMap((s) => s.models));
-      for (const m of ladder.judge.models) expect(seatedHere.has(m), `${file} ${m}`).toBe(false);
-      expect(ladder.stageTimeoutS, file).toBe(cfg.council.capitoline.stageTimeoutS);
+  // No ladder ships: a capability ladder is a measuring instrument, declared
+  // in a host's overlay for as long as a measurement runs
+  // (docs/measure-a-model.md). The guide's three examples are the only place
+  // they live, so they are loaded here over the shipped file exactly as an
+  // overlay would be, and a model renamed in the tables breaks this instead
+  // of the first measurement someone attempts.
+  it("loads the guide's three ladders over the shipped configuration", () => {
+    const guide = readFileSync("docs/measure-a-model.md", "utf8");
+    const blocks = [...guide.matchAll(/```yaml\n(council:\n[\s\S]*?)```/g)].map((m) => m[1]);
+    expect(blocks.length).toBe(3);
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-ladder-"));
+    const names: string[] = [];
+    for (const [i, block] of blocks.entries()) {
+      const overlay = join(dir, `ladder-${i}.yaml`);
+      writeFileSync(overlay, block);
+      const cfg = loadConfig("config/capitoline.yaml", overlay);
+      const added = Object.keys(cfg.council).filter((n) => n !== "capitoline" && n !== "capitoline-fast");
+      expect(added.length, block).toBe(1);
+      const ladder = cfg.council[added[0]];
+      names.push(added[0]);
+      // The rules the guide states, one by one. One model per seat and no
+      // chain: a rung that steps down stops being the rung it measures.
+      expect(ladder.seats.every((s) => s.models.length === 1), added[0]).toBe(true);
+      // Three rungs of one lineage, on one provider.
+      const providerOf = new Map(Object.entries(cfg.providers).flatMap(([id, p]) => Object.keys(p.models).map((m) => [m, id] as const)));
+      expect(new Set(ladder.seats.map((s) => providerOf.get(s.models[0]))).size, added[0]).toBe(1);
+      // The ranking is the measurement, and every rung or nothing.
+      expect([ladder.ranking, ladder.minMembers, ladder.seats.length], added[0]).toEqual([true, 3, 3]);
+      // The judge is from another family: none of its chain is a rung.
+      const seated = new Set(ladder.seats.flatMap((s) => s.models));
+      expect(ladder.judge.models.length, added[0]).toBeGreaterThan(1);
+      for (const m of ladder.judge.models) expect(seated.has(m), `${added[0]} ${m}`).toBe(false);
+      expect([ladder.judgeAllowMember, ladder.judgeBlind], added[0]).toEqual([false, true]);
     }
+    expect(names).toEqual(["capitoline-gemini", "capitoline-claude", "capitoline-openai"]);
   });
 
   it("gives every provider a slot for the largest council it is seated in", () => {
@@ -417,14 +401,13 @@ describe("config", () => {
         }
         for (const [pid, n] of per) largest.set(pid, Math.max(largest.get(pid) ?? 0, n));
       }
-      // Three rungs on one subscription is the largest Antigravity seating of
-      // the three councils — the reference panel and the fast one seat it
-      // twice each — so `concurrency: 3` is the whole change the ladder costs
-      // and no other provider moves.
-      expect(largest.get("antigravity"), file).toBe(3);
-      expect(cfg.providers.antigravity.concurrency, file).toBe(3);
-      expect(cfg.providers.claude.concurrency, file).toBe(2);
-      expect(cfg.providers.codex.concurrency, file).toBe(1);
+      // The reference panel and the fast one seat Antigravity twice each,
+      // the largest seating any shipped council asks of one provider.
+      expect(largest.get("antigravity"), file).toBe(2);
+      // Concurrency is sized from memory, not from this rule (design §4.1):
+      // ten runs per CLI, which covers every shipped council and a ladder
+      // declared in an overlay alike.
+      for (const pid of ["claude", "codex", "antigravity"]) expect(cfg.providers[pid].concurrency, `${file} ${pid}`).toBe(10);
       for (const [pid, seats] of largest) expect(cfg.providers[pid].concurrency, `${file} ${pid}`).toBeGreaterThanOrEqual(seats);
     }
   });
@@ -754,7 +737,6 @@ describe("the end-to-end configuration tracks the repository one", () => {
   // machine as on the host.
   const INTENDED = [
     "council.capitoline-fast.stageTimeoutS",     // the same, for the fast shape
-    "council.capitoline-gemini.stageTimeoutS",   //   and for the ladder
     "council.capitoline.stageTimeoutS",          // seconds, not minutes, so a suspended member fails fast
     "providers.antigravity.binary",              // the fake CLIs replay fixtures
     "providers.antigravity.image.collect",       //   and so does the collect helper
@@ -801,7 +783,7 @@ describe("the end-to-end configuration tracks the repository one", () => {
       expect(p.timeout_s, id).toBeLessThanOrEqual(30);
       expect(repo.providers[id].timeout_s, id).toBeGreaterThanOrEqual(600);
     }
-    for (const name of ["capitoline", "capitoline-fast", "capitoline-gemini"]) {
+    for (const name of ["capitoline", "capitoline-fast"]) {
       expect(e2e.council[name].stageTimeoutS, name).toBeLessThanOrEqual(30);
       expect(repo.council[name].stageTimeoutS, name).toBeGreaterThanOrEqual(300);
     }

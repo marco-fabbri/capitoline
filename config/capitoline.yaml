@@ -10,6 +10,10 @@ server:
     audience: ""
   queue:
     max_wait_s: 120
+  # What the host uses with no CLI running: the gateway (~90 MB), cloudflared
+  # (~30 MB) and the runner's resident services. Measured 2026-09-23 on the
+  # owner's host; the startup check adds it to the CLIs' share (design §4.1).
+  memory_mb: 150
 
 runner:
   user: runner            # Linux user that owns the CLI credentials
@@ -22,7 +26,11 @@ usage:
 providers:
   claude:
     binary: claude
-    concurrency: 2
+    # How many runs at once, sized from memory and not from the subscription:
+    # parallel runs spend the same quota as the same runs one after another,
+    # only sooner. Ten per CLI is the default; what it costs is design §4.1.
+    concurrency: 10
+    memory_mb: 250            # peak of one run, 191–212 MB measured 2026-09-23 (Claude Code 2.1.280)
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }   # 0 = not declared; real windows come from rate_limit_event
     health_model: claude-haiku
@@ -73,7 +81,8 @@ providers:
 
   codex:
     binary: codex
-    concurrency: 1
+    concurrency: 10           # sized from memory, as for claude above
+    memory_mb: 150            # peak of one run, 112–147 MB (an image run the highest), 2026-09-23 (Codex CLI 0.156.0)
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: codex-gpt-5.5
@@ -196,19 +205,12 @@ providers:
 
   antigravity:
     binary: agy
-    # Three slots, not one. The reference panel seats Google and open weights
-    # on this same subscription (design §12.1), so with a single slot the
-    # second of the two members would wait on the provider's queue for
-    # server.queue.max_wait_s and then lose its seat to queue_full, twice per
-    # deliberation. Three rather than two because capitoline-gemini is a
-    # ladder of three rungs, all of them here, and all three start in the same
-    # instant. The count is per council, over the largest council this
-    # provider is seated in, and never the sum over the three: two councils
-    # overlapping is load, and load is what server.queue.max_wait_s answers.
-    # Three `agy` processes on one subscription is one more than `claude`
-    # already runs above; the shared quota is accounted per model, not per
-    # slot, so the third slot costs nothing that the first does not.
-    concurrency: 3
+    # Sized from memory, as for claude above. A council also needs one slot per
+    # seat it gives this provider — the reference panel seats Google and open
+    # weights here, two at once — and the configuration refuses to load with
+    # fewer (design §12.1).
+    concurrency: 10
+    memory_mb: 250            # peak of one run, 214–240 MB measured 2026-09-23 (Antigravity CLI 1.2.9)
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: antigravity-gemini-flash
@@ -218,11 +220,13 @@ providers:
       antigravity-gemini-3.7-flash: { cli_model: gemini-3.7-flash, effort_suffix: true }
       antigravity-gemini-3.6-flash: { cli_model: gemini-3.6-flash, effort_suffix: true }
       antigravity-gemini-pro:       { cli_model: gemini-3.1-pro,   effort_suffix: true, efforts: [low, high] }
-      # The three rungs of capitoline-gemini. The reasoning level is part of
-      # the id here and not a request-time choice (effort_suffix: false), which
-      # is what makes a seat a rung: `antigravity-gemini-pro` above answers at whatever
-      # effort the request asks for, while `antigravity-gemini-pro-high` is one fixed
-      # point on the ladder. Every id is one `agy models` lists.
+      # Three models with the reasoning level fixed in the id rather than
+      # chosen per request (effort_suffix: false): `antigravity-gemini-pro`
+      # above answers at whatever effort the request asks for, while
+      # `antigravity-gemini-pro-high` is always the same model at the same
+      # level. That is what a rung of a capability ladder needs
+      # (docs/measure-a-model.md), and what a caller pins when it wants one
+      # level and no resolution. Every id is one `agy models` lists.
       #
       # These three are aliases: every one of their CLI ids is already
       # reachable under another name in this table. `antigravity-gemini-pro`
@@ -377,77 +381,4 @@ council:
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to synthesize
     ranking: false              # no stage 2: four answers and a synthesis, five calls
-    stage_timeout_s: 300        # per member, per stage — not for the whole deliberation
-
-  # The first capability ladder: one family at three reasoning levels, biggest
-  # first — the big model, the small one trying, the small one not trying. It
-  # answers "how far down can I go", not "which answer is best": if the three
-  # rungs agree, the cheapest of them would have sufficed. A measuring
-  # instrument to run over a sample of real questions, not a daily mode.
-  #
-  # On Gemini and not on Claude because a ladder spends three of its calls on
-  # the family it measures and the Anthropic weekly window is the scarce one.
-  # Antigravity serves no Flash-Lite — that model lives in the Gemini API,
-  # which this gateway does not use — but it serves every model at several
-  # reasoning levels, and those are better rungs than three Claude sizes
-  # would be, because the level is pinned by the model id itself.
-  #
-  # This is the one council that seats a single lineage more than once, and it
-  # does so knowingly: one seat per family is what buys independent judgment
-  # (design §12.2), and independent judgment is not what is being bought here.
-  # A seat's `family` is therefore the name of its rung.
-  #
-  # No `ranking: false`. The blind peer ranking is the measurement itself — it
-  # is what says whether the cheap rung's answer is judged as good as the
-  # expensive one's — so the shape stays the reference panel's, as the name
-  # already says: `-gemini` is a family name, not a shape word (design §12.8).
-  capitoline-gemini:
-    seats:
-      # No fallback chain on any rung: a seat stepping down to another model
-      # stops being the rung whose capability was being measured, and the
-      # deliberation would report a ladder it never ran. A rung the state
-      # refuses is a lost seat and is declared as one (design §12.5).
-      - { family: pro-high,   models: [antigravity-gemini-pro-high] }
-      - { family: flash-high, models: [antigravity-gemini-flash-high] }
-      - { family: flash-low,  models: [antigravity-gemini-flash-low] }
-    # The judge is no rung, and no Gemini at all: the ladder under test must
-    # not synthesize its own measurement. With judge_allow_member: false it must be one no
-    # member can take, which these Gemini seats never could.
-    #
-    # A second model stands behind it for the reason every chain exists, and it
-    # is not the judge_allow_member one: the refusal nobody foresaw. A model
-    # already known paused is never seated at all and the deliberation degrades
-    # honestly — the best-ranked answer is returned unsynthesised — but the
-    # first refusal of a window is by definition not in the state yet (design
-    # §12.2), and with nothing behind the head of the chain that single refusal
-    # throws away six Gemini calls already spent and hands the client an error
-    # instead of an answer. codex-gpt-5.6-sol closes the chain, and every model
-    # in it sits in no seat of this council, which is what judge_allow_member:
-    # false requires.
-    #
-    # The head is codex-gpt-6-astra and not the cheapest model of another
-    # family, which is what this chain held until 2026-09-22. The judge writes
-    # the answer the client reads, so it is the one seat where economising is
-    # false economy: a synthesis is one call out of seven while the
-    # deliberation spends upwards of 150k tokens, and the first ladder run
-    # measured what the cheap judge costs — claude-haiku merged the three
-    # answers and shipped a claim none of them made, on the very point the
-    # question turned on (docs/backlog.md, "The judge can introduce an error
-    # none of the members made"). Astra ahead of the Anthropic models on
-    # purpose: this ladder already spends no Anthropic window on its rungs, and
-    # that window is the scarce one.
-    judge: { family: best-available, models: [codex-gpt-6-astra, claude-fable, claude-opus, codex-gpt-5.6-sol] }
-    judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
-    judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
-    # Every rung or nothing, unlike the two panels above. A ladder missing one
-    # of its rungs measures nothing: "how far down can I go" needs the
-    # expensive rung present to compare the cheap ones against, and flash-high
-    # against flash-low on its own answers no question. Two cases, and they
-    # behave differently. A rung already known unavailable keeps the ladder
-    # from being seated at all: /v1/models says plainly it cannot run today.
-    # A rung lost *during* the run — measured 2026-09-23, two rungs soft-denied
-    # a tool they tried to use — stops the deliberation after its first stage:
-    # three calls, not seven, and the surviving answer returned as it was
-    # written and declared as no council, never dressed as a synthesis.
-    min_members: 3
     stage_timeout_s: 300        # per member, per stage — not for the whole deliberation

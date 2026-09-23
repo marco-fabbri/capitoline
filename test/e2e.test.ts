@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { start } from "../src/main.js";
@@ -40,7 +40,7 @@ describe("end to end with fake CLIs", () => {
     // Owned by the gateway and of a kind of their own: they are served by no
     // provider, and their calls are accounted under the models that served
     // them (§12.7).
-    for (const name of ["capitoline", "capitoline-fast", "capitoline-gemini"]) {
+    for (const name of ["capitoline", "capitoline-fast"]) {
       expect(data.find((m) => m.id === name), name).toMatchObject({ owned_by: "capitoline", capitoline: { kind: "council" } });
     }
   });
@@ -322,22 +322,46 @@ describe("a council end to end", () => {
     // usage table and not off the deliberation's own count.
     expect((await rows()) - before).toBe(5);
   }, 30_000);
+});
 
-  // The capability ladder, through the same door: three rungs of one lineage
-  // on one Antigravity subscription (plan 2026-09-22-council-variants, task
-  // 3). It is configuration only, so nothing here tests an engine path the two
-  // tests above do not — except the one runtime risk the task carries, which
-  // no unit test can reach: three `agy` processes starting in the same
-  // instant, twice, against `providers.antigravity.concurrency: 3`. A slot
-  // short and a rung would wait out server.queue.max_wait_s and be declared
-  // lost to queue_full in stage 1, or drop its ballot in stage 2, which is
-  // what `lost` and the three rankings below assert. The fake CLIs need no new
+
+// No ladder ships: a host adds one to its overlay for as long as a
+// measurement runs (docs/measure-a-model.md). This starts a second gateway
+// with the guide's own Gemini example as its overlay — the example as
+// written, with only the per-stage deadline shortened as every e2e council's
+// is — so the recipe the guide hands out is the one proven to deliberate.
+describe("a ladder from docs/measure-a-model.md, end to end", () => {
+  let ladderApp: Awaited<ReturnType<typeof start>>;
+  beforeAll(async () => {
+    const guide = readFileSync("docs/measure-a-model.md", "utf8");
+    const gemini = /```yaml\n(council:\n  capitoline-gemini:[\s\S]*?)```/.exec(guide);
+    expect(gemini, "the guide no longer carries the Gemini ladder").not.toBeNull();
+    mkdirSync("tmp", { recursive: true });
+    const overlay = "tmp/e2e-ladder-overlay.yaml";
+    writeFileSync(overlay, gemini![1].replace(/stage_timeout_s: \d+/, "stage_timeout_s: 20"));
+    ladderApp = await start("test/e2e.config.yaml", { port: 0, overlayPath: overlay });
+  }, 30_000);
+  afterAll(async () => { await ladderApp.close(); });
+  const rows = async (): Promise<number> => {
+    const r = await fetch(`http://127.0.0.1:${ladderApp.port}/v1/usage`);
+    const { callers } = (await r.json()) as { callers: { calls: number }[] };
+    return callers.reduce((n, c) => n + c.calls, 0);
+  };
+
+  // Three rungs of one lineage on one Antigravity subscription, all starting
+  // in the same instant, twice. It is configuration only, so nothing here
+  // tests an engine path the panels do not — except the one runtime risk a
+  // ladder carries, which no unit test can reach: three `agy` processes at
+  // once against the provider's concurrency. A slot short and a rung would
+  // wait out server.queue.max_wait_s and be declared lost to queue_full in
+  // stage 1, or drop its ballot in stage 2, which is what `lost` and the
+  // three rankings below assert. The fake CLIs need no new
   // flag: fake-agy.sh picks its recording from the prompt, never from the
   // model id, so the three rungs replay the same chat and ranking fixtures the
   // panel's Antigravity seats do.
   it("deliberates capitoline-gemini over three rungs of one subscription and writes seven usage rows", async () => {
     const before = await rows();
-    const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {
+    const r = await fetch(`http://127.0.0.1:${ladderApp.port}/v1/chat/completions`, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: "capitoline-gemini", messages: [{ role: "user", content: COUNCIL_QUESTION }] }),
     });

@@ -56,8 +56,8 @@ describe("the note on what the token numbers mean", () => {
   });
 });
 
-// The three councils of 2026-09-22 are a configuration change and nothing
-// else: a fourth one is six lines of YAML, and nothing in the code would
+// The shipped councils are a configuration change and nothing else: another
+// one is six lines of YAML, and nothing in the code would
 // notice that it never reached the README, the runbook or the spec. What each
 // council costs is the number a reader decides on, and it is derivable from
 // the file — one call per seat, one more per seat when the ranking stage runs,
@@ -95,7 +95,7 @@ const councilTable = (text: string, where: string): Map<string, string> => {
 // The explanation of one configuration key, out of the `| Key |` tables of
 // §7. There are several of them in that section, so the table is chosen by
 // the key it documents rather than by position. The council table documents
-// the three blocks at once, so a row that states only the reference panel's
+// both blocks at once, so a row that states only the reference panel's
 // reading is a row that is false for a variant.
 const keyRow = (text: string, where: string, key: string): string => {
   const lines = text.split("\n");
@@ -112,7 +112,7 @@ const keyRow = (text: string, where: string, key: string): string => {
 
 const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
 
-describe("the three councils, as documented", () => {
+describe("the shipped councils, as documented", () => {
   it("are all in the README with their price in calls", () => {
     const rows = councilTable(section(readFileSync("README.md", "utf8"), "## Use it"), "the README");
     expect([...rows.keys()].sort()).toEqual(COUNCILS.map(([n]) => n).sort());
@@ -125,9 +125,9 @@ describe("the three councils, as documented", () => {
     for (const [name, c] of COUNCILS) expect(rows.get(name), `${name}: calls`).toBe(String(price(c)));
   });
 
-  // The line that went stale the moment capitoline-gemini was configured: it
-  // read `2` while the file said `3`, and a runbook that contradicts the file
-  // it documents is worse than one that says nothing. The value and the
+  // A line that has gone stale before: it read `2` while the file said `3`,
+  // the day a three-rung ladder was shipped, and a runbook that contradicts
+  // the file it documents is worse than one that says nothing. The value and the
   // council that justifies it are both read out of the configuration here.
   it("say why the Antigravity subscription runs the number of processes it runs", () => {
     const s = section(readFileSync("docs/deploy.md", "utf8"), "## 7. ");
@@ -159,7 +159,7 @@ describe("the three councils, as documented", () => {
     }
   });
 
-  // The §7 table documents all three blocks with the reference panel's
+  // The §7 table documents both blocks with the reference panel's
   // values, so every row whose reading differs for a variant has to carry the
   // exception. The judge row is the one that went stale first: the ladder's
   // chain does not close on `claude-haiku`, it opens on it.
@@ -230,10 +230,16 @@ describe("the backlog", () => {
     expect(backlog).not.toMatch(/three calls instead of nine/);
   });
 
-  it("records the two ladders left and the shape that would justify a strategy object", () => {
-    const later = section(backlog, "## Phase 2 and beyond");
-    expect(later).toMatch(/capitoline-claude/);
-    expect(later).toMatch(/capitoline-openai/);
-    expect(later).toMatch(/strategy object/);
+  it("records the shape that would justify a strategy object", () => {
+    expect(section(backlog, "## Phase 2 and beyond")).toMatch(/strategy object/);
+  });
+
+  // The two ladders it used to hold as still to come are closed, and not by
+  // being built into the shipped file: they are a recipe now.
+  it("closes the other ladders into the guide rather than leaving them open", () => {
+    expect(section(backlog, "## Phase 2 and beyond")).not.toMatch(/capitoline-claude|capitoline-openai/);
+    expect(section(backlog, "## Shipped")).toMatch(/docs\/measure-a-model\.md/);
+    const guide = readFileSync("docs/measure-a-model.md", "utf8");
+    for (const name of ["capitoline-gemini", "capitoline-claude", "capitoline-openai"]) expect(guide).toMatch(new RegExp("  " + name + ":"));
   });
 });

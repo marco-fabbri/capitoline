@@ -45,6 +45,11 @@ const ImageSchema = z
 const ProviderSchema = z.object({
   binary: z.string().min(1),
   concurrency: z.number().int().min(1),
+  // Peak memory of one run of this CLI, in MB, as measured by
+  // scripts/measure-cli-resources.py. It changes with every CLI update, which
+  // is why it is configuration; the startup check multiplies it by
+  // `concurrency` (src/sizing.ts, design §4.1).
+  memory_mb: z.number().int().min(1),
   timeout_s: z.number().int().min(1),
   budget: z.object({ window_5h_tokens: z.number().int().min(0), window_7d_tokens: z.number().int().min(0) }).strict(),
   health_model: z.string().min(1),
@@ -191,6 +196,10 @@ export const ConfigSchema = z
           callers: z.record(z.string().min(1), z.string().min(1)).default({}),
         }).strict().default({}),
         queue: z.object({ max_wait_s: z.number().int().min(1).default(120) }).strict().default({}),
+        // What the host uses with no CLI running — the gateway, the tunnel,
+        // the runner's resident services — in MB. 0 = not declared, and the
+        // startup check then counts the CLIs alone (design §4.1).
+        memory_mb: z.number().int().min(0).default(0),
       })
       .strict()
       .default({}),
