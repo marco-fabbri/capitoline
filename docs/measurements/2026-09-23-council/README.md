@@ -112,6 +112,9 @@ weekly window. `capitoline` and `capitoline-fast` run after that window
 resets, on Friday 25 September after 21:00, for two reasons: not to spend the
 owner's working allowance, and because until then `claude-fable` is
 exhausted and the reference panel would be measured in its degraded form.
+(They ran on the night of 26–27 September, one day later than planned, into
+`results-panels/`; the window had reset on the Friday and every seat was at
+full strength, so nothing in the comparison depends on the day.)
 
 ## Results: `capitoline-gemini`, 2026-09-23
 
@@ -222,3 +225,109 @@ it was wrong. Where all three rungs are right, as on `ipv4-regex`, the order
 reflects something other than correctness — explanation, presentation — and
 should not be read as a verdict. The instrument measures what it was built to
 measure, which is the condition the backlog set for the other two ladders.
+
+## Results: `capitoline` and `capitoline-fast`, night of 26–27 September
+
+Twelve deliberations, question-major, from 00:37 to 00:50 CEST on 27
+September (`results-panels/run.log`), through the tunnel with the service
+token. Every seat was at full strength: no fallback and no lost seat in any of
+the twelve, `claude-fable` in the Anthropic seat throughout, and the judge
+`claude-opus` — the head of the chain, seated because it sits in no seat — on
+all twelve. Model identities at the start of the run are in
+`results-panels/model-identities-*.json`.
+
+One run had to be repeated. The first `capitoline` deliberation on
+`ipv4-regex` answered nothing for 125 s and the tunnel's edge closed the
+connection with `524`; the deliberation went on regardless and completed its
+nine calls for a client that had gone (`docs/deploy.md` §9 says exactly this,
+and the measurement script asks without streaming). The repeat, six minutes
+later, took 118 s and came back `200`; it is the run scored below, and the
+nine orphaned calls are counted in the cost. The two `524`s in `run.log` and
+the repeat's line are the record of it.
+
+Scored against `questions.json` as registered: `ipv4-regex`, `subnet-27` and
+`tcp-keepalive` by `score.py`, the three Nutanix questions by reading against
+the registered truth, and **marked for the owner's review**. Every synthesis
+was read whole, and every claim no member made was classified by the
+amendment above; `score.py`'s candidate list was the starting point and not
+the verdict.
+
+| Question | `capitoline` | derived / unsourced-correct / unsourced-wrong | `capitoline-fast` | derived / unsourced-correct / unsourced-wrong |
+|---|---|---|---|---|
+| `rf2-node-failure` | correct | 0 / 0 / 0 | correct | 0 / 0 / 0 |
+| `subnet-27` | correct | 0 / 0 / 0 | correct | 0 / 0 / 0 |
+| `tcp-keepalive` | correct | 2 / 0 / 0 | correct | 1 / 0 / 0 |
+| `ipv4-regex` | correct | 1 / 0 / 0 | correct | 2 / 1 / 0 |
+| `ec-backup-6-nodes` | correct | 0 / 0 / 0, plus one claim for review | correct | 1 / 0 / 0 |
+| `rf3-min-nodes` | correct | 0 / 0 / 0 | correct | 1 / 0 / 0 |
+
+All 24 answers of the three mechanically scored questions were correct too,
+in both councils (`score.py`).
+
+**The claims behind the counts**, so the reading can be checked:
+
+- `capitoline`, `tcp-keepalive`: "the ninth probe is sent 600 s after the
+  first" and "`tcp_retries2` … roughly 15 minutes or more" — the first is
+  arithmetic on the members' 75 s interval, the second rewords a member's
+  "13 to 30 minutes". Derived.
+- `capitoline`, `ipv4-regex`: "rejects `1.2.3.4.5`" — follows from the
+  pattern the members gave. Derived.
+- `capitoline`, `ec-backup-6-nodes`: "encoded data can revert to RF2 if node
+  loss leaves too few nodes for the stripe". No member said it and the
+  registered source does not state it in those words; whether it is correct
+  is the owner's call, and it is the one claim of the twelve syntheses this
+  reading could not settle. It is listed apart rather than forced into a
+  class. It changes nothing below: under either class the two councils tie
+  on the criterion.
+- `capitoline-fast`, `tcp-keepalive`: "the ninth probe goes out at 7800 s".
+  Derived. The "some sources give 7200 + 10 × 75" remark, which the candidate
+  list flagged, is a member's ("10 times 75", in words).
+- `capitoline-fast`, `ipv4-regex`: the match/no-match examples are checkable
+  against the pattern (derived, counted once), and the Arabic-Indic digit is
+  an illustration of two members' Unicode remark (derived). The note that
+  under `re.match` a `$` accepts a trailing newline and `\Z` does not is in no
+  member's answer: true, and **unsourced-correct** — the one instruction slip
+  of the twelve.
+- `capitoline-fast`, `ec-backup-6-nodes`: "a spare node remains for rebuilds"
+  restates a member's "4/1 stripe, which still fits with one node down", and
+  "a 4+2 layout would require RF3" follows from one member's "EC-X does not
+  upgrade it to RF3" set against another's 4+2 option. Derived.
+- `capitoline-fast`, `rf3-min-nodes`: "the RF + failures formula gives 5 only
+  by coincidence" — an inference from the 2N + 1 rule two members gave.
+  Derived.
+
+**Cost**, from `run.log` and the result files:
+
+| | Calls per question | Tokens per question | Wall time per question | Total spent |
+|---|---|---|---|---|
+| `capitoline` | 9 | 88,490–104,894 | 39–118 s | 63 calls (+ 9 orphaned by the `524`) |
+| `capitoline-fast` | 5 | 42,821–50,818 | 21–64 s | 30 calls |
+
+**The rankings**, for what the ranked shape adds: the aggregate put
+`antigravity-gemini-pro` first on `rf2-node-failure`, `rf3-min-nodes` and
+`ipv4-regex`, `claude-fable` first on `subnet-27` and `tcp-keepalive`,
+`codex-gpt-6-astra` first on `ec-backup-6-nodes`; `antigravity-gpt-oss` was
+last on five of six. With every answer correct, the order is about
+presentation, as the ladder's `ipv4-regex` run had already shown, and the
+synthesis was correct whichever answer led.
+
+### The reading, by the criterion registered above
+
+- Correct syntheses: `capitoline` 6 of 6, `capitoline-fast` 6 of 6. Equal.
+- Unsourced wrong claims: 0 and 0. Equal.
+
+**The four ranking calls bought nothing on these six questions.** By the
+rule written before the runs, `capitoline-fast` is the better everyday
+council: the same six correct syntheses at 30 calls instead of 63, at half
+the tokens and about half the wall time, and it was the one shape that never
+touched the tunnel's 100 s edge. The one difference outside the criterion —
+one unsourced-correct remark in a fast synthesis against none in the ranked
+ones — is a difference of one on six questions, noted and not acted on, as
+the criterion says.
+
+What this does not say: that the ranking is worthless. Six questions is a
+small sample, all six had four correct members, and the failure the ranking
+guards against — a wrong answer leading the synthesis — never had the chance
+to happen. On the ladder, where a member *was* wrong, the ranking put it last
+every time. The ranked shape stays available; what changes is which shape a
+client reaches without thinking, and that is recorded in `docs/backlog.md`.

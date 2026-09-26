@@ -105,7 +105,13 @@ def candidates(synthesis, answers):
 
 for f in sorted(RESULTS.glob("*__*.json")):
     council, qid = f.stem.split("__", 1)
-    d = json.loads(f.read_text())
+    try:
+        d = json.loads(f.read_text())
+    except json.JSONDecodeError:
+        # No body at all: a 524 from the tunnel's edge leaves an empty file
+        # (run.log has the status). Recorded, not skipped silently.
+        print(f"\n{council}  {qid}: no response body")
+        continue
     if "capitoline" not in d or "council" not in d.get("capitoline", {}):
         print(f"\n{council}  {qid}: no deliberation ({d.get('error', {}).get('message', 'unknown')})")
         continue

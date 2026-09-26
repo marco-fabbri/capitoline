@@ -30,7 +30,7 @@ providers:
     # parallel runs spend the same quota as the same runs one after another,
     # only sooner. Ten per CLI is the default; what it costs is design §4.1.
     concurrency: 10
-    memory_mb: 250            # peak of one run, 191–212 MB measured 2026-09-23 (Claude Code 2.1.280)
+    memory_mb: 250            # peak of one run, 214 MB under council load (2026-09-27, Claude Code 2.1.280)
     timeout_s: 10
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }   # 0 = not declared; real windows come from rate_limit_event
     health_model: claude-haiku
@@ -82,7 +82,7 @@ providers:
   codex:
     binary: test/fake-cli/fake-codex.sh
     concurrency: 10           # sized from memory, as for claude above
-    memory_mb: 150            # peak of one run, 112–147 MB (an image run the highest), 2026-09-23 (Codex CLI 0.156.0)
+    memory_mb: 150            # peak of one run, 147 MB generating an image, 118 under council load (2026-09-27, Codex CLI 0.156.0)
     timeout_s: 10
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: codex-gpt-5.5
@@ -210,7 +210,7 @@ providers:
     # weights here, two at once — and the configuration refuses to load with
     # fewer (design §12.1).
     concurrency: 10
-    memory_mb: 250            # peak of one run, 214–240 MB measured 2026-09-23 (Antigravity CLI 1.2.9)
+    memory_mb: 300            # peak of one run, 256 MB under council load (2026-09-27, Antigravity CLI 1.2.9)
     timeout_s: 10
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: antigravity-gemini-flash

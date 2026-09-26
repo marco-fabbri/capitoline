@@ -1,0 +1,37 @@
+[
+  {
+    "model": "claude-fable",
+    "cliModelId": "claude-fable-5-1",
+    "calls": 41,
+    "firstAt": 1790382679523,
+    "lastAt": 1790462900462
+  },
+  {
+    "model": "claude-haiku",
+    "cliModelId": "claude-haiku-4-5-20251001",
+    "calls": 8,
+    "firstAt": 1790117824234,
+    "lastAt": 1790193126058
+  },
+  {
+    "model": "claude-opus",
+    "cliModelId": "claude-opus-5",
+    "calls": 2,
+    "firstAt": 1790117690013,
+    "lastAt": 1790117703094
+  },
+  {
+    "model": "claude-opus",
+    "cliModelId": "claude-opus-5-5",
+    "calls": 77,
+    "firstAt": 1790117766964,
+    "lastAt": 1790462917226
+  },
+  {
+    "model": "claude-sonnet",
+    "cliModelId": "claude-sonnet-5",
+    "calls": 1,
+    "firstAt": 1790193239072,
+    "lastAt": 1790193239072
+  }
+]

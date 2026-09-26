@@ -73,25 +73,25 @@ Capitoline targets **any Debian or Ubuntu host**: a VM on Nutanix AHV, a Proxmox
 
 Every request is a whole CLI process run by the `runner` user, so what a host must hold is the number of runs that can be in flight at once times what one run costs. `providers.<id>.concurrency` caps the first per CLI; the second is measured. Concurrency is a question of the host's capacity and not of the subscriptions: runs in parallel spend the same quota as the same runs one after another, only sooner.
 
-**What one run costs**, measured 2026-09-23 on the owner's host with `scripts/measure-cli-resources.py`, which sums each run's whole process tree (a CLI's helpers are part of its cost — Codex runs as a Node wrapper of about 36 MB around a native binary of about 78 MB). Light load: one-line questions and ~800-word answers at high reasoning, one image. The council runs of 25 September, the heaviest load the gateway produces, replace these figures.
+**What one run costs**, measured on the owner's host with `scripts/measure-cli-resources.py`, which sums each run's whole process tree (a CLI's helpers are part of its cost — Codex runs as a Node wrapper of about 36 MB around a native binary of about 78 MB). Two loads: light, on 2026-09-23 (one-line questions, ~800-word answers at high reasoning, one image), and the heaviest the gateway produces, on 2026-09-27 — fourteen council deliberations back to back, 93 CLI runs, the three CLIs answering and ranking in parallel. The peaks are the second load's, except Codex's, which was highest generating an image.
 
 | CLI (version) | Peak memory, one run | CPU per run | Wall time per run | `memory_mb` |
 |---|---|---|---|---|
-| `claude` (2.1.280) | 191–212 MB | 1.1–2.1 s | 3–27 s | 250 |
-| `codex` (0.156.0) | 112–114 MB; 147 MB generating an image | 0.3–0.5 s | 6–41 s | 150 |
-| `agy` (1.2.9) | 214–240 MB | 0.5–4.6 s | 10–69 s | 250 |
+| `claude` (2.1.280) | 191–214 MB | 1.1–2.1 s | 3–27 s | 250 |
+| `codex` (0.156.0) | 112–118 MB; 147 MB generating an image | 0.3–0.5 s | 6–41 s | 150 |
+| `agy` (1.2.9) | 214–256 MB | 0.5–5.3 s | 7–86 s | 300 |
 
-With no CLI running the host uses about 140 MB: the gateway (~90 MB), `cloudflared` (~30 MB) and the runner's resident services — its systemd instance and the keyring Antigravity needs (~25 MB together). That is `server.memory_mb`, 150.
+With no CLI running the host uses about 140 MB: the gateway (~90 MB idle, 101 MB at its peak through the fourteen deliberations), `cloudflared` (~30 MB) and the runner's resident services — its systemd instance and the keyring Antigravity needs (~25 MB together). That is `server.memory_mb`, 150.
 
 **Memory** is the constraint. The worst case is every slot busy at once:
 
 `RAM ≥ server.memory_mb + Σ over providers (concurrency × memory_mb)`
 
-With ten runs per CLI that is 150 + 10 × (250 + 150 + 250) = 6,650 MB, so the shipped configuration wants an **8 GB** host: the remainder is the kernel, the page cache the CLIs' binaries are read from, and room for a CLI update that grows. Swap is not headroom — a CLI paged out mid-answer is a timeout. Past the limit the kernel kills a process, and the client sees a CLI that crashed. The gateway does this arithmetic at startup (`src/sizing.ts`) against the memory it can actually use — the smallest cgroup `memory.max` above it, else the machine's total, which in an LXC container is the container's — and logs a warning when the configuration does not fit. A warning and not a refusal: every slot of every provider busy at the same moment is a worst case an operator may decide to accept, but not one to be surprised by.
+With ten runs per CLI that is 150 + 10 × (250 + 150 + 300) = 7,150 MB, so the shipped configuration wants an **8 GB** host: the remainder is the kernel, the page cache the CLIs' binaries are read from, and room for a CLI update that grows. Swap is not headroom — a CLI paged out mid-answer is a timeout. Past the limit the kernel kills a process, and the client sees a CLI that crashed. The gateway does this arithmetic at startup (`src/sizing.ts`) against the memory it can actually use — the smallest cgroup `memory.max` above it, else the machine's total, which in an LXC container is the container's — and logs a warning when the configuration does not fit. A warning and not a refusal: every slot of every provider busy at the same moment is a worst case an operator may decide to accept, but not one to be surprised by.
 
 **CPU** is not the constraint. A run spends most of its life waiting on the provider's servers: over its whole duration it uses between a hundredth and a tenth of a core. The cost is at start-up, when a Node CLI loads — a short `claude` run spends 1.1 s of CPU in 2.8 s — so thirty runs starting in the same second would queue on two cores for a few seconds, and 4 vCPU keep that out of the latency.
 
-**Disk** does not grow with load. A run's sandbox directory stays under 1 MB and is removed after it; the CLIs' own session state in the runner's home grew by 0.3 MB over ten runs (Codex runs `--ephemeral`). What takes space is the CLIs themselves, about 1 GB in the runner's home.
+**Disk** does not grow with load. A run's sandbox directory stays under 1 MB and is removed after it; the CLIs' own session state in the runner's home grew by 0.3 MB over ten runs and by 4.8 MB over the 93 runs of the council load (Codex runs `--ephemeral`; the growth is Claude's and Antigravity's session logs, about 50 KB a run). What takes space is the CLIs themselves, about 1 GB in the runner's home.
 
 **When to measure again**: after every CLI update (`docs/update-clis.md`), since a new version can grow, and whenever a provider is added. The figures and `memory_mb` are configuration because they change with the CLIs, not with the gateway.
 

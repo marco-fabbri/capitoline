@@ -11,20 +11,20 @@ describe("sizing", () => {
 
   it("adds every provider's slots at their measured peak to what the idle host uses", () => {
     const s = sizing(cfg, 8192);
-    // 150 + 10 × 250 (claude) + 10 × 150 (codex) + 10 × 250 (antigravity):
+    // 150 + 10 × 250 (claude) + 10 × 150 (codex) + 10 × 300 (antigravity):
     // the worked example of §4.1, recomputed from the shipped file.
-    expect(s.providers).toEqual({ claude: 2500, codex: 1500, antigravity: 2500 });
-    expect(s.requiredMb).toBe(6650);
+    expect(s.providers).toEqual({ claude: 2500, codex: 1500, antigravity: 3000 });
+    expect(s.requiredMb).toBe(7150);
     expect(s.fits).toBe(true);
   });
 
   it("says when the configuration does not fit, as on a 4 GB host at ten runs per CLI", () => {
-    expect(sizing(cfg, 4096)).toMatchObject({ requiredMb: 6650, availableMb: 4096, fits: false });
+    expect(sizing(cfg, 4096)).toMatchObject({ requiredMb: 7150, availableMb: 4096, fits: false });
   });
 
   it("counts the CLIs alone when the idle host's share is not declared", () => {
     const undeclared = { ...cfg, server: { ...cfg.server, memory_mb: 0 } };
-    expect(sizing(undeclared, 8192).requiredMb).toBe(6500);
+    expect(sizing(undeclared, 8192).requiredMb).toBe(7000);
   });
 });
 

@@ -21,7 +21,7 @@ internet, no inbound ports.
 The memory is what the shipped concurrency needs — ten runs per CLI, each a
 whole CLI process — and not a round number: design §4.1 has the measured cost
 of one run and the formula, `server.memory_mb + Σ concurrency × memory_mb`,
-6,650 MB for the shipped file. A smaller host works with lower `concurrency`
+7,150 MB for the shipped file. A smaller host works with lower `concurrency`
 in the overlay; the gateway checks the arithmetic at startup and logs
 `sizing: the configured concurrency does not fit in memory` when it does not
 hold, rather than let the kernel find out under load. Where the variants

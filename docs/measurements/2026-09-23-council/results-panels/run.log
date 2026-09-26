@@ -1,0 +1,13 @@
+capitoline  rf2-node-failure  78s  calls=9  tokens=94549  judge=claude-opus
+capitoline-fast  rf2-node-failure  38s  calls=5  tokens=44435  judge=claude-opus
+capitoline  subnet-27  39s  calls=9  tokens=88490  judge=claude-opus
+capitoline-fast  subnet-27  21s  calls=5  tokens=42821  judge=claude-opus
+capitoline  tcp-keepalive  79s  calls=9  tokens=98522  judge=claude-opus
+capitoline-fast  tcp-keepalive  34s  calls=5  tokens=46450  judge=claude-opus
+capitoline  ipv4-regex  125s  HTTP 524  
+capitoline-fast  ipv4-regex  64s  calls=5  tokens=50818  judge=claude-opus
+capitoline  ec-backup-6-nodes  62s  calls=9  tokens=95520  judge=claude-opus
+capitoline-fast  ec-backup-6-nodes  40s  calls=5  tokens=46413  judge=claude-opus
+capitoline  rf3-min-nodes  60s  calls=9  tokens=95934  judge=claude-opus
+capitoline-fast  rf3-min-nodes  36s  calls=5  tokens=46451  judge=claude-opus
+capitoline  ipv4-regex  118s  calls=9  tokens=104894  judge=claude-opus
