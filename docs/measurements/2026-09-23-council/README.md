@@ -247,7 +247,8 @@ the repeat's line are the record of it.
 
 Scored against `questions.json` as registered: `ipv4-regex`, `subnet-27` and
 `tcp-keepalive` by `score.py`, the three Nutanix questions by reading against
-the registered truth, and **marked for the owner's review**. Every synthesis
+the registered truth and its source (reviewed against the documentation on
+2026-09-27, below). Every synthesis
 was read whole, and every claim no member made was classified by the
 amendment above; `score.py`'s candidate list was the starting point and not
 the verdict.
@@ -258,7 +259,7 @@ the verdict.
 | `subnet-27` | correct | 0 / 0 / 0 | correct | 0 / 0 / 0 |
 | `tcp-keepalive` | correct | 2 / 0 / 0 | correct | 1 / 0 / 0 |
 | `ipv4-regex` | correct | 1 / 0 / 0 | correct | 2 / 1 / 0 |
-| `ec-backup-6-nodes` | correct | 0 / 0 / 0, plus one claim for review | correct | 1 / 0 / 0 |
+| `ec-backup-6-nodes` | correct | 0 / 1 (unverifiable, see below) / 0 | correct | 1 / 0 / 0 |
 | `rf3-min-nodes` | correct | 0 / 0 / 0 | correct | 1 / 0 / 0 |
 
 All 24 answers of the three mechanically scored questions were correct too,
@@ -273,12 +274,17 @@ in both councils (`score.py`).
 - `capitoline`, `ipv4-regex`: "rejects `1.2.3.4.5`" — follows from the
   pattern the members gave. Derived.
 - `capitoline`, `ec-backup-6-nodes`: "encoded data can revert to RF2 if node
-  loss leaves too few nodes for the stripe". No member said it and the
-  registered source does not state it in those words; whether it is correct
-  is the owner's call, and it is the one claim of the twelve syntheses this
-  reading could not settle. It is listed apart rather than forced into a
-  class. It changes nothing below: under either class the two councils tie
-  on the criterion.
+  loss leaves too few nodes for the stripe". No member said it, and no
+  reachable source says it either: the registered chapter states only that
+  the strip size is chosen from the cluster size and that one node more than
+  the strip is recommended for rebuilds, and the public erasure-coding pages
+  say nothing about what happens to existing strips when nodes are lost. On
+  the question's own cluster the case does not even arise: a 4/1 strip needs
+  five distinct nodes and six less one is five. Counted as **unsourced**, in
+  the invented column, because the strict convention applies when a claim
+  cannot be traced; not counted as wrong, because nothing shows it is. It is
+  the one claim of the twelve syntheses the documentation could not settle,
+  and it changes nothing below: the criterion counts unsourced wrong claims.
 - `capitoline-fast`, `tcp-keepalive`: "the ninth probe goes out at 7800 s".
   Derived. The "some sources give 7200 + 10 × 75" remark, which the candidate
   list flagged, is a member's ("10 times 75", in words).
@@ -311,6 +317,38 @@ last on five of six. With every answer correct, the order is about
 presentation, as the ladder's `ipv4-regex` run had already shown, and the
 synthesis was correct whichever answer led.
 
+### The Nutanix syntheses against the documentation
+
+Reviewed 2026-09-27 against the registered chapters of the Nutanix Bible
+(`questions.json`, `sources`), with two community pages for a figure the
+Bible states only in part.
+
+- **`rf2-node-failure`, both syntheses correct.** Every claim is in the
+  registered chapter: a Curator scan finds the data the failed node held and
+  "all nodes / CVMs / disks will participate in the re-replication", the
+  rebuild starts immediately, VM HA restarts the failed node's VMs, the
+  rebuild needs the survivors' free capacity ("resilient capacity"), and
+  three nodes is the floor for FT1 — "the 3-block requirement is due to
+  ensure quorum" — so a two-node remainder cannot take another loss. Neither
+  synthesis says both replicas survive, the registered disqualifier.
+- **`rf3-min-nodes`, both syntheses correct.** "For RF3, a minimum of 5
+  nodes is required since metadata will be RF5" is the chapter's own
+  sentence, and its table puts FT2 at five nodes. The five Zookeeper
+  instances both syntheses cite are not in the chapter; Nutanix's community
+  documentation states it ("cluster keeps 5 copies of Metadata and Zookeeper"
+  under redundancy factor 3), as it does that a cluster at redundancy factor
+  3 hosts containers at RF2 or RF3, which is the fast synthesis's "RF3 must
+  be enabled at the cluster level first". Neither says three or four.
+- **`ec-backup-6-nodes`, both syntheses correct.** The default 4/1 strip for
+  RF2-like availability, 1.25× against 2×, the post-process encoding by
+  Curator of write-cold data, the decode cost on a failure, the unsuitability
+  for overwrite-heavy data, and "at least 1 more node than the combined strip
+  size to allow for rebuilding" — which is the fast synthesis's "a spare node
+  remains" — are all the chapter's. Its strip table gives six nodes 4/1 at
+  FT1, so neither synthesis's figures are wrong, and neither calls EC-X
+  inline or six nodes too few, the registered disqualifiers. The one claim
+  the chapter does not cover is the "revert to RF2" remark above.
+
 ### The reading, by the criterion registered above
 
 - Correct syntheses: `capitoline` 6 of 6, `capitoline-fast` 6 of 6. Equal.
@@ -320,10 +358,10 @@ synthesis was correct whichever answer led.
 rule written before the runs, `capitoline-fast` is the better everyday
 council: the same six correct syntheses at 30 calls instead of 63, at half
 the tokens and about half the wall time, and it was the one shape that never
-touched the tunnel's 100 s edge. The one difference outside the criterion —
-one unsourced-correct remark in a fast synthesis against none in the ranked
-ones — is a difference of one on six questions, noted and not acted on, as
-the criterion says.
+touched the tunnel's 100 s edge. The differences outside the criterion — one
+unsourced-correct remark in a fast synthesis, one unsourced and unverifiable
+remark in a ranked one — are one each, noted and not acted on, as the
+criterion says.
 
 What this does not say: that the ranking is worthless. Six questions is a
 small sample, all six had four correct members, and the failure the ranking
