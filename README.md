@@ -37,6 +37,8 @@ Connecting another application of your own: `docs/clients.md`, which covers the 
       -d '{"prompt":"a red fox in the snow, 16:9"}' | jq -r '.data[0].b64_json' | base64 -d > fox.jpg
     curl -N http://127.0.0.1:8080/v1/chat/completions -H 'content-type: application/json' \
       -d '{"model":"capitoline","stream":true,"messages":[{"role":"user","content":"Is a retry after a refusal worth one more call?"}]}'
+    curl -N http://127.0.0.1:8080/v1/chat/completions -H 'content-type: application/json' \
+      -d '{"model":"capitoline","reasoning_effort":"low","stream":true,"messages":[{"role":"user","content":"Same question, five calls: no peer ranking."}]}'
 
 `GET /v1/usage` answers two questions: `.callers` is who spent the last day, and `.models` is which real model served each gateway name over the last week. The second exists because the configuration names CLI aliases rather than dated ids — `opus` meant Opus 5 until 2026-09-22 and Opus 5.5 after it, with nothing here changed — so two rows under one name is an alias that moved, and without them every measurement would be undated underneath.
 
