@@ -10,7 +10,7 @@ import { buildProviders } from "./providers/index.js";
 import type { Provider } from "./providers/adapter.js";
 import { createRunner } from "./runner/runner.js";
 import { hostMemoryMb, sizing } from "./sizing.js";
-import { createAccessMiddleware } from "./server/access.js";
+import { createAuthMiddleware } from "./server/access.js";
 import { createApp } from "./server/app.js";
 import { UsageStore } from "./usage/store.js";
 
@@ -110,10 +110,13 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     log.info({ council: name, seats: councilCfg.seats.map((s) => s.family), judge: councilCfg.judge.family }, "council registered");
   }
 
-  const access = cfg.server.access.team_domain
-    ? createAccessMiddleware({ teamDomain: cfg.server.access.team_domain, audience: cfg.server.access.audience }, log.child({ mod: "access" }))
-    : undefined;
-  if (!access) log.warn("Cloudflare Access verification is disabled (server.access.team_domain is empty)");
+  // The two identities (design §4): the gateway's own keys, always, and the
+  // Cloudflare Access JWT when a team domain is configured. With neither a
+  // key issued nor Access in front the gateway is open, and says so.
+  const accessOn = cfg.server.access.team_domain !== "";
+  const access = createAuthMiddleware({ access: accessOn ? { teamDomain: cfg.server.access.team_domain, audience: cfg.server.access.audience } : undefined, keys: usage }, log.child({ mod: "access" }));
+  if (!accessOn && !usage.hasKeys()) log.warn("identity: open — Cloudflare Access is not configured (server.access.team_domain is empty) and no API key exists; the first key closes it");
+  else log.info({ access: accessOn, keys: usage.hasKeys(), admins: cfg.server.access.admins.length }, "identity");
 
   // The port is bound first and the requests are gated, never the other way
   // round: a real health check spawns the CLI with a deadline of a minute, and
@@ -124,7 +127,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // reports available, so the app answers 503 + Retry-After to everything but
   // /health (see createApp).
   let ready = false;
-  const app = createApp(core, { log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })), ready: () => ready, callerNames: cfg.server.access.callers });
+  const app = createApp(core, { log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins } });
   const port = overrides.port ?? cfg.server.port;
 
   // One owner for the sqlite handle: whatever fails between here and the end of

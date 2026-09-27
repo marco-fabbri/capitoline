@@ -710,7 +710,28 @@ dashboard. `server.access.callers` maps an id to a name where `/v1/usage`
 reports it, not where the row is written: a row stores the id Cloudflare
 sent, so a token mapped an hour late reads back all the way, and renaming an
 application renames its past with it. An id the overlay has not named is
-reported as itself, which is unreadable and still correct.
+reported as itself, which is unreadable and still correct. The same binding
+can be made at run time, without a restart, by the admin API
+(`PUT /v1/admin/callers/<client id>`, `docs/clients.md` §2b), and a binding
+made there wins over the overlay's.
+
+**The gateway's own keys.** Beside the Access JWT the gateway accepts keys it
+issued itself, sent as `Authorization: Bearer cap_…` (design §4): the
+identity that works with no Cloudflare in front, and the one `docs/clients.md`
+recommends for applications behind the tunnel too. Keys live hashed in the
+usage database, are issued and revoked through `/v1/admin/keys` by the
+callers named in `server.access.admins` (an email from Access, a bound
+service token's name, or a key's own name — put the owner's email there), and
+the first one on a host with no admin yet is made on the host:
+
+```sh
+cd /var/lib/capitoline/app && sudo -u capitoline env CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml npm run keys -- create <name>
+```
+
+With `server.access.team_domain` empty the gateway is open until the first
+key exists and closed from then on; the startup log line `identity` says
+which. With Access configured a request that carries one of our keys is
+judged on the key alone.
 `GET /v1/usage` reports the last 24 hours grouped by it, which is how two
 applications sharing one gateway are told apart. It is deliberately not on
 `/health`: that route is the exemption above, readable by anyone who can open
@@ -1108,3 +1129,9 @@ the host overlay changes.)
 Expected: three lines with status `200`, a short answer and a token count,
 then an `image` line with `200` and the size of the collected picture; exit
 code 0. Run it again after every CLI update (`docs/update-clis.md`).
+
+A gateway that is not behind Access, or a check of the key path behind it,
+uses a key instead: make one (§9, "the gateway's own keys") and run
+`scripts/smoke.sh` with `CAPITOLINE_API_KEY=cap_…` in the environment; revoke
+it after. Through the tunnel the Access headers are still needed at the edge,
+so both go together.

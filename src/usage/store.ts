@@ -1,8 +1,9 @@
+import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import type { ModelKind } from "../config.js";
-import type { ErrorKind, RateLimitWindow } from "../core/types.js";
+import { CapitolineError, type ErrorKind, type RateLimitWindow } from "../core/types.js";
 
 export interface CallRecord {
   provider: string; model: string; inputTokens: number; outputTokens: number; durationMs: number;
@@ -42,6 +43,11 @@ export type WindowName = "five_hour" | "seven_day";
 export interface ImageWindow { used: number; windowStartedAt: number | null }
 /** A pause held across restarts. `model` is null for a pause that covers the whole provider. */
 export interface PauseRow { provider: string; model: string | null; until: number; strikes: number }
+/** A key as the admin API lists it: never the hash, never the key. */
+export interface ApiKeyInfo { name: string; createdAt: number; createdBy: string | null; revokedAt: number | null; lastUsedAt: number | null }
+/** Lower case, digits and dashes, 2-64 characters: a name that is also safe in a header, a log line and a URL. */
+export const KEY_NAME = /^[a-z0-9][a-z0-9-]{1,63}$/;
+const hashKey = (key: string): string => createHash("sha256").update(key).digest("hex");
 
 /** The five-hour window: the provider's short image quota and the budget windows share it. */
 export const H5 = 5 * 3600_000;
@@ -56,6 +62,8 @@ export class UsageStore {
     record: StatementSync; imageWindow: StatementSync; totals: StatementSync; setWindow: StatementSync; windows: StatementSync;
     callers: StatementSync; setPause: StatementSync; clearPause: StatementSync; prunePauses: StatementSync; pauses: StatementSync;
     deliberation: StatementSync; identities: StatementSync;
+    insertKey: StatementSync; keyByHash: StatementSync; touchKey: StatementSync; revokeKey: StatementSync; keys: StatementSync; liveKeys: StatementSync;
+    nameCaller: StatementSync; callerNames: StatementSync;
   };
   private closed = false;
   constructor(path: string) {
@@ -95,6 +103,17 @@ export class UsageStore {
       -- scope a value the index can compare, and gives setPause() a conflict
       -- target so one atomic upsert replaces the delete-then-insert pair.
       CREATE UNIQUE INDEX IF NOT EXISTS pauses_scope ON pauses(provider, ifnull(model, ''));
+      -- The gateway's own identity (design §4, "two identities"): a key it
+      -- issued, kept as the sha256 of the key and never the key, which is
+      -- shown once at creation. A revoked key stays, so the usage rows that
+      -- carry its name keep their meaning; revoked_at is what refuses it.
+      CREATE TABLE IF NOT EXISTS api_keys (
+        name TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, created_by TEXT,
+        revoked_at INTEGER, last_used_at INTEGER);
+      -- What to call a caller Cloudflare identifies by a client id: the
+      -- runtime half of server.access.callers, written by the admin API, read
+      -- by /v1/usage at presentation time exactly as the configured map is.
+      CREATE TABLE IF NOT EXISTS callers (id TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at INTEGER NOT NULL);
     `);
     // A database written before image models existed has no `kind` column, and
     // CREATE TABLE IF NOT EXISTS leaves it alone: add it here, with the same
@@ -154,6 +173,14 @@ export class UsageStore {
       // and add a line to every listing for it. `calls_ts` covers the bound.
       identities: this.db.prepare(`SELECT model, cli_model_id AS id, COUNT(*) AS calls, MIN(ts) AS first_at, MAX(ts) AS last_at
         FROM calls WHERE ts > ? AND cli_model_id IS NOT NULL GROUP BY model, cli_model_id ORDER BY model, last_at`),
+      insertKey: this.db.prepare(`INSERT INTO api_keys (name, hash, created_at, created_by) VALUES (?, ?, ?, ?)`),
+      keyByHash: this.db.prepare(`SELECT name, revoked_at FROM api_keys WHERE hash = ?`),
+      touchKey: this.db.prepare(`UPDATE api_keys SET last_used_at = ? WHERE name = ?`),
+      revokeKey: this.db.prepare(`UPDATE api_keys SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL`),
+      keys: this.db.prepare(`SELECT name, created_at, created_by, revoked_at, last_used_at FROM api_keys ORDER BY created_at, name`),
+      liveKeys: this.db.prepare(`SELECT COUNT(*) AS n FROM api_keys WHERE revoked_at IS NULL`),
+      nameCaller: this.db.prepare(`INSERT INTO callers (id, name, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`),
+      callerNames: this.db.prepare(`SELECT id, name FROM callers ORDER BY id`),
     };
   }
   record(c: CallRecord): void {
@@ -240,6 +267,57 @@ export class UsageStore {
 
   // SIGTERM followed by SIGINT closes the store twice, and node:sqlite throws
   // on the second close: the flag keeps a clean shutdown clean.
+  // ---- The gateway's own identity: keys it issued, and names for callers.
+
+  /**
+   * A new key, returned in the clear exactly once. `cap_` and 32 random
+   * bytes; what is stored is the sha256 of the whole string, so a database
+   * read back from a backup yields nothing a client could send.
+   */
+  createKey(name: string, createdBy: string | null, now = Date.now()): { name: string; key: string; createdAt: number } {
+    if (!KEY_NAME.test(name)) throw new CapitolineError("bad_request", `key name "${name}" must match ${KEY_NAME}`);
+    const key = `cap_${randomBytes(32).toString("base64url")}`;
+    try {
+      this.stmts.insertKey.run(name, hashKey(key), now, createdBy);
+    } catch (e) {
+      if (String(e).includes("UNIQUE")) throw new CapitolineError("bad_request", `key "${name}" already exists`);
+      throw e;
+    }
+    return { name, key, createdAt: now };
+  }
+
+  /** The key's name when it is one of ours and not revoked; null otherwise. Touches last_used_at. */
+  authenticateKey(key: string, now = Date.now()): { name: string } | null {
+    if (!key.startsWith("cap_")) return null;
+    const row = this.stmts.keyByHash.get(hashKey(key)) as { name: string; revoked_at: number | null } | undefined;
+    if (!row || row.revoked_at !== null) return null;
+    this.stmts.touchKey.run(now, row.name);
+    return { name: row.name };
+  }
+
+  /** Whether any live key exists: with none and no Access the gateway is open (design §4). */
+  hasKeys(): boolean {
+    return Number((this.stmts.liveKeys.get() as { n: number }).n) > 0;
+  }
+
+  listKeys(): ApiKeyInfo[] {
+    const rows = this.stmts.keys.all() as { name: string; created_at: number; created_by: string | null; revoked_at: number | null; last_used_at: number | null }[];
+    return rows.map((r) => ({ name: r.name, createdAt: Number(r.created_at), createdBy: r.created_by, revokedAt: r.revoked_at === null ? null : Number(r.revoked_at), lastUsedAt: r.last_used_at === null ? null : Number(r.last_used_at) }));
+  }
+
+  /** True when the key existed and was live; a second revoke, or an unknown name, is false. */
+  revokeKey(name: string, now = Date.now()): boolean {
+    return Number(this.stmts.revokeKey.run(now, name).changes) > 0;
+  }
+
+  nameCaller(id: string, name: string, now = Date.now()): void {
+    this.stmts.nameCaller.run(id, name, now);
+  }
+
+  callerNames(): Record<string, string> {
+    return Object.fromEntries((this.stmts.callerNames.all() as { id: string; name: string }[]).map((r) => [r.id, r.name]));
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;

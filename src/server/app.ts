@@ -3,6 +3,7 @@ import type { Core } from "../core/core.js";
 import { CapitolineError, type ProviderEvent, type Usage } from "../core/types.js";
 import type { Logger } from "../log.js";
 import { callerOf } from "./access.js";
+import { createAdminRouter, type AdminStore } from "./admin.js";
 import { convertImageRequest, imageResponse, type ImageEvent } from "./images.js";
 import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, ignoredHeader, sseChunk, type Converted } from "./openai.js";
 import type { Deliberation } from "../council/council.js";
@@ -39,7 +40,9 @@ function sendError(res: Response, e: unknown, log: Logger) {
 
 export function createApp(core: Core, opts: { access?: RequestHandler; log: Logger; mcp?: RequestHandler; ready?: () => boolean;
   /** What to call each service token in /v1/usage, by its client id (server.access.callers). */
-  callerNames?: Record<string, string> }): express.Express {
+  callerNames?: Record<string, string>;
+  /** The gateway's own keys and caller names, and who may manage them: mounts /v1/admin and names /v1/usage's rows. */
+  identity?: { store: AdminStore; admins: string[] } }): express.Express {
   const app = express();
   app.disable("x-powered-by");
   // Access runs first, app-wide, so an unauthenticated caller gets a 401 before
@@ -179,13 +182,18 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // spent it", the second "what actually answered". They differ because the
   // second is read for a change — a gateway name whose model moved shows two
   // rows — and a day is too short to catch one.
+  if (opts.identity) app.use("/v1/admin", createAdminRouter(opts.identity.store, opts.identity.admins, opts.log));
+
   app.get("/v1/usage", (_req, res) => {
     // Named here and not when the row was written: a row stores the client id
     // Cloudflare sent, which is stable, and the name is presentation. So a
     // token mapped an hour late is readable all the way back, and renaming an
     // application renames its past with it. An id nobody named is reported as
     // itself, which is unreadable and still correct.
-    const named = core.callers().map((c) => ({ ...c, caller: (c.caller !== null && opts.callerNames?.[c.caller]) || c.caller }));
+    // The runtime registry (admin API) first, the configured map second: a
+    // name given from the API is the more recent decision.
+    const names = { ...(opts.callerNames ?? {}), ...(opts.identity?.store.callerNames() ?? {}) };
+    const named = core.callers().map((c) => ({ ...c, caller: (c.caller !== null && names[c.caller]) || c.caller }));
     res.json({ callers: named, models: core.modelIdentities() });
   });
 

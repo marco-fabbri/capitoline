@@ -194,6 +194,14 @@ export const ConfigSchema = z
            * column for a user token.
            */
           callers: z.record(z.string().min(1), z.string().min(1)).default({}),
+          /**
+           * Who may use `/v1/admin`: caller names as `callerOf` derives them —
+           * an email from Access, a service token's name once it is bound, a
+           * key's own name. Host-specific, so the overlay sets it. Empty means
+           * the admin API answers 403 to everyone, and the keys CLI is the way
+           * in (docs/deploy.md §8).
+           */
+          admins: z.array(z.string().min(1)).default([]),
         }).strict().default({}),
         queue: z.object({ max_wait_s: z.number().int().min(1).default(120) }).strict().default({}),
         // What the host uses with no CLI running — the gateway, the tunnel,

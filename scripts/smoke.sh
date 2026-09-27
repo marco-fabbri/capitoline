@@ -10,6 +10,11 @@ if [[ -n "${CF_ACCESS_CLIENT_ID:-}" || -n "${CF_ACCESS_CLIENT_SECRET:-}" ]]; the
   [[ -n "${CF_ACCESS_CLIENT_ID:-}" && -n "${CF_ACCESS_CLIENT_SECRET:-}" ]] || { echo "smoke: set both CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET" >&2; exit 2; }
   HDR=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
 fi
+# A key the gateway issued (docs/clients.md §2a): the identity that works with
+# no Access in front, and, through the tunnel, together with the headers above.
+if [[ -n "${CAPITOLINE_API_KEY:-}" ]]; then
+  HDR+=(-H "Authorization: Bearer $CAPITOLINE_API_KEY")
+fi
 MODELS=$(yq -r '.providers[].health_model' "$CFG" 2>/dev/null || grep -E '^\s+health_model:' "$CFG" | awk '{print $2}' || true)
 [[ -n "${MODELS// /}" ]] || { echo "smoke: no health_model found in $CFG" >&2; exit 1; }
 fail=0

@@ -367,3 +367,43 @@ describe("UsageStore", () => {
     }
   });
 });
+
+describe("UsageStore: the gateway's own keys and caller names", () => {
+  it("issues a key once, stores only its hash, and authenticates it by name", () => {
+    const s = new UsageStore(":memory:");
+    const now = 1_000_000_000_000;
+    const { key, name, createdAt } = s.createKey("app-two", "owner@example.com", now);
+    expect(name).toBe("app-two");
+    expect(createdAt).toBe(now);
+    expect(key).toMatch(/^cap_[A-Za-z0-9_-]{43}$/);
+    expect(s.authenticateKey(key, now + 5)).toEqual({ name: "app-two" });
+    expect(s.authenticateKey("cap_" + "x".repeat(43))).toBeNull();
+    expect(s.authenticateKey("not-a-key")).toBeNull();
+    // The listing carries what an operator needs and never the secret.
+    expect(s.listKeys()).toEqual([{ name: "app-two", createdAt: now, createdBy: "owner@example.com", revokedAt: null, lastUsedAt: now + 5 }]);
+    expect(JSON.stringify(s.listKeys())).not.toContain(key.slice(4, 20));
+    expect(s.hasKeys()).toBe(true);
+    s.close();
+  });
+
+  it("refuses a duplicate or malformed name, and revokes without deleting", () => {
+    const s = new UsageStore(":memory:");
+    s.createKey("app", null);
+    expect(() => s.createKey("app", null)).toThrow(/already exists/);
+    for (const bad of ["App", "a", "-x", "x".repeat(65), "sp ace"]) expect(() => s.createKey(bad, null), bad).toThrow(/must match/);
+    expect(s.revokeKey("app", 42)).toBe(true);
+    expect(s.revokeKey("app", 43)).toBe(false);
+    expect(s.revokeKey("ghost")).toBe(false);
+    expect(s.listKeys()[0]).toMatchObject({ name: "app", revokedAt: 42 });
+    expect(s.hasKeys()).toBe(false);
+    s.close();
+  });
+
+  it("names a caller, and renames it in place", () => {
+    const s = new UsageStore(":memory:");
+    s.nameCaller("0000000000000000000000000000000a.access", "app-one");
+    s.nameCaller("0000000000000000000000000000000a.access", "app-one");
+    expect(s.callerNames()).toEqual({ "0000000000000000000000000000000a.access": "app-one" });
+    s.close();
+  });
+});

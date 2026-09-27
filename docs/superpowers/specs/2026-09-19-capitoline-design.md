@@ -65,7 +65,7 @@ Capitoline targets **any Debian or Ubuntu host**: a VM on Nutanix AHV, a Proxmox
 - **Two natures, two deployment shapes.** With the subscription CLIs (this spec) the deployment needs persistence: refreshed credentials on disk, a keyring for Antigravity, two Linux users. That is a host, or a single-replica StatefulSet with a persistent volume, one container with both users (`allowPrivilegeEscalation` on, because sudo is one), `cloudflared` as a sidecar. With self-hosted API providers only (an OpenAI-compatible adapter for the platform, Ollama, vLLM; phase 2 backlog) the process is stateless and runs anywhere, including Kubernetes/NKP next to the platform. Heroku-style ephemeral platforms fit only the second shape. Pay-per-use public APIs are excluded by the owner's rule.
 - **Cloudflare Tunnel** (`cloudflared` as a service in the LXC) to `localhost:8080`. No inbound ports open. The tunnel creates the DNS record `api.example.com` in the zone already on Cloudflare.
 - **Cloudflare Access**, free Zero Trust plan. Two policies: email login for the owner (browser), service token for apps and for Claude Code.
-- **The gateway verifies the Access JWT** on every request (`Cf-Access-Jwt-Assertion`), before the body is read. Anyone reaching port 8080 from inside the Proxmox network without going through Cloudflare is rejected. The one deliberate exemption is `GET /health`, which is unauthenticated so that local monitoring on 127.0.0.1 works without a service token; it only reports cached state, never reaches a CLI and names no caller. The per-caller usage breakdown is `GET /v1/usage`, behind Access, because on a host that also runs the `runner` user "anyone who can reach 127.0.0.1:8080" is not the owner alone. On the corporate Proxmox the network is not the owner's: twenty lines of verification are worth the guarantee.
+- **Two identities, and the gateway verifies both before the body is read** (2026-09-27; until then the Access JWT was the only one). A key the gateway issued itself, `Authorization: Bearer cap_…`, stored as its sha256 in the usage database and managed through `/v1/admin/keys` by the callers named in `server.access.admins` (or `npm run keys` on the host, for the first one): the identity that needs no Cloudflare, and the one recommended to applications either way, since the header is the one every OpenAI client sends. And **the Access JWT** (`Cf-Access-Jwt-Assertion`) when a team domain is configured, whose service tokens are bound to a name by `server.access.callers` or at run time by `PUT /v1/admin/callers/<id>`. A request carrying one of our keys is judged on the key alone. With neither Access configured nor a key issued the gateway is open — a developer machine — and the first key closes it; the startup log says which state holds. Anyone reaching port 8080 from inside the Proxmox network without going through Cloudflare is rejected. The one deliberate exemption is `GET /health`, which is unauthenticated so that local monitoring on 127.0.0.1 works without a service token; it only reports cached state, never reaches a CLI and names no caller. The per-caller usage breakdown is `GET /v1/usage`, behind Access, because on a host that also runs the `runner` user "anyone who can reach 127.0.0.1:8080" is not the owner alone. On the corporate Proxmox the network is not the owner's: twenty lines of verification are worth the guarantee.
 - Alternatives evaluated and discarded: Cloudflare Workers (no processes or filesystem), Cloudflare Containers (ephemeral, paid plan, refreshed tokens lost on restart), Oracle Cloud Always Free (valid as plan B), Fly/Railway/Render (free tiers gone or sleeping).
 - Note for reuse by a company: same Tunnel + Access scheme on separate account and zone. Cloudflare's "subdomain setup" (a subdomain as its own zone) is Enterprise only; two-level hosts need Advanced Certificate Manager (10 $/month) or a single-level host.
 
@@ -149,7 +149,9 @@ Response: standard format with `usage` (tokens from the CLI when available) plus
 
 `GET /health`: process and provider state, without consuming subscription (reads the `health` cache). The one unauthenticated route (§4), so it carries nothing that names a caller.
 
-`GET /v1/usage`: the last 24 hours grouped by caller — the email of a user token or the name of a service token — busiest first, the gateway's own health probes excluded. Authenticated like the rest of `/v1`: it is the one report that names people.
+`GET /v1/usage`: the last 24 hours grouped by caller — the email of a user token, the bound name of a service token, or a key's own name — busiest first, the gateway's own health probes excluded. Authenticated like the rest of `/v1`: it is the one report that names people.
+
+`/v1/admin` (2026-09-27), for the callers named in `server.access.admins`, 403 for everyone else: `POST /keys {name}` issues a key and returns it once (201); `GET /keys` lists names, dates and last use, never a hash; `DELETE /keys/:name` revokes without deleting, so usage rows keep their name; `PUT /callers/:id {name}` and `GET /callers` bind and list the names of Cloudflare-identified callers. Nothing in the configuration file is written from here: keys and names are state, and the file stays the source of truth for everything else (§8.5).
 
 ### 6.2 MCP
 
@@ -274,6 +276,8 @@ server:
   access:
     team_domain: <team>.cloudflareaccess.com
     audience: <aud of the Access app>
+    callers: { <client id>: <name> }       # what to call a service token in /v1/usage
+    admins: [<caller name>]                # who may use /v1/admin; never a key itself
 providers:
   <id>:
     binary: <executable>
@@ -424,6 +428,8 @@ The first real deliberation (2026-09-22) cost nine calls and about 90k tokens fo
 | Debian/Ubuntu host + Tunnel | Cloudflare Workers/Containers | no processes / ephemeral |
 | OpenAI-compatible API, subset | custom API | loses Open WebUI, SDKs, LiteLLM |
 | No multi-turn sessions | mapping CLI sessions | not needed by the council; fragile |
+| Cloudflare tokens created from the owner's machine (`scripts/cf-service-token.sh`) | the gateway calling Cloudflare's API itself | a credential that can rewrite who may reach the gateway does not belong on the process facing the internet |
+| Keys as state in the usage database, issued by the admin API | keys in the configuration file | a key is issued and revoked at run time, and a hash in a file that is copied about is a secret in a file that is copied about |
 | Build from scratch, reading Conclave | fork of Conclave | it is a Go TUI without HTTP; single-stage council |
 | MCP over HTTP in the same process | local stdio server | second program without benefits |
 | Declared + verified models | dynamic discovery | only two of three CLIs expose a list; config also carries names and effort mapping |

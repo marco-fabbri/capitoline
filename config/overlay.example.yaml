@@ -32,6 +32,11 @@ server:
     callers:
       "0000000000000000000000000000000a.access": app-one
       "0000000000000000000000000000000b.access": app-two
+    # Who may use /v1/admin (keys and caller names): caller names exactly as
+    # /v1/usage shows them — an email from Access, a name bound above, or a
+    # key's own name. Empty answers 403 to everyone; `npm run keys` on the
+    # host is then the way to make the first key (docs/deploy.md §8).
+    admins: [owner@example.com]
     # Filled in §9, from the Zero Trust dashboard. Both empty disables the JWT
     # verification, which is the only state in which this gateway may be
     # reachable from 127.0.0.1 alone.

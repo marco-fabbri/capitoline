@@ -21,7 +21,10 @@ export interface AccessOptions {
 // was written: the rows app-one wrote in the hour before its id was mapped
 // would have stayed opaque for ever, and renaming an application would leave
 // its past under the old name.
-export interface Identity { email?: string; sub: string; type: "user" | "service"; name?: string }
+export interface Identity { email?: string; sub: string; type: "user" | "service" | "key"; name?: string }
+
+/** What the auth middleware needs from the store: the gateway's own keys (src/usage/store.ts). */
+export interface KeyAuthenticator { authenticateKey(key: string): { name: string } | null; hasKeys(): boolean }
 
 // A caller is written into every usage row, so what a token can put there is
 // bounded here: the longest address an email may have.
@@ -51,7 +54,7 @@ export function callerOf(identity: Partial<Identity> | undefined | null): string
 }
 
 // One body for every refusal, in the spec 8.3 shape, so the two 401 paths cannot drift.
-const DENIED = { error: { message: "missing or invalid Cloudflare Access token", type: "invalid_request_error", code: "unauthorized" } };
+const DENIED = { error: { message: "missing or invalid credentials: an API key (Authorization: Bearer) or a Cloudflare Access token", type: "invalid_request_error", code: "unauthorized" } };
 
 // Cloudflare Access signs with RS256 and publishes ES256 keys too; both are
 // asymmetric. Pinning them here rules out "none" and HMAC confusion by
@@ -82,5 +85,35 @@ export function createAccessMiddleware(opts: AccessOptions, log: Logger): Reques
       log.warn({ err: String(e) }, "access token rejected");
       res.status(401).json(DENIED);
     }
+  };
+}
+
+const BEARER = /^Bearer\s+(\S+)$/i;
+
+/**
+ * The gateway's two identities, in one middleware (design §4): a key it
+ * issued itself, sent as `Authorization: Bearer cap_…` — the header every
+ * OpenAI client already sends — or the Cloudflare Access JWT the edge adds,
+ * when Access is configured. A request that presents one of our keys is
+ * judged on that key alone: a wrong key is refused even if a valid Access
+ * token rides along, since a client sending both has a broken configuration
+ * and should learn it. With no Access configured the gateway is open until
+ * the first key exists (a developer machine), and closed from then on: the
+ * first key is the decision that this gateway has callers to tell apart.
+ */
+export function createAuthMiddleware(opts: { access?: AccessOptions; keys: KeyAuthenticator }, log: Logger): RequestHandler {
+  const access = opts.access ? createAccessMiddleware(opts.access, log) : undefined;
+  return (req, res, next) => {
+    const bearer = BEARER.exec(req.header("authorization") ?? "")?.[1];
+    if (bearer !== undefined && bearer.startsWith("cap_")) {
+      const key = opts.keys.authenticateKey(bearer);
+      if (!key) { log.warn("api key rejected"); res.status(401).json(DENIED); return; }
+      res.locals.identity = { type: "key", name: key.name, sub: `key:${key.name}` } satisfies Identity;
+      next();
+      return;
+    }
+    if (access) { access(req, res, next); return; }
+    if (opts.keys.hasKeys()) { res.status(401).json(DENIED); return; }
+    next();
   };
 }

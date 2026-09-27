@@ -193,7 +193,7 @@ describe("config", () => {
     expect(() => parseConfig(`server: { access: { team_domain: t.cloudflareaccess.com } }\n${base}`)).toThrow(/server\.access\.audience/);
     expect(() => parseConfig(`server: { access: { audience: abc } }\n${base}`)).toThrow(/server\.access\.team_domain/);
     expect(parseConfig(`server: { access: { team_domain: t.cloudflareaccess.com, audience: abc } }\n${base}`).server.access.audience).toBe("abc");
-    expect(parseConfig(base).server.access).toEqual({ team_domain: "", audience: "", callers: {} });
+    expect(parseConfig(base).server.access).toEqual({ team_domain: "", audience: "", callers: {}, admins: [] });
   });
 
   it("rejects an unknown key in any of the objects", () => {
@@ -929,6 +929,7 @@ describe("config/overlay.example.yaml", () => {
     "providers.codex.binary",
     "runner.sandbox_root",
     "runner.user",
+    "server.access.admins",                 // who may use /v1/admin: names, never keys (an array is one leaf)
     "server.access.audience",
     // Two leaves, one per named client id: what to call each service token in
     // the usage breakdown, which Cloudflare's JWT cannot say by itself.
@@ -961,6 +962,7 @@ describe("config/overlay.example.yaml", () => {
     expect(cfg.server.access).toEqual({
       team_domain: "", audience: "",
       callers: { "0000000000000000000000000000000a.access": "app-one", "0000000000000000000000000000000b.access": "app-two" },
+      admins: ["owner@example.com"],
     });
     // The host adds and never replaces: the repository's command line arrives
     // with the pull that changes it, and the host names only its own argument.

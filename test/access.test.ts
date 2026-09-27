@@ -4,7 +4,8 @@ import request from "supertest";
 import { SignJWT, exportJWK, generateKeyPair, createLocalJWKSet } from "jose";
 
 type PrivateKey = Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
-import { callerOf, createAccessMiddleware } from "../src/server/access.js";
+import { callerOf, createAccessMiddleware, createAuthMiddleware } from "../src/server/access.js";
+import { UsageStore } from "../src/usage/store.js";
 import { createLogger } from "../src/log.js";
 
 const team = "example.cloudflareaccess.com", aud = "abc123";
@@ -32,7 +33,7 @@ describe("access middleware", () => {
   it("rejects a missing token with the spec 8.3 error shape", async () => {
     const r = await request(app).get("/x");
     expect(r.status).toBe(401);
-    expect(r.body).toEqual({ error: { message: "missing or invalid Cloudflare Access token", type: "invalid_request_error", code: "unauthorized" } });
+    expect(r.body).toEqual({ error: { message: "missing or invalid credentials: an API key (Authorization: Bearer) or a Cloudflare Access token", type: "invalid_request_error", code: "unauthorized" } });
   });
   it("accepts a valid header token and exposes the identity", async () => {
     const r = await call(await sign({ email: "me@example.com", sub: "u1" }));
@@ -89,5 +90,65 @@ describe("callerOf", () => {
   });
   it("bounds what a token can write into the database", () => {
     expect(callerOf({ email: "x".repeat(500), sub: "" })!.length).toBe(320);
+  });
+});
+
+// The gateway's own identity beside Cloudflare's (design §4): a key it
+// issued, sent as `Authorization: Bearer cap_…`, judged before and apart
+// from the Access JWT, and the rule for a gateway with no Access in front.
+describe("auth middleware: keys and Access together", () => {
+  const withKeys = (opts: { access?: boolean } = {}) => {
+    const store = new UsageStore(":memory:");
+    const a = express();
+    a.use(createAuthMiddleware({ access: opts.access ? { teamDomain: team, audience: aud, jwks } : undefined, keys: store }, createLogger("t")));
+    a.get("/x", (_req, res) => res.json({ who: res.locals.identity ?? null }));
+    return { store, app: a };
+  };
+
+  it("accepts a live key and identifies the caller by the key's name", async () => {
+    const { store, app: a } = withKeys({ access: true });
+    const { key } = store.createKey("app-one", "test");
+    const r = await request(a).get("/x").set("Authorization", `Bearer ${key}`);
+    expect(r.status).toBe(200);
+    expect(r.body.who).toEqual({ type: "key", name: "app-one", sub: "key:app-one" });
+    expect(callerOf(r.body.who)).toBe("app-one");
+  });
+
+  it("refuses a revoked, unknown or malformed key, even beside a valid Access token", async () => {
+    const { store, app: a } = withKeys({ access: true });
+    const { key } = store.createKey("old", "test");
+    store.revokeKey("old");
+    const token = await sign({ email: "a@b.c", sub: "u1" });
+    for (const bearer of [key, "cap_nothing", "cap_"]) {
+      const r = await request(a).get("/x").set("Authorization", `Bearer ${bearer}`).set("Cf-Access-Jwt-Assertion", token);
+      expect(r.status, bearer).toBe(401);
+      expect(r.body.error.code).toBe("unauthorized");
+    }
+    // A bearer that is not one of ours is not a key at all: the Access path
+    // decides, as it would for a request with no Authorization header.
+    const other = await request(a).get("/x").set("Authorization", "Bearer sk-something-else").set("Cf-Access-Jwt-Assertion", token);
+    expect(other.status).toBe(200);
+    expect(other.body.who.email).toBe("a@b.c");
+  });
+
+  it("keeps the Access path unchanged when no key is presented", async () => {
+    const { app: a } = withKeys({ access: true });
+    expect((await request(a).get("/x")).status).toBe(401);
+    const r = await request(a).get("/x").set("Cf-Access-Jwt-Assertion", await sign({ email: "a@b.c", sub: "u1" }));
+    expect(r.status).toBe(200);
+    expect(r.body.who.type).toBe("user");
+  });
+
+  it("is open without Access until the first key exists, and closed from then on", async () => {
+    const { store, app: a } = withKeys();
+    const open = await request(a).get("/x");
+    expect(open.status).toBe(200);
+    expect(open.body.who).toBeNull();
+    const { key } = store.createKey("first", "test");
+    expect((await request(a).get("/x")).status).toBe(401);
+    expect((await request(a).get("/x").set("Authorization", `Bearer ${key}`)).status).toBe(200);
+    // Revoking the last key reopens it: the rule is about live keys.
+    store.revokeKey("first");
+    expect((await request(a).get("/x")).status).toBe(200);
   });
 });

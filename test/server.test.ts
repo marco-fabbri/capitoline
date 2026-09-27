@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 import type { AddressInfo } from "node:net";
 import { createApp } from "../src/server/app.js";
+import { createAuthMiddleware } from "../src/server/access.js";
 import { Core, type Context } from "../src/core/core.js";
 import { UsageStore } from "../src/usage/store.js";
 import { FakeProvider } from "./fake-provider.js";
@@ -916,5 +917,75 @@ describe("access middleware placement", () => {
     const r = await request(app).post("/v1/chat/completions").set("Content-Type", "application/json").send("{not json");
     expect(r.status).toBe(401);
     expect((await request(app).get("/v1/models").set("Cf-Access-Jwt-Assertion", "x")).status).toBe(200);
+  });
+});
+
+// The admin API (design §6.1): the gateway's own keys and the names of its
+// callers, for the callers named in server.access.admins and nobody else.
+describe("/v1/admin", () => {
+  const makeAdmin = (admins: string[]) => {
+    const p = new FakeProvider("claude", ["claude-opus"], OK, 1);
+    const usage = new UsageStore(":memory:");
+    const core = new Core([p], usage, { maxWaitMs: QUEUE_WAIT_MS, budgets: {}, log: createLogger("t") });
+    // The real auth middleware with no Access: a key is the identity, and
+    // until one exists the gateway is open — which is how the first admin
+    // call below gets in, as an anonymous caller who is then refused.
+    const app = createApp(core, { log: createLogger("t"), access: createAuthMiddleware({ keys: usage }, createLogger("t")), identity: { store: usage, admins }, callerNames: { "id.access": "configured" } });
+    return { usage, app };
+  };
+
+  it("refuses anyone not named in admins with 403, and an anonymous caller too", async () => {
+    const { usage, app } = makeAdmin(["boss"]);
+    expect((await request(app).post("/v1/admin/keys").send({ name: "x" })).status).toBe(403);
+    const { key } = usage.createKey("worker", null);
+    const r = await request(app).get("/v1/admin/keys").set("Authorization", `Bearer ${key}`);
+    expect(r.status).toBe(403);
+    expect(r.body.error.code).toBe("forbidden");
+  });
+
+  it("issues, lists and revokes keys as an admin, showing the key exactly once", async () => {
+    const { usage, app } = makeAdmin(["boss"]);
+    const { key: boss } = usage.createKey("boss", null);
+    const auth = (r: request.Test) => r.set("Authorization", `Bearer ${boss}`);
+    const created = await auth(request(app).post("/v1/admin/keys")).send({ name: "app-one" });
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({ name: "app-one" });
+    expect(created.body.key).toMatch(/^cap_/);
+    expect(typeof created.body.created_at).toBe("number");
+    // The new key works, its calls are its own in /v1/usage, and the listing
+    // never carries the secret or its hash.
+    const call = await request(app).post("/v1/chat/completions").set("Authorization", `Bearer ${created.body.key}`).send(body());
+    expect(call.status).toBe(200);
+    const usageR = await auth(request(app).get("/v1/usage"));
+    expect(usageR.body.callers.map((c: { caller: string }) => c.caller)).toContain("app-one");
+    const list = await auth(request(app).get("/v1/admin/keys"));
+    expect(list.body.keys.map((k: { name: string }) => k.name)).toEqual(["boss", "app-one"]);
+    expect(JSON.stringify(list.body)).not.toContain(created.body.key.slice(4, 20));
+    expect(list.body.keys[1].last_used_at).not.toBeNull();
+    // Bad names and duplicates are 400, not 500.
+    expect((await auth(request(app).post("/v1/admin/keys")).send({ name: "App One" })).status).toBe(400);
+    expect((await auth(request(app).post("/v1/admin/keys")).send({ name: "app-one" })).status).toBe(400);
+    expect((await auth(request(app).post("/v1/admin/keys")).send({})).status).toBe(400);
+    // Revoked: 401 from then on, 404 on a second revoke, still listed.
+    expect((await auth(request(app).delete("/v1/admin/keys/app-one"))).body).toEqual({ name: "app-one", revoked: true });
+    expect((await request(app).post("/v1/chat/completions").set("Authorization", `Bearer ${created.body.key}`).send(body())).status).toBe(401);
+    expect((await auth(request(app).delete("/v1/admin/keys/app-one"))).status).toBe(404);
+    expect((await auth(request(app).get("/v1/admin/keys"))).body.keys[1].revoked_at).not.toBeNull();
+  });
+
+  it("names a Cloudflare-identified caller, and the name wins over the configured map in /v1/usage", async () => {
+    const { usage, app } = makeAdmin(["boss"]);
+    const { key: boss } = usage.createKey("boss", null);
+    const auth = (r: request.Test) => r.set("Authorization", `Bearer ${boss}`);
+    // Two rows under Cloudflare client ids, as the Access path would write them.
+    usage.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 1, outcome: "ok", source: "http", caller: "id.access" });
+    usage.record({ provider: "claude", model: "claude-opus", inputTokens: 1, outputTokens: 1, durationMs: 1, outcome: "ok", source: "http", caller: "other.access" });
+    expect((await auth(request(app).put("/v1/admin/callers/other.access")).send({ name: "app-two" })).body).toEqual({ id: "other.access", name: "app-two" });
+    expect((await auth(request(app).put("/v1/admin/callers/id.access")).send({ name: "renamed" })).status).toBe(200);
+    expect((await auth(request(app).put("/v1/admin/callers/x.access")).send({ name: "" })).status).toBe(400);
+    expect((await auth(request(app).get("/v1/admin/callers"))).body.callers).toEqual({ "other.access": "app-two", "id.access": "renamed" });
+    const named = (await auth(request(app).get("/v1/usage"))).body.callers.map((c: { caller: string }) => c.caller).sort();
+    // boss made only admin calls, which spend no CLI and write no row.
+    expect(named).toEqual(["renamed", "app-two"]);
   });
 });
