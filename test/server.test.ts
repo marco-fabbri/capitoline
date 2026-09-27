@@ -7,6 +7,7 @@ import { Core, type Context } from "../src/core/core.js";
 import { UsageStore } from "../src/usage/store.js";
 import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
+import type { Effort } from "../src/config.js";
 import type { InternalRequest, ProviderEvent } from "../src/core/types.js";
 import type { Script } from "./fake-provider.js";
 import type { RequestHandler } from "express";
@@ -575,11 +576,11 @@ function makeVirtual(events: CouncilEvent[] = SYNTHESIS) {
 // The same, with the deliberation written by hand: a test that is about *when*
 // a byte is written needs an engine it can hold still, which a scripted array
 // cannot do.
-function makeVirtualRun(run: (question: string, ctx: Context) => AsyncIterable<CouncilEvent>) {
+function makeVirtualRun(run: (question: string, ctx: Context, effort?: Effort) => AsyncIterable<CouncilEvent>, efforts: Effort[] = []) {
   const p = new FakeProvider("claude", ["claude-opus"], OK, 1);
   const usage = new UsageStore(":memory:");
   const core = new Core([p], usage, { maxWaitMs: QUEUE_WAIT_MS, budgets: {}, log: createLogger("t") });
-  core.registerVirtual("capitoline", run);
+  core.registerVirtual("capitoline", run, undefined, efforts);
   return { core, app: createApp(core, { log: createLogger("t") }) };
 }
 
@@ -609,7 +610,10 @@ describe("a council over HTTP", () => {
     expect(claude.calls.length).toBe(0);
   });
 
-  it("declares reasoning_effort ignored for a council instead of dropping it", async () => {
+  it("declares reasoning_effort ignored for a council pinned to one shape instead of dropping it", async () => {
+    // Registered with no efforts, as main.ts registers a council configured
+    // with `ranking: false`: the shape is the configuration's and the field
+    // means nothing to it.
     const { app } = makeVirtual();
     const r = await request(app).post("/v1/chat/completions")
       .send({ model: "capitoline", messages: [{ role: "user", content: "why?" }], reasoning_effort: "high" });
@@ -621,6 +625,22 @@ describe("a council over HTTP", () => {
     expect(r.body.capitoline.ignored).toEqual(["reasoning_effort"]);
     const real = await request(make().app).post("/v1/chat/completions").send(body({ reasoning_effort: "high" }));
     expect(real.headers["x-capitoline-ignored"]).toBeUndefined();
+  });
+
+  // A council with its ranking stage declares `low` and `high` (main.ts), and
+  // the request's effort reaches it untouched: the resolution of `medium` and
+  // the rest is the council's (test/council.test.ts), not the transport's.
+  it("passes reasoning_effort to a council that declared efforts, and does not call it ignored", async () => {
+    const seen: (Effort | undefined)[] = [];
+    const { app } = makeVirtualRun(async function* (_q, _ctx, effort) { seen.push(effort); yield* SYNTHESIS; }, ["low", "high"]);
+    for (const effort of ["low", "medium", undefined] as const) {
+      const r = await request(app).post("/v1/chat/completions")
+        .send({ model: "capitoline", messages: [{ role: "user", content: "why?" }], ...(effort ? { reasoning_effort: effort } : {}) });
+      expect(r.status).toBe(200);
+      expect(r.headers["x-capitoline-ignored"]).toBeUndefined();
+      expect(r.body.capitoline.ignored).toEqual([]);
+    }
+    expect(seen).toEqual(["low", "medium", undefined]);
   });
 
   it("refuses a council request whose message is an image", async () => {

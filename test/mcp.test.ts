@@ -189,12 +189,12 @@ describe("MCP", () => {
     // What the council was asked and under whose identity: a member call is an
     // ordinary request, so the caller /v1/usage groups by has to survive the
     // tool call (see "records the caller of a tool call" above).
-    let asked: { question: string; source: string; caller?: string | null }[];
-    const register = (events: CouncilEvent[] = RUN, name = "capitoline") => {
-      core.registerVirtual(name, async function* (question, ctx) {
-        asked.push({ question, source: ctx.source, caller: ctx.caller });
+    let asked: { question: string; source: string; caller?: string | null; effort?: string }[];
+    const register = (events: CouncilEvent[] = RUN, name = "capitoline", efforts: ("low" | "high")[] = []) => {
+      core.registerVirtual(name, async function* (question, ctx, effort) {
+        asked.push({ question, source: ctx.source, caller: ctx.caller, ...(effort !== undefined ? { effort } : {}) });
         for (const ev of events) { await new Promise((r) => setTimeout(r, 1)); yield ev; }
-      });
+      }, undefined, efforts);
     };
     beforeEach(() => { asked = []; });
 
@@ -205,7 +205,20 @@ describe("MCP", () => {
       // The agent decides between this tool and ask_model on the description
       // alone: nine calls over several minutes is the whole difference.
       expect(tool.description).toMatch(/nine/);
-      expect(Object.keys(tool.inputSchema.properties!).sort()).toEqual(["council", "question"]);
+      expect(Object.keys(tool.inputSchema.properties!).sort()).toEqual(["council", "effort", "question"]);
+      await c.close();
+    });
+
+    // The effort is the council's shape (design §12.9), and the tool offers
+    // the two values a council declares. It reaches a council that declared
+    // efforts and not one pinned by its configuration, exactly as over HTTP.
+    it("passes effort to a council that declared efforts and withholds it from a pinned one", async () => {
+      register(RUN, "capitoline", ["low", "high"]);
+      register(RUN, "senate");
+      const c = await client();
+      await c.callTool({ name: "ask_council", arguments: { question: "why?", effort: "low" } });
+      await c.callTool({ name: "ask_council", arguments: { question: "why?", council: "senate", effort: "low" } });
+      expect(asked.map((a) => a.effort)).toEqual(["low", undefined]);
       await c.close();
     });
 

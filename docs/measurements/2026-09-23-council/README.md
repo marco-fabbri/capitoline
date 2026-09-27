@@ -240,7 +240,7 @@ One run had to be repeated. The first `capitoline` deliberation on
 `ipv4-regex` answered nothing for 125 s and the tunnel's edge closed the
 connection with `524`; the deliberation went on regardless and completed its
 nine calls for a client that had gone (`docs/deploy.md` §9 says exactly this,
-and the measurement script asks without streaming). The repeat, six minutes
+and the measurement script asked without streaming — it streams since the same day, and keeps the raw stream next to each result). The repeat, six minutes
 later, took 118 s and came back `200`; it is the run scored below, and the
 nine orphaned calls are counted in the cost. The two `524`s in `run.log` and
 the repeat's line are the record of it.

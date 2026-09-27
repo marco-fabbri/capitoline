@@ -64,7 +64,15 @@ export interface Context { signal?: AbortSignal; source: "http" | "mcp"; caller?
  * cancels it, the source it came from, the caller that /v1/usage groups by —
  * because a council member is a request like any other and inherits all three.
  */
-export type VirtualRun = (question: string, ctx: Context) => AsyncIterable<CouncilEvent>;
+/**
+ * The effort is the request's, passed through untouched: what it means is the
+ * virtual model's own business (a council reads `low` as "skip the peer
+ * ranking", design §12.9), and a virtual that declared no efforts at
+ * registration is never handed one — the transport marks the field ignored
+ * instead, as it does for every other request field a model has no channel
+ * for.
+ */
+export type VirtualRun = (question: string, ctx: Context, effort?: Effort) => AsyncIterable<CouncilEvent>;
 
 /**
  * Whether a virtual model can serve a request right now, decided against the
@@ -82,7 +90,7 @@ export type VirtualRun = (question: string, ctx: Context) => AsyncIterable<Counc
  */
 export type VirtualAvailability = (models: ModelInfo[]) => { available: boolean; reason?: string };
 
-interface Virtual { run: VirtualRun; availability?: VirtualAvailability }
+interface Virtual { run: VirtualRun; availability?: VirtualAvailability; efforts: Effort[] }
 
 /**
  * What a model pause is about: one provider's quota for one CLI id **at one
@@ -281,16 +289,26 @@ export class Core {
    * virtual model that is always on) can leave it out; a council passes the
    * seating rule of §12.2, which is the only thing that knows what a seat is.
    */
-  registerVirtual(name: string, run: VirtualRun, availability?: VirtualAvailability): void {
+  registerVirtual(name: string, run: VirtualRun, availability?: VirtualAvailability, efforts: Effort[] = []): void {
     const owner = this.modelIndex.get(name);
     if (owner) throw new Error(`virtual model "${name}" is also a model of provider ${owner.provider.id}`);
     if (this.virtuals.has(name)) throw new Error(`virtual model "${name}" is already registered`);
-    this.virtuals.set(name, { run, availability });
+    this.virtuals.set(name, { run, availability, efforts });
   }
 
   /** Whether the name is a virtual model, which is what a transport asks before choosing between execute() and deliberate(). */
   isVirtual(model: string): boolean {
     return this.virtuals.has(model);
+  }
+
+  /**
+   * Whether a request's effort means anything to this virtual model. A
+   * council with its ranking stage accepts `low` and `high`; one configured
+   * without it (`ranking: false`) is pinned to its shape and accepts none, so
+   * a transport declares the field ignored rather than passing it on.
+   */
+  acceptsEffort(model: string): boolean {
+    return (this.virtuals.get(model)?.efforts.length ?? 0) > 0;
   }
 
   // The quota of a provider that has image models, null for the others. `used`
@@ -388,7 +406,7 @@ export class Core {
     // under the council's name (§12.5, spec 6.1).
     const state = this.virtualState(virtual, this.realModels());
     if (!state.available) throw new CapitolineError("model_unavailable", `model "${req.model}" unavailable: ${state.reason ?? "the council cannot be seated"}`);
-    yield* virtual.run(question, ctx);
+    yield* virtual.run(question, ctx, virtual.efforts.length > 0 ? req.effort : undefined);
   }
 
   /**

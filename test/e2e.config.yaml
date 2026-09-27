@@ -356,9 +356,15 @@ council:
   # answers with no aggregate) and not a fourth prompt — the prompts are the
   # strategy and stay in the code (design §12.8).
   #
-  # It is the everyday shape. The reference panel above is the one to ask when
-  # the panel's own verdict on its answers is worth its price; this one buys
-  # four independent perspectives and a synthesis for half of it.
+  # It is the everyday shape, and it is `capitoline` at reasoning_effort
+  # low: a council with its ranking stage takes the request's effort as its
+  # shape (low skips stage 2, high runs it), and this block is the same thing
+  # pinned under a name of its own for clients that cannot send the field —
+  # as antigravity-gemini-flash-low stands next to antigravity-gemini-flash.
+  # With `ranking: false` the effort is declared ignored. The reference panel
+  # above is the one to ask when the panel's own verdict on its answers is
+  # worth its price; this one buys four independent perspectives and a
+  # synthesis for half of it.
   #
   # Deliberately not a two-seat council that keeps the ranking, which costs
   # the same five calls: two members cast one vote each and cannot break a

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { Effort } from "../config.js";
+import { nearestEffort } from "../core/prompt.js";
 import type { Logger } from "../log.js";
 import { CapitolineError, type FailureKind, type InternalRequest, type Usage } from "../core/types.js";
 import type { ProviderEvent } from "../core/types.js";
@@ -217,8 +219,16 @@ export class Council {
    * tell: the client that asked has gone, and `Core` has already recorded every
    * call it made as aborted.
    */
-  async *deliberate(question: string, ctx: CouncilContext): AsyncIterable<CouncilEvent> {
+  async *deliberate(question: string, ctx: CouncilContext, effort?: Effort): AsyncIterable<CouncilEvent> {
     const run: Run = { id: randomUUID(), calls: 0, usage: { input: 0, output: 0 } };
+    // The shape of this deliberation. `ranking: false` in the configuration
+    // pins the council to the five-call shape and the effort never reaches
+    // it (Core hands one only to a council that declared efforts). With the
+    // ranking configured, the request chooses: `low` skips stage 2, `high`
+    // runs it, and any other value resolves to the nearer of the two by the
+    // same rule a model's effort follows, the tie breaking upward — so
+    // `medium` is the full council, and so is no effort at all (design §12.9).
+    const ranking = this.cfg.ranking && nearestEffort(effort ?? "high", ["low", "high"]) !== "low";
     const state = this.core.listModels();
     const seated = seat(this.cfg.seats, state);
 
@@ -277,7 +287,7 @@ export class Council {
       this.log.warn({ council: this.name, answers: members.length, quorum: this.cfg.minMembers }, "below the quorum: the answer is returned without a council");
       this.assignLabels(members, question);
       yield { type: "text", delta: members[0].answer };
-      yield this.finish(run, members, lost, [], [], "");
+      yield this.finish(run, members, lost, [], [], "", ranking);
       return;
     }
 
@@ -296,7 +306,7 @@ export class Council {
     // must not be shown one that never runs.
     const rankings: MemberRanking[] = [];
     let verdict: Aggregate[] = [];
-    if (this.cfg.ranking) {
+    if (ranking) {
       yield { type: "progress", stage: "rankings", done: 0, total: members.length };
       const votes = new Array<Ranking[] | null>(members.length).fill(null);
       let ranked = 0;
@@ -327,11 +337,11 @@ export class Council {
       this.log.warn({ council: this.name, chain: this.cfg.judge.models }, "no judge could be seated: the best-ranked answer is returned unsynthesised");
       const top = members.find((m) => m.label === verdict[0]?.label) ?? members[0];
       yield { type: "text", delta: top.answer };
-      yield this.finish(run, members, lost, rankings, verdict, "");
+      yield this.finish(run, members, lost, rankings, verdict, "", ranking);
       return;
     }
     const identities = new Map(members.map((m) => [m.label, m.model]));
-    const prompt = synthesisPrompt(question, answers, verdict, this.cfg.judgeBlind, identities, this.cfg.ranking);
+    const prompt = synthesisPrompt(question, answers, verdict, this.cfg.judgeBlind, identities, ranking);
     let model = judge.model;
     let spoken = false;
     for (let attempt = 0; ; attempt++) {
@@ -366,7 +376,7 @@ export class Council {
       model = next;
     }
     yield { type: "progress", stage: "synthesis", done: 1, total: 1 };
-    yield this.finish(run, members, lost, rankings, verdict, model);
+    yield this.finish(run, members, lost, rankings, verdict, model, ranking);
   }
 
   /**
@@ -411,16 +421,18 @@ export class Council {
   }
 
   /** The terminal event, with the usage of every call the deliberation spent and the un-blinded record of it (§12.6, §12.7). */
-  private finish(run: Run, members: RunningMember[], lost: LostSeat[], rankings: MemberRanking[], verdict: Deliberation["aggregate"], judgeModel: string): Extract<CouncilEvent, { type: "done" }> {
+  private finish(run: Run, members: RunningMember[], lost: LostSeat[], rankings: MemberRanking[], verdict: Deliberation["aggregate"], judgeModel: string, ranking: boolean): Extract<CouncilEvent, { type: "done" }> {
     const detail: Deliberation = {
       deliberationId: run.id,
       strategyVersion: STRATEGY_VERSION,
-      // The configured shape, not what happened. A ranked council that
-      // reached stage 2 aggregates every label, with `votes: 0` for the ones
-      // nobody ranked (§12.5), so an empty aggregate is this shape or the
-      // below-quorum branch above — readable from `votes: 0` and an empty
-      // judge, and stated here so no client has to read it that way.
-      shape: this.cfg.ranking ? "ranked" : "fast",
+      // The shape this deliberation ran, not what happened in it. A ranked
+      // council that reached stage 2 aggregates every label, with `votes: 0`
+      // for the ones nobody ranked (§12.5), so an empty aggregate is this
+      // shape or the below-quorum branch above — readable from `votes: 0` and
+      // an empty judge, and stated here so no client has to read it that way.
+      // "fast" whether the configuration pinned it or the request's `low`
+      // chose it: the client asked one or the other and reads what it got.
+      shape: ranking ? "ranked" : "fast",
       members: members.map((m): DeliberationMember => ({
         family: m.seat.family, model: m.model, label: m.label, answer: m.answer,
         ...(m.fellBackFrom.length > 0 ? { fellBackFrom: m.fellBackFrom } : {}),

@@ -209,6 +209,36 @@ describe("Council", () => {
     expect(d.judge).toEqual({ model: "claude-opus", blind: true });
   });
 
+  // The request's effort is the shape (design §12.9): `low` is the five-call
+  // council, `high` the nine-call one, and every other value resolves to the
+  // nearer of the two by the rule a model's effort follows, ties upward — so
+  // `medium` is the full council, as is no effort at all.
+  it("takes the request's effort as its shape: low skips the ranking, medium and high run it", async () => {
+    const low = panel();
+    const lowEvents = await run(low.council.deliberate(QUESTION, { source: "http" }, "low"));
+    expect(textOf(lowEvents)).toBe(SYNTHESIS);
+    expect(detailOf(lowEvents)).toMatchObject({ shape: "fast", calls: 5, rankings: [], aggregate: [] });
+    expect(low.promptsOf("rankings")).toEqual([]);
+    expect(lowEvents.filter((e) => e.type === "progress" && e.stage === "rankings")).toEqual([]);
+
+    const medium = panel();
+    const d = detailOf(await run(medium.council.deliberate(QUESTION, { source: "http" }, "medium")));
+    expect(d.shape).toBe("ranked");
+    expect(d.calls).toBe(9);
+    expect(medium.promptsOf("rankings")).toHaveLength(4);
+  });
+
+  // `ranking: false` pins the shape: the configuration, not the request,
+  // decided it, and Core never hands such a council an effort. Even if one
+  // arrived, `high` could not switch a stage on that the council does not have.
+  it("stays pinned to the fast shape whatever the effort when configured without a ranking", async () => {
+    const p = panel({ cfg: { ranking: false } });
+    const d = detailOf(await run(p.council.deliberate(QUESTION, { source: "http" }, "high")));
+    expect(d.shape).toBe("fast");
+    expect(d.calls).toBe(5);
+    expect(p.promptsOf("rankings")).toEqual([]);
+  });
+
   it("says which shape ran, next to the aggregate a degraded panel still reports", async () => {
     const fast = detailOf(await run(panel({ cfg: { ranking: false } }).council.deliberate(QUESTION, { source: "http" })));
     expect(fast.shape).toBe("fast");

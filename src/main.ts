@@ -102,7 +102,11 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // exactly as to a direct request (design §12, plan constraints).
   for (const [name, councilCfg] of Object.entries(cfg.council)) {
     const council = new Council(name, councilCfg, core, log.child({ mod: "council", council: name }));
-    core.registerVirtual(name, (question, ctx) => council.deliberate(question, ctx), (models) => council.seatable(models));
+    // A council with its ranking stage takes the request's effort as its
+    // shape — `low` skips the peer ranking — while one pinned to the fast
+    // shape by `ranking: false` declares none and the field is marked ignored
+    // for it (design §12.9).
+    core.registerVirtual(name, (question, ctx, effort) => council.deliberate(question, ctx, effort), (models) => council.seatable(models), councilCfg.ranking ? ["low", "high"] : []);
     log.info({ council: name, seats: councilCfg.seats.map((s) => s.family), judge: councilCfg.judge.family }, "council registered");
   }
 

@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { start } from "../src/main.js";
@@ -322,8 +322,65 @@ describe("a council end to end", () => {
     // usage table and not off the deliberation's own count.
     expect((await rows()) - before).toBe(5);
   }, 30_000);
+
+  // The same five rows from the reference panel asked at `reasoning_effort:
+  // low`: the request chose the shape (design §12.9), the response says so,
+  // and the field is not among the ignored ones.
+  it("runs capitoline as the five-call shape when asked at reasoning_effort low", async () => {
+    const before = await rows();
+    const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "capitoline", reasoning_effort: "low", messages: [{ role: "user", content: COUNCIL_QUESTION }] }),
+    });
+    expect(r.status).toBe(200);
+    expect(r.headers.get("x-capitoline-ignored")).toBeNull();
+    const body = (await r.json()) as { choices: { message: { content: string } }[]; capitoline: { ignored: string[]; council: Deliberation } };
+    expect(body.choices[0].message.content).toBe(COUNCIL_SYNTHESIS);
+    expect(body.capitoline.ignored).toEqual([]);
+    expect(body.capitoline.council).toMatchObject({ shape: "fast", calls: 5, rankings: [], aggregate: [] });
+    expect((await rows()) - before).toBe(5);
+  }, 30_000);
 });
 
+
+// The measurement script, against this gateway and the fake CLIs: it is what
+// every measurement's evidence comes through, and since 2026-09-27 it streams
+// and assembles the answer itself (a 524 from the tunnel's edge cost nine
+// calls when it did not), so the assembly is checked against the shape a
+// non-streaming answer has. `jq` and `curl` are what the script needs, as
+// scripts/smoke.sh does; a machine without them skips this and says so.
+describe("scripts/measure-council.sh", () => {
+  const have = (bin: string) => spawnSync("sh", ["-c", `command -v ${bin}`]).status === 0;
+  it.skipIf(!have("jq") || !have("curl"))("streams a council, keeps the raw stream and assembles the completion", async () => {
+    mkdirSync("tmp/e2e-measure", { recursive: true });
+    const questions = "tmp/e2e-measure/questions.json";
+    writeFileSync(questions, JSON.stringify({ questions: [{ id: "q1", question: COUNCIL_QUESTION }] }));
+    const out = "tmp/e2e-measure/results";
+    rmSync(out, { recursive: true, force: true });
+    // Not spawnSync: the gateway under test runs in this very process, and a
+    // synchronous wait would hold the event loop while curl waits for it — a
+    // deadlock that ends only at curl's own 1200 s limit.
+    const r = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn("bash", ["scripts/measure-council.sh", `http://127.0.0.1:${app.port}`, questions, out, "capitoline-fast"], { env: { ...process.env, CF_ACCESS_CLIENT_ID: "", CF_ACCESS_CLIENT_SECRET: "" } });
+      let stdout = "", stderr = "";
+      child.stdout.on("data", (d) => { stdout += d; });
+      child.stderr.on("data", (d) => { stderr += d; });
+      child.on("close", (status) => resolve({ status, stdout, stderr }));
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/^capitoline-fast  q1  \d+s  calls=5  tokens=\d+  judge=/m);
+    const raw = readFileSync(`${out}/capitoline-fast__q1.sse`, "utf8");
+    expect(raw.trimEnd().endsWith("data: [DONE]")).toBe(true);
+    const body = JSON.parse(readFileSync(`${out}/capitoline-fast__q1.json`, "utf8")) as { object: string; model: string; choices: { message: { content: string }; finish_reason: string }[]; usage: { total_tokens: number }; capitoline: { council: Deliberation } };
+    expect(body.object).toBe("chat.completion");
+    expect(body.model).toBe("capitoline-fast");
+    expect(body.choices[0].message.content).toBe(COUNCIL_SYNTHESIS);
+    expect(body.choices[0].finish_reason).toBe("stop");
+    expect(body.usage.total_tokens).toBeGreaterThan(0);
+    expect(body.capitoline.council).toMatchObject({ shape: "fast", calls: 5 });
+    expect(readFileSync(`${out}/run.log`, "utf8")).toMatch(/calls=5/);
+  }, 30_000);
+});
 
 // No ladder ships: a host adds one to its overlay for as long as a
 // measurement runs (docs/measure-a-model.md). This starts a second gateway

@@ -135,10 +135,11 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
   });
 
   server.registerTool("ask_council", {
-    description: "Put one question to a council: several models of different families answer it independently, rank each other's answers without knowing whose is whose, and a judge writes the final answer from the ranking. One deliberation is nine model calls over several minutes on three different subscriptions; a council configured without the ranking stage (a `-fast` name) costs one call per seat plus the synthesis, five in all. Either way ask_model is the right tool for anything a single model can answer. Use list_models for council names (kind council); omit council for the first available one.",
+    description: "Put one question to a council: several models of different families answer it independently, rank each other's answers without knowing whose is whose, and a judge writes the final answer from the ranking. One deliberation is nine model calls over several minutes on three different subscriptions; with effort low, or a council configured without the ranking stage (a `-fast` name), it costs one call per seat plus the synthesis, five in all. Either way ask_model is the right tool for anything a single model can answer. Use list_models for council names (kind council); omit council for the first available one.",
     inputSchema: {
       question: z.string().min(1).describe("The question the council deliberates on"),
       council: z.string().min(1).optional().describe("Council name from list_models (kind council); default: the first available council"),
+      effort: z.enum(["low", "high"]).optional().describe("low: skip the peer-ranking stage (one call per seat plus the synthesis); high or omitted: the full deliberation. Ignored by a council configured without the ranking stage"),
     },
     // The un-blinded record of a blind deliberation (§12.6), minus the
     // individual rankings: the aggregate is the panel's verdict, and every
@@ -172,7 +173,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }),
       calls: z.number(),
     },
-  }, async ({ question, council: requested }, extra) => {
+  }, async ({ question, council: requested, effort }, extra) => {
     // Everything inside the try, listModels() included, for the reason
     // generate_image gives: an exception escaping the handler is turned by the
     // SDK into a tool error carrying the raw message, with no log line and no
@@ -215,7 +216,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       // §12.6, and the flattened form has nowhere to put either. It is also
       // where a council is refused — the empty question, a quorum that cannot
       // be filled — before a single member call is spent.
-      for await (const ev of core.deliberate({ model: name, messages: [{ role: "user", text: question }], stream: true }, { signal: extra.signal, source: "mcp", caller })) {
+      for await (const ev of core.deliberate({ model: name, messages: [{ role: "user", text: question }], effort, stream: true }, { signal: extra.signal, source: "mcp", caller })) {
         if (ev.type === "progress") await progress(`${ev.stage} ${ev.done}/${ev.total}`);
         // The synthesis is the one stage that streams, and it emits no stage
         // event while it is written: this mark is the only sign of life in
