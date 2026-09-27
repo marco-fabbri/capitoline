@@ -24,12 +24,17 @@ const FORBIDDEN = { error: { message: "this caller is not an administrator (serv
  * (design §8.5): a key is state, not configuration, and so is a caller's
  * name.
  */
-export function createAdminRouter(store: AdminStore, admins: string[], log: Logger): express.Router {
+export function createAdminRouter(store: AdminStore, admins: string[], names: () => Record<string, string>, log: Logger): express.Router {
   const router = express.Router();
   const allowed = new Set(admins);
   router.use((req, res, next) => {
-    const caller = callerOf(res.locals.identity);
-    if (caller === null || !allowed.has(caller)) { res.status(403).json(FORBIDDEN); return; }
+    // The caller as /v1/usage would show it: a service token reaches here as
+    // its client id, and `admins` names it the way the operator knows it —
+    // through the same binding, configured or made at run time. A raw id in
+    // `admins` works too.
+    const raw = callerOf(res.locals.identity);
+    const caller = raw === null ? null : (names()[raw] ?? raw);
+    if (caller === null || (!allowed.has(caller) && !(raw !== null && allowed.has(raw)))) { res.status(403).json(FORBIDDEN); return; }
     res.locals.admin = caller;
     next();
   });

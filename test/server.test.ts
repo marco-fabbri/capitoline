@@ -934,6 +934,22 @@ describe("/v1/admin", () => {
     return { usage, app };
   };
 
+  // A service token reaches the gate as its client id; `admins` names it as
+  // the operator knows it, through the binding — the configured map here, the
+  // runtime registry alike — and a raw id works as well.
+  it("admits a service token by its bound name", async () => {
+    const p = new FakeProvider("claude", ["claude-opus"], OK, 1);
+    const usage = new UsageStore(":memory:");
+    const core = new Core([p], usage, { maxWaitMs: QUEUE_WAIT_MS, budgets: {}, log: createLogger("t") });
+    const asToken = asCaller({ type: "service", name: "abcd.access", sub: "s" });
+    const app = createApp(core, { log: createLogger("t"), access: asToken, identity: { store: usage, admins: ["owner"] }, callerNames: { "abcd.access": "owner" } });
+    expect((await request(app).get("/v1/admin/keys")).status).toBe(200);
+    const unbound = createApp(core, { log: createLogger("t"), access: asToken, identity: { store: usage, admins: ["owner"] } });
+    expect((await request(unbound).get("/v1/admin/keys")).status).toBe(403);
+    usage.nameCaller("abcd.access", "owner");
+    expect((await request(unbound).get("/v1/admin/keys")).status).toBe(200);
+  });
+
   it("refuses anyone not named in admins with 403, and an anonymous caller too", async () => {
     const { usage, app } = makeAdmin(["boss"]);
     expect((await request(app).post("/v1/admin/keys").send({ name: "x" })).status).toBe(403);

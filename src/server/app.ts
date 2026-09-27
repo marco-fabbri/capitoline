@@ -182,7 +182,10 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // spent it", the second "what actually answered". They differ because the
   // second is read for a change — a gateway name whose model moved shows two
   // rows — and a day is too short to catch one.
-  if (opts.identity) app.use("/v1/admin", createAdminRouter(opts.identity.store, opts.identity.admins, opts.log));
+  // One reading of a caller's name for the admin gate and for /v1/usage: the
+  // runtime registry first, the configured map second.
+  const callerNames = () => ({ ...(opts.callerNames ?? {}), ...(opts.identity?.store.callerNames() ?? {}) });
+  if (opts.identity) app.use("/v1/admin", createAdminRouter(opts.identity.store, opts.identity.admins, callerNames, opts.log));
 
   app.get("/v1/usage", (_req, res) => {
     // Named here and not when the row was written: a row stores the client id
@@ -192,7 +195,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     // itself, which is unreadable and still correct.
     // The runtime registry (admin API) first, the configured map second: a
     // name given from the API is the more recent decision.
-    const names = { ...(opts.callerNames ?? {}), ...(opts.identity?.store.callerNames() ?? {}) };
+    const names = callerNames();
     const named = core.callers().map((c) => ({ ...c, caller: (c.caller !== null && names[c.caller]) || c.caller }));
     res.json({ callers: named, models: core.modelIdentities() });
   });
