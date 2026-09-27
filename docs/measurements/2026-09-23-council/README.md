@@ -369,3 +369,87 @@ guards against — a wrong answer leading the synthesis — never had the chance
 to happen. On the ladder, where a member *was* wrong, the ranking put it last
 every time. The ranked shape stays available; what changes is which shape a
 client reaches without thinking, and that is recorded in `docs/backlog.md`.
+
+## Addendum: the judge seated in the council, 27 September
+
+Not registered with the rest: decided after the panels' result, when the
+owner asked whether the seat-apart judge had ever been measured against
+karpathy/llm-council's chairman, who is a member and synthesizes too. It had
+not. The spec's reason for the seat-apart judge (§12.3) was a risk stated
+without a measurement — a synthesizer weighing its own answer — and the
+measurement was cheap once the twelve panel syntheses existed to compare
+against. What was written down before the runs, in the conversation: the
+same six questions, the same seats, `judge_allow_member: true` with
+`claude-fable` — the seated Anthropic member — at the head of the judge
+chain, both shapes; scored by the amended rule; and one extra reading, in the
+ranked shape, of whether the chairman's synthesis follows the peers' aggregate
+or its own answer.
+
+The two councils were declared in the host's overlay for the run and removed
+after it (`capitoline-chair`, `capitoline-chair-fast`, in
+`results-chairman/`). Twelve deliberations from 03:04 to 03:16 CEST, every
+seat at full strength, no fallback, no lost seat, `claude-fable` judging all
+twelve.
+
+**One thing the run corrected before anything was scored.** The chairman
+saves no call: the synthesis is a call whether the model that writes it sat
+in the council or not, so the ranked shape still cost nine and the fast one
+five. What the chairman changes is *which* model writes the final answer —
+the best seated one instead of the best unseated one — and that one family's
+window is not spent twice. The claim that it saves one call in nine, made in
+the conversation and in the spec, was wrong, and the spec is corrected with
+this addendum.
+
+| Question | `capitoline-chair` (ranked) | derived / unsourced-correct / unsourced-wrong | `capitoline-chair-fast` | derived / unsourced-correct / unsourced-wrong |
+|---|---|---|---|---|
+| `rf2-node-failure` | correct | 0 / 0 / 0 | correct | 0 / 0 / 0 |
+| `subnet-27` | correct | 0 / 0 / 0 | correct | 0 / 0 / 0 |
+| `tcp-keepalive` | correct | 0 / 0 / 0 | correct | 0 / 0 / 0 |
+| `ipv4-regex` | correct | 0 / 0 / 0 | correct | 0 / 1 / 0 |
+| `ec-backup-6-nodes` | correct | 0 / 0 / 0 | correct | 0 / 0 / 0 |
+| `rf3-min-nodes` | correct | 0 / 0 / 0 | correct | 0 / 0 / 0 |
+
+Every claim of the twelve syntheses was traced to a member's answer except
+one: the fast synthesis on `ipv4-regex` says `fullmatch` "does not have the
+`$`-before-final-newline quirk", which no member said; true, and
+unsourced-correct — the same kind of remark, on the same question, as the
+one slip of the seat-apart fast judge. The Nutanix syntheses were checked
+against the same sources as above: the chairman's `rf2-node-failure` takes
+its "metadata is always kept at three copies" and "cannot be rebuilt on two
+nodes, so the cluster stays degraded and critical" from the Gemini member,
+and both are the chapter's (metadata RF3 under FT1, three nodes the floor).
+
+**Does the chairman favour its own answer?** No, on these six. In the ranked
+shape its own ballot put its answer last on `rf2-node-failure`, third on
+`ipv4-regex` and `tcp-keepalive`, second on `ec-backup-6-nodes` and
+`subnet-27`, first only on `rf3-min-nodes`, where the other three members
+put it first too (aggregate 1.25). And the syntheses follow the aggregate,
+not the chair: on `ipv4-regex` it is the top-ranked pattern of the OpenAI
+and Google members that the synthesis carries, not the chairman's own
+anchored form, and on `rf2-node-failure` the synthesis is built on the
+Google member's metadata points, ranked first, with the chairman's own
+answer, ranked last, contributing nothing it did not share with the others.
+
+**Cost.** The same calls; tokens within a few percent of the seat-apart
+runs (ranked 90,824–107,371 against 88,490–104,894; fast 44,371–52,800
+against 42,821–50,818); wall time the same range (18–123 s); and no `524`
+this time, the longest run at 123 s — which says the edge's limit is not a
+simple 100 s of silence, and does not make the streaming item less needed.
+
+### What it says
+
+On these six questions the chairman is as good as the seat-apart judge:
+six correct syntheses of six in both shapes, no unsourced wrong claim, one
+unsourced-correct remark against one, and no sign of self-preference where
+it could have shown. The seat-apart rule therefore rests on no measured
+harm; what it demonstrably costs is that the best model never writes the
+final answer, and, with one seat per family and three families, that the
+judge is always a second model of a family already seated.
+
+Six questions with four correct members each is the same small sample as
+above, and it cannot show what a chairman does when its own answer is the
+wrong one — the case the seat-apart rule was written for. The Gemini ladder
+is where a member was wrong, and there the judge was from outside by
+construction. So the honest reading is: no evidence for the rule, and no
+test of its worst case yet. The decision on the shipped default is the
+owner's and is recorded in `docs/backlog.md`.

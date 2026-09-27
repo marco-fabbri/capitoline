@@ -1,0 +1,12 @@
+capitoline-chair  rf2-node-failure  65s  calls=9  tokens=94218  judge=claude-fable
+capitoline-chair-fast  rf2-node-failure  40s  calls=5  tokens=47088  judge=claude-fable
+capitoline-chair  subnet-27  47s  calls=9  tokens=90824  judge=claude-fable
+capitoline-chair-fast  subnet-27  18s  calls=5  tokens=44371  judge=claude-fable
+capitoline-chair  tcp-keepalive  78s  calls=9  tokens=99283  judge=claude-fable
+capitoline-chair-fast  tcp-keepalive  36s  calls=5  tokens=47643  judge=claude-fable
+capitoline-chair  ipv4-regex  123s  calls=9  tokens=107371  judge=claude-fable
+capitoline-chair-fast  ipv4-regex  72s  calls=5  tokens=52800  judge=claude-fable
+capitoline-chair  ec-backup-6-nodes  62s  calls=9  tokens=97364  judge=claude-fable
+capitoline-chair-fast  ec-backup-6-nodes  37s  calls=5  tokens=48679  judge=claude-fable
+capitoline-chair  rf3-min-nodes  55s  calls=9  tokens=96093  judge=claude-fable
+capitoline-chair-fast  rf3-min-nodes  40s  calls=5  tokens=47925  judge=claude-fable
