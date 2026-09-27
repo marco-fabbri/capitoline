@@ -1,0 +1,6 @@
+capitoline-chair-ladder  rf2-node-failure  140s  calls=7  tokens=117931  judge=antigravity-gemini-flash-low
+capitoline-chair-ladder  subnet-27  51s  calls=7  tokens=103824  judge=antigravity-gemini-flash-low
+capitoline-chair-ladder  tcp-keepalive  62s  calls=7  tokens=112586  judge=antigravity-gemini-flash-low
+capitoline-chair-ladder  ipv4-regex  120s  calls=7  tokens=127698  judge=antigravity-gemini-flash-low
+capitoline-chair-ladder  ec-backup-6-nodes  75s  calls=7  tokens=105390  judge=antigravity-gemini-flash-low
+capitoline-chair-ladder  rf3-min-nodes  76s  calls=7  tokens=109720  judge=antigravity-gemini-flash-low

@@ -1,0 +1,286 @@
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493401,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493401,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"capitoline":{"stage":"answers","done":0,"total":3}}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493409,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"capitoline":{"stage":"answers","done":1,"total":3}}
+
+: keep-alive
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493428,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"capitoline":{"stage":"answers","done":2,"total":3}}
+
+: keep-alive
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493459,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"capitoline":{"stage":"answers","done":3,"total":3}}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493459,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"capitoline":{"stage":"rankings","done":0,"total":3}}
+
+: keep-alive
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493471,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"capitoline":{"stage":"rankings","done":1,"total":3}}
+
+: keep-alive
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493486,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"capitoline":{"stage":"rankings","done":2,"total":3}}
+
+: keep-alive
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493510,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"capitoline":{"stage":"rankings","done":3,"total":3}}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493510,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"capitoline":{"stage":"synthesis","done":0,"total":1}}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"Here is the regular"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" expression that strictl"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"y matches a valid, four-"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"octet dotted-decimal IPv4 address with no leadin"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"g zeros:\n\n``"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"`regex\n^(?:(?:25[0-5]|2[0-4][0-9]|1["},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"0-9]{2}|[1-9]?[0-9])\\.){"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"3}(?:2"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"5[0-5]|2[0-4"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"][0-9]|1[0-9]{2}|[1-9]"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"?[0-9])$\n```\n\n---\n\n### P"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"ython Usage Example\n\n```"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"python\nimpor"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"t re\n\nIPV4_REGEX"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" = r\"^(?:(?:25[0-5]|2[0-4][0-9]|1"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"[0-5]|2[0-4][0-9]|1[0-9]"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"{2}|[1-9]?"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"[0-9])$\"\n\n# "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"Valid addresses (returns"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" Match object)\nassert re.fullmatch(I"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"PV4_REGEX, \""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"0."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"0.0.0\") is not None\nasse"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"rt re.fullmatch(IPV4_REGEX, \"127.0.0"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":".1\") is not None\nassert "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"re.fullmatch(IPV4_REGEX,"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" \"192.168.1.1\") is not None\nassert r"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"e.fullmatch(IPV4_REGEX, "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"\"255"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":".255.255.255"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493518,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"\") is not None\n\n# Invali"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"d addresses (returns Non"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"e)\nassert re.fullmatch(I"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"PV4_REGEX, \"01.2.3.4\") i"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"s None      # Leading ze"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"ro\nassert re.fullmatch(I"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"PV4_REGEX, \"1.2.3.04"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"\") is None      # Leadin"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"g zero\nassert re.fullmat"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"ch(IPV4_REGE"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"X, \"00.0.0.0\") is None  "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"    # Leading zero\nasser"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"t re.fullmatch(IPV4_REGE"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"X, \"256.1.1.1\") is None "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"    # Octet > 255\nassert"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" re.fullmatch(IPV4_REGEX"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":", \"1.2.3\") is None      "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"   # Only 3 octets\nasser"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"t re.fullmatch(IPV4_REGE"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"X, \"1.2.3.4.5\")"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" is None    "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" # Extra octet\nassert re"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":".fullmatch(IPV4_REGEX, \""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"1.2.3.4 \") i"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"s None      # Trailing s"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"pace\n```\n\n---\n\n### Reaso"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"ning and Breakdown\n\nTo s"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"trictly reje"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"ct out-of-range numbers "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"and leading zeros, the a"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"llowed numeric ranges fo"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"r each octet"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" (0–255) are defined a"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"s distinct branches in a"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"n alternation:\n\n1. **`25"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"[0-5]`**: Ma"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"tches `250` through `255"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"`.\n2. **`2[0-4][0-9]`**:"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493519,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" Matches `20"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"0` through `249`.\n3. **`"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"1[0-9]{2}`**: Matches `1"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"00` through "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"`199`.\n4. **"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"`[1-9]?[0-9]`**: Matches"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" `0` through `99`.\n   * "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"*Why this pr"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"events leading zeros"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":":* The tens digit `[1-9]"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"` is optional (`?`) but "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"cannot be ze"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"ro. If the number has tw"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"o digits, it"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" must start with 1–9 ("},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"e.g., `10`, "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"`99`). If it has one dig"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"it, it can b"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"e anything from `0` to `"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"9`. A value like `01` or"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" `00` fails "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"because the "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"initial `0` forces `[1-9"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"]?` to match nothing, `["},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"0-9]` consum"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"es the first zero, and t"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"he remaining digit is le"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"ft unmatched"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" against the delimiter o"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"r boundary.\n"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"\n---\n\n### Structural Com"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"ponents\n\n* **`[0-9]` vs."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" `\\d`**: In "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"Python 3, `\\d` matches a"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"ll Unicode digits (e.g.,"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" Eastern Arabic-Indic di"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"gits like `"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"١`, `٢`) b"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"y default unless the `re"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493520,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":".ASCII` flag is passed. "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"Using explicit `[0-9]` g"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"uarantees th"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"at only standard ASCII d"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"igits are ma"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"tched regardless of rege"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"x flags.\n* **`(?: ... )`"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"**: Non-capturing groups"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" group the a"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"lternation and repetitio"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"n logic without incurrin"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"g the memory"},"finish_reason":null}]}
+
+: keep-alive
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":" overhead of capturing s"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"ubgroups.\n* **`\\.`**: Ma"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"tches the literal dot se"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":"parator.\n* **`{3}`**: Repeats the pattern (an octet followed by a dot) exactly three times, followed by the fourth octet without a trailing dot.\n* **`^` and `$`**: Explicit start-of-string and end-of-string anchors. While `re.fullmatch` inherently requires the pattern to match the entire string from index `0` to `len(string)`, including `^` and `$` guarantees whole-string validation and prevents accidental partial matching if the regex is ever reused with functions like `re.match` or `re.search`.\n"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"capitoline":{"stage":"synthesis","done":1,"total":1}}
+
+data: {"id":"chatcmpl-29e6bf37-80f9-476e-95c3-065875410c36","object":"chat.completion.chunk","created":1790493521,"model":"capitoline-chair-ladder","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":102327,"completion_tokens":25371,"total_tokens":127698},"capitoline":{"provider":"capitoline","ignored":[],"council":{"deliberationId":"2212ac3e-465f-4c5f-a092-913e52d1ec2c","strategyVersion":2,"shape":"ranked","members":[{"family":"pro-high","model":"antigravity-gemini-pro-high","label":"Response A","answer":"Here is the regular expression that strictly matches a valid, four-octet dotted-decimal IPv4 address with no leading zeros. \n\n```regex\n^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$\n```\n\n### Reasoning and Breakdown\n\nTo strictly reject invalid numbers and leading zeros, we cannot simply check for 1 to 3 digits. Instead, we must define the specific allowed numeric ranges for each octet (0–255) as distinct branches in an alternation:\n\n1. **`25[0-5]`**: Matches `250` through `255`.\n2. **`2[0-4][0-9]`**: Matches `200` through `249`.\n3. **`1[0-9]{2}`**: Matches `100` through `199`.\n4. **`[1-9]?[0-9]`**: Matches `0` through `99`. \n   * *Why this prevents leading zeros:* The tens digit `[1-9]` is optional (`?`) but cannot be zero. If the number has two digits, it must start with 1-9 (e.g., `10`, `99`). If it has one digit, it can be anything from `0` to `9`. A string like `01` or `00` will fail because the first `0` forces the `[1-9]?` to match nothing, the `[0-9]` matches the first zero, and the remaining digit is left unmatched.\n\n### Structural Components\n\n* **`[0-9]` vs `\\d`**: In Python 3, `\\d` matches all Unicode digits (e.g., Arabic-Indic numerals like `٤` or full-width digits) by default unless the `re.ASCII` flag is passed. Using explicit `[0-9]` ranges guarantees that only standard ASCII digits are permitted.\n* **`(?: ... )`**: This is a non-capturing group. It groups the logic together for repetition without incurring the overhead of saving the matched subgroups.\n* **`\\.`**: Matches the literal dot separator.\n* **`{3}`**: Repeats the pattern (an octet followed by a dot) exactly three times, accommodating the first three octets. The final octet pattern is appended at the end without a trailing dot.\n* **`^` and `$`**: These are start-of-string and end-of-string anchors. While Python's `re.fullmatch` inherently enforces that the pattern must consume the whole string to return a match, including these anchors is best practice. It mathematically guarantees that \"nothing else is in the string\" and prevents the expression from accidentally behaving like a substring search if passed to `re.match` or `re.search` by mistake.\n"},{"family":"flash-high","model":"antigravity-gemini-flash-high","label":"Response B","answer":"Here is the regular expression:\n\n```python\nr\"(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])\"\n```\n\n---\n\n### Python Usage Example\n\n```python\nimport re\n\nIPV4_REGEX = r\"(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])\"\n\n# Valid addresses (returns match objects)\nassert re.fullmatch(IPV4_REGEX, \"0.0.0.0\") is not None\nassert re.fullmatch(IPV4_REGEX, \"127.0.0.1\") is not None\nassert re.fullmatch(IPV4_REGEX, \"192.168.1.1\") is not None\nassert re.fullmatch(IPV4_REGEX, \"255.255.255.255\") is not None\n\n# Invalid addresses (returns None)\nassert re.fullmatch(IPV4_REGEX, \"01.2.3.4\") is None      # Leading zero\nassert re.fullmatch(IPV4_REGEX, \"1.2.3.04\") is None      # Leading zero\nassert re.fullmatch(IPV4_REGEX, \"00.0.0.0\") is None      # Leading zero\nassert re.fullmatch(IPV4_REGEX, \"256.1.1.1\") is None     # Octet > 255\nassert re.fullmatch(IPV4_REGEX, \"1.2.3\") is None         # Only 3 octets\nassert re.fullmatch(IPV4_REGEX, \"1.2.3.4.5\") is None     # 5 octets\nassert re.fullmatch(IPV4_REGEX, \"1.2.3.4 \") is None      # Trailing space\n```\n\n---\n\n### How It Works\n\n#### 1. Matching a Single Octet (`0` to `255`, No Leading Zeros)\nA single octet is matched by:\n```text\n(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])\n```\nThis is split into mutually exclusive numeric ranges ordered from longest/highest to shortest:\n- `25[0-5]`: Matches numbers `250`–`255`.\n- `2[0-4][0-9]`: Matches numbers `200`–`249`.\n- `1[0-9]{2}`: Matches numbers `100`–`199`.\n- `[1-9][0-9]`: Matches two-digit numbers `10`–`99` (the first digit must be `1`–`9`, preventing two-digit leading zeros like `01`–`09`).\n- `[0-9]`: Matches single-digit numbers `0`–`9`.\n\nAny number with leading zeros (e.g., `01`, `001`, `00`) fails because:\n- It cannot match the 3-digit branches (`1xx`, `20x`-`24x`, `25x`).\n- It cannot match `[1-9][0-9]` because the first digit is `0`.\n- If `[0-9]` consumes the initial `0`, the following digit cannot match the literal `.` delimiter (or string boundary), failing the match.\n\n#### 2. Why `[0-9]` Instead of `\\d`\nIn Python 3, `\\d` matches Unicode decimal digits by default (e.g., Eastern Arabic-Indic numerals `١`, `٢`) unless the `re.ASCII` flag is passed. Using explicit `[0-9]` ensures only standard ASCII decimal digits match regardless of regex flags.\n\n#### 3. Four Octets Separated by Dots\n- `(?:\\b...\\.){3}` matches the first 3 octets, each followed by a literal dot (`\\.`).\n- `(?:\\b...)` matches the 4th and final octet without a trailing dot.\n- Non-capturing groups `(?: ... )` are used so no unnecessary group captures are created.\n\n#### 4. Whole-String Matching\nBecause this pattern is passed to `re.fullmatch`, Python inherently requires the entire string from index `0` to `len(string)` to match. If you intend to use this pattern with `re.search` or `re.match` instead, anchor it with `\\A` (beginning of string) and `\\Z` (end of string):\n```python\nr\"\\A(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])\\Z\"\n```\n"},{"family":"flash-low","model":"antigravity-gemini-flash-low","label":"Response C","answer":"Here is the regular expression to match a valid dotted-decimal IPv4 address:\n\n```regex\n(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}\n```\n\n### Usage with Python's `re.fullmatch`:\n\n```python\nimport re\n\nipv4_regex = r\"(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}\"\n\n# Examples:\nassert re.fullmatch(ipv4_regex, \"192.168.1.1\") is not None\nassert re.fullmatch(ipv4_regex, \"0.0.0.0\") is not None\nassert re.fullmatch(ipv4_regex, \"255.255.255.255\") is not None\n\n# Invalid examples:\nassert re.fullmatch(ipv4_regex, \"01.2.3.4\") is None      # Leading zero rejected\nassert re.fullmatch(ipv4_regex, \"1.2.3.04\") is None     # Leading zero rejected\nassert re.fullmatch(ipv4_regex, \"256.1.1.1\") is None    # Out of bounds (>255)\nassert re.fullmatch(ipv4_regex, \"1.2.3\") is None        # Missing octet\nassert re.fullmatch(ipv4_regex, \"1.2.3.4.5\") is None    # Extra octet\n```\n\n---\n\n### Reasoning & Breakdown\n\n1. **Octet Validation (`0` to `255`, no leading zeros):**\n   A valid octet without leading zeros falls into one of these ranges:\n   - `25[0-5]`: Matches `250`–`255`.\n   - `2[0-4]\\d`: Matches `200`–`249`.\n   - `1\\d\\d`: Matches `100`–`199`.\n   - `[1-9]?\\d`: Matches `0`–`99` without leading zeros:\n     - `\\d` matches `0`–`9`.\n     - `[1-9]\\d` matches `10`–`99`.\n     *(Note: Putting higher numbers first ensures regex engines do not greedily match a single or double digit prefix when a three-digit match is possible).*\n\n2. **Dotted Structure:**\n   - The first octet: `(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)`\n   - Followed by exactly three repetitions of a dot and an octet: `(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}`\n\n3. **Whole-string Matching:**\n   - Because `re.fullmatch` inherently anchors the match to the entire string from start to end (equivalent to having implicit `^` at the beginning and `$` at the end), explicit anchors are not strictly required, though `^(?:...)$` can also be used.\n"}],"lost":[],"rankings":[{"by":"antigravity-gemini-pro-high","ranking":[{"label":"Response A","rank":1,"reason":"Provides a highly accurate and concise regex that avoids Python's Unicode digit matching issue, accompanied by a flawless and well-reasoned explanation."},{"label":"Response B","rank":2,"reason":"The regex correctly uses explicit character classes to prevent matching non-ASCII Unicode digits, but the explanation hallucinates a '\\b' boundary anchor that does not exist in the code."},{"label":"Response C","rank":3,"reason":"Fails to account for Python 3's default behavior where '\\d' matches non-ASCII Unicode digits, which creates a functional flaw for strict IP address validation."}]},{"by":"antigravity-gemini-flash-high","ranking":[{"label":"Response A","rank":1,"reason":"Provides an exact, fully functional regular expression using [0-9] to avoid non-ASCII Unicode digits in Python, with a clear and entirely accurate breakdown."},{"label":"Response B","rank":2,"reason":"The regular expression and test cases are correct, but the explanation in section 3 introduces phantom '\\b' word-boundary tokens that are not present in the actual pattern."},{"label":"Response C","rank":3,"reason":"Uses '\\d' instead of '[0-9]', which allows non-ASCII Unicode digits by default in Python 3 unless the re.ASCII flag is used."}]},{"by":"antigravity-gemini-flash-low","ranking":[{"label":"Response B","rank":1,"reason":"It strictly enforces ASCII digits with `[0-9]` (avoiding Python 3's default Unicode digit matching with `\\d`), omits unnecessary outer anchors since `re.fullmatch` already anchors the string, and provides comprehensive tests."},{"label":"Response A","rank":2,"reason":"It correctly uses `[0-9]` to avoid matching non-ASCII Unicode digits in Python 3 and structures the octet range cleanly, though adding explicit `^` and `$` anchors is redundant when using `re.fullmatch`."},{"label":"Response C","rank":3,"reason":"It relies on `\\d` without the `re.ASCII` flag, causing it to inadvertently match Unicode digits (such as Arabic-Indic numerals) as valid IPv4 octets in Python 3."}]}],"aggregate":[{"label":"Response A","averageRank":1.333,"votes":3},{"label":"Response B","averageRank":1.667,"votes":3},{"label":"Response C","averageRank":3,"votes":3}],"judge":{"model":"antigravity-gemini-flash-low","blind":true},"calls":7}}}
+
+data: [DONE]
+

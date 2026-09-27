@@ -453,3 +453,60 @@ is where a member was wrong, and there the judge was from outside by
 construction. So the honest reading is: no evidence for the rule, and no
 test of its worst case yet. The decision on the shipped default is the
 owner's and is recorded in `docs/backlog.md`.
+
+## Second addendum: the chairman in its worst case, 27 September
+
+The one thing the first addendum could not show: what a chairman does when
+its **own** answer is the wrong one. Pre-stated before the run (the plan of
+the same day): the Gemini ladder of `docs/measure-a-model.md` with its
+weakest rung, `antigravity-gemini-flash-low`, seated as chairman
+(`judge_allow_member: true`), on the six questions, where that rung had been
+wrong twice on 23 September. Read: on each question where the chairman's own
+answer is wrong, does the synthesis follow the peers' aggregate or the
+chairman's answer, and where did the chairman rank itself? Declared in the
+host's overlay as `capitoline-chair-ladder` for the run and removed after;
+six deliberations from 09:16 to 09:26 CEST, streamed, no `524`, seven calls
+each, in `results-chairman-ladder/`.
+
+**The worst case happened three times.** The chairman's own answer was wrong
+on `tcp-keepalive` (7,425 s, from "7200 + 675 = 7425" written out), on
+`rf2-node-failure` (the registered disqualifier: "the cluster cannot restore
+RF2 redundancy … cannot place two copies across two nodes"), and on
+`ec-backup-6-nodes` (a 4+2 strip offered as an option under RF2). Its other
+three answers were correct.
+
+| Question | chairman's own answer | its own ballot put itself | aggregate | synthesis | derived / unsourced-correct / unsourced-wrong |
+|---|---|---|---|---|---|
+| `rf2-node-failure` | **wrong** | last | flash-high 1.33, pro-high 2.33, flash-low 2.33 | correct | 0 / 0 / 0 |
+| `subnet-27` | correct | last | flash-high 1, pro-high 1.33, flash-low 1.33 | correct | 0 / 0 / 0 |
+| `tcp-keepalive` | **wrong** | last | flash-high 1, pro-high 1.33, flash-low 3 | correct | 2 / 1 / 0 |
+| `ipv4-regex` | correct | last | pro-high 1.33, flash-high 1.67, flash-low 3 | correct | 0 / 0 / 0 |
+| `ec-backup-6-nodes` | **wrong** | last | flash-high 1, pro-high 1.67, flash-low 2.67 | correct | 0 / 0 / 0 |
+| `rf3-min-nodes` | correct | second | flash-high 1, flash-low 2, pro-high 3 | correct | 0 / 0 / 0 |
+
+On all three the synthesis followed the top-ranked answer and contradicted
+the chairman's own: 7,875 s with the nine-probe timeline written out;
+"if the two surviving nodes have sufficient free storage capacity, background
+services automatically re-replicate under-replicated data between the two
+remaining nodes to restore two copies"; a 4+1 strip at 1.25× and no 4+2. The
+chairman ranked its own answer last on five questions of six and second on
+the sixth, where the aggregate agreed. The unsourced-correct remark is
+`TCP_CLOSE` as the socket state at teardown, in no member's answer and true;
+the two derived figures are the probe times 7,350 and 7,725, arithmetic on
+the members' 75 s. Every other claim traced to a member. All six syntheses
+were checked against the registered truths and the sources above.
+
+### What it says
+
+The seat-apart rule (§12.3) was written against a synthesizer that would
+weigh its own answer. Put in its worst case — the weakest model of the
+family as chairman, wrong on half the questions — the chairman weighed the
+peers' verdict instead of its own every time, and the syntheses were as
+correct as a seat-apart judge's. With the first addendum, that is 18
+chairman syntheses over six question shapes, three of them with a wrong
+chairman, and no harm measured. The rule therefore has no measured
+justification left; what it keeps is the certainty rather than the
+likelihood, at the price of the best seated model never writing the final
+answer. The shipped default stays seated apart by the owner's decision of
+the same day, taken before this run; the measurement is here for the day
+that decision is revisited, and the backlog carries no open item on it.
