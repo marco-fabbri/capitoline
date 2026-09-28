@@ -152,7 +152,7 @@ the path moves to free-tier or self-hosted inference instead.
    is the software using the owner's subscription to run itself.
 4. **A path that takes free text from another person uses something else**:
    free-tier inference (app-one already holds a Gemini free-tier key),
-   self-hosted (the platform, Ollama), or API keys if the no-pay-per-use rule is ever
+   self-hosted (the platform), or API keys if the no-pay-per-use rule is ever
    lifted. This is not a matter of volume and cannot be bought off with a
    rate limit.
 5. Never pool accounts, and give every application its own service token —
