@@ -56,24 +56,83 @@ regimes:
 The rest of this document is the evidence: the cases, then each provider's
 words, then the line drawn from them.
 
-## What you can do, case by case
+## What you can and cannot do, with examples
 
-"Yes" means within the reading this document takes, not a guarantee. The
-column that matters most is the account: the same case changes answer when
-it moves from a personal plan to company credentials.
+"Can" means within the reading this document takes, not a guarantee. The
+account decides most answers: the same example changes verdict when it moves
+from a personal plan to credentials the company holds.
 
-| Case | Personal plan | Company credentials |
-|---|---|---|
-| You ask the models yourself — Claude Code over MCP, your scripts, the council | **Yes** | **Yes** |
-| Your software serves other people, the prompt composed by the software (app-one's `/dinner`) | **Yes, within the four conditions** | **Yes**, under the company's terms |
-| Content you generate and publish (recipes, drafts, images) | **Yes** | **Yes** |
-| Claude Code on your employer's repositories, as part of your job | **The employer's policy decides**; the code goes to a consumer account (training unless you opt out) | **Yes** — the ordinary use of a Team or Enterprise seat |
-| Your employer's or its customers' data through the models — tickets, logs, customer documents | **No**: not yours to send to a consumer account, and no data processing agreement | **Yes**, under the agreement the company signed |
-| Other people type their own questions — a chat, a key handed to a friend, a team channel | **No**: the account made "available to anyone else" | **Yes**, for the company's own authorized users, on API keys or workspace service identities |
-| An internal company service — internal agents, a ticket-analysis bot | **No**, on both counts above | **Yes**: the case OpenAI's service accounts and Anthropic's API-key clause describe |
-| Capitoline offered to outside users as a product | **No** | **Only under commercial terms**, with each end user authenticating with their own credentials (Anthropic) |
-| Someone else installs Capitoline on their own accounts | **Yes**, on their accounts and their reading | **Yes**, on their company's |
-| A company project paid for with one person's consumer plan | **A weak shape**: the account and its history are the person's and leave with them; consumer terms and content clauses apply to company data; Anthropic's European terms define a consumer as someone "acting wholly or mainly outside your trade, business, craft or profession" | — the shape it should have |
+### On your own plan
+
+You can:
+
+- **Ask the models yourself, from anything.** Claude Code on your Mac calling
+  `ask_model` or `ask_council` over MCP; Open WebUI pointed at the gateway
+  for your own chats; a script of yours that asks Codex to review a diff
+  before you commit. You are the account holder, using the official CLI in
+  the headless mode its provider documents.
+- **Let your software run on it, for you.** A nightly job that drafts the
+  articles of your travel blog and publishes them after you read them; a
+  batch that fills your recipe app's database; images generated for your own
+  site. Content you generate and then publish is your use; who reads it
+  afterwards does not matter.
+- **Let your software serve other people, if nobody else writes the
+  prompt.** A family-meal bot: a parent presses a fixed "what's for dinner"
+  button, the software builds the prompt from the menu, the season
+  and preferences picked from a closed list, and sends back a suggestion.
+  The parent receives the software's output and never talks to the model.
+  All four conditions below must hold.
+
+You cannot:
+
+- **Give someone else a way to ask their own questions.** A gateway key for
+  your partner's chat app; a Telegram bot where anyone types a question and
+  your Max answers it; an Open WebUI you share with friends. That is the
+  account "available to anyone else", in the words of Anthropic, OpenAI and
+  xAI, whatever the key is called.
+- **Add a free-text field to an app that is otherwise fine.** A *tell us
+  what your child likes* box in prose instead of a closed list turns the
+  family-meal bot into the case above. That path uses something else: a free-tier key, self-hosted
+  inference, or a paid API.
+- **Sell it or offer it as a service.** No subscription, no per-use charge,
+  no access resold, even at cost.
+- **Send data that is not yours to send.** Your employer's documents, its
+  customers' tickets, someone else's personal data: on a consumer plan they
+  fall under the content clauses below (training unless you opt out, Google
+  staff review, xAI's licence) with no data processing agreement.
+- **Pool accounts.** Two Max subscriptions behind one gateway to double the
+  limits is an explicit breach, not a gray area.
+
+### On a seat of a business plan
+
+The same lists as above: a seat is still one person's, and a colleague
+asking their own questions through it is the shared-account case again. What
+changes is the data. Work material — your company's code, documents,
+tickets — belongs here, under the agreement the company signed rather than
+the consumer terms, and on Google the consumer Antigravity terms, widest
+clause included, stop applying under Gemini Enterprise.
+
+### With credentials the company holds
+
+This is the only way Capitoline may answer other people's own questions.
+You can, for example:
+
+- **Run an internal ticket-triage service** on a Codex service account of the
+  company's ChatGPT workspace — the shared integration OpenAI's service
+  accounts exist for (their own documentation's example list includes an
+  "incident-triage-bot").
+- **Give colleagues internal agents** backed by the company's Anthropic API
+  key, which Anthropic allows "for use by the customer's own authorized
+  users" as long as the company is billed.
+- **Put the council in front of a team** on those credentials, each caller
+  with a gateway key of their own, so `/v1/usage` shows who spent what.
+
+You still cannot offer it to people outside the company as a product except
+under the provider's commercial terms, with each end user authenticating with
+their own credentials (Anthropic's wording, quoted below). Capitoline never
+touches the credential — the CLI signs in with whatever the host gives it —
+so this is configuration on the host; it is pay-per-use, and whether to pay
+is the company's decision, not the owner's personal rule.
 
 ## The pattern
 
@@ -403,7 +462,7 @@ clause names is a product that lets *its* users sign in with, or spend, the
 developer's plan; that is what Anthropic shut down in February 2026, and the
 sentence sits in a paragraph about OAuth and about developers who should be
 using API keys. The broad reading would also forbid a script that summarises
-the owner's mail and sends the summary to his wife, which is not what the
+the owner's mail and sends the summary to a family member, which is not what the
 clause pursues and not how anyone reads it.
 
 So the line is drawn at **free-form passthrough**:
@@ -473,15 +532,13 @@ to free-tier or self-hosted inference instead.
    site. Who reads the result afterwards does not matter, as with any text
    written with a model and published.
 3. **A request another person triggered may be answered by a subscription
-   provider only when all four conditions above hold.** app-one's `/dinner`
-   is the case that settled this: a parent types a fixed command, the Worker
-   builds the prompt from the menu, the month, the dishes already
-   suggested and a set of taste codes taken from a closed list, and sends a
-   dinner suggestion back. No word the parent wrote reaches the model. That
-   is the software using the owner's subscription to run itself.
+   provider only when all four conditions above hold.** The family-meal bot
+   above is the pattern: the software builds the prompt from its own data
+   and a closed list of choices; no word the person wrote reaches the model.
+   That is the software using the owner's subscription to run itself.
 4. **A path that takes free text from another person uses something else**:
-   free-tier inference (app-one already holds a Gemini free-tier key),
-   self-hosted (the platform), or API keys if the no-pay-per-use rule is ever lifted.
+   free-tier inference, self-hosted models, or API keys under the provider's
+   business terms.
    This is not a matter of volume and cannot be bought off with a rate limit.
 5. **Credentials are per application, never per person.** Never pool
    accounts; every application gets its own credential — a gateway key or a
