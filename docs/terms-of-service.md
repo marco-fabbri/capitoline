@@ -1,8 +1,12 @@
 # Terms of service: can you use Capitoline with your accounts, and for what
 
-**An interpretation, not legal advice.** This is the owner's reading of the
-four providers' terms as they stood when they were last read, with the
-sentences that matter quoted verbatim from the primary pages. It records which
+**A personal interpretation, not legal advice.** This is the reading of the
+author of Capitoline, who is not a lawyer, of the four providers' terms as
+they stood when they were last read, with the sentences that matter quoted
+verbatim from the primary pages. Nothing here has been reviewed by a lawyer
+or confirmed by any provider; anyone relying on it for their own accounts
+should read the terms that bind them, and take legal advice where it
+matters. It records which
 reading Capitoline follows and why, so that a change in a text — or a
 provider enforcing a broader reading than the one taken here — is visible
 rather than discovered. A provider can change its terms at any time and is

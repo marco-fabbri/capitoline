@@ -91,5 +91,6 @@ providers' terms (Anthropic, OpenAI, Google and xAI), with the clauses that
 matter quoted verbatim and dated. In short: yes for your own use on your
 own plan; a business seat is still one person's; a service for colleagues
 needs credentials the company holds. It is an
-interpretation, not legal advice: anyone installing Capitoline reads the
-terms that bind their own accounts.
+personal interpretation by the author, who is not a lawyer, and not legal
+advice: anyone installing Capitoline reads the terms that bind their own
+accounts.
