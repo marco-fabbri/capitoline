@@ -284,6 +284,61 @@ recorded here is which reading is being followed and why, so that if one of
 the four conditions stops holding, the change is visible and the path moves
 to free-tier or self-hosted inference instead.
 
+## What the consumer terms let the provider do with the content
+
+This matters the moment the content is not the owner's — work documents,
+customer tickets, colleagues' data — and it is the same for Capitoline as for
+the providers' own apps, because Capitoline changes nothing about which
+account the CLI signs in with.
+
+- **Anthropic** (Consumer Terms): "We may use Materials to provide, maintain,
+  and improve the Services and to develop other products and services,
+  including training our models, unless you opt out of training through your
+  account settings. Even if you opt out, we will use Materials for model
+  training when: (1) you provide Feedback to us regarding any Materials, or
+  (2) your Materials are flagged for safety review".
+- **OpenAI** (Europe Terms): "We can use your Content worldwide to provide,
+  maintain, develop, and improve our Services"; training can be switched off
+  ("If you do not want us to use your Content to train our models, you have
+  the option to opt out by updating your account settings").
+- **Google** (Antigravity terms): "We use Interactions to evaluate, develop,
+  and improve Google and Alphabet research, products, services and machine
+  learning technologies." And: "Google employees and contractors may access,
+  view, review and use Interactions."
+- **xAI** (Consumer Terms): inputs come with "an irrevocable, perpetual,
+  transferable, sublicensable, royalty-free, and worldwide right to SpaceXAI"
+  to use them, among other things, for "developing new products or features".
+
+None of the four consumer texts read here contains a data processing
+agreement. When a company has a provider process personal data on its behalf,
+GDPR (Art. 28) requires one, and the providers offer it with their business
+plans, which each of them names: Anthropic's Commercial Terms for "Team,
+Enterprise, and Claude API users"; OpenAI's "Business Terms govern use of
+ChatGPT Enterprise, our APIs, and our other services for businesses and
+developers"; Antigravity used "through Gemini Enterprise (Google Cloud),
+Gemini Enterprise for Business or a Google Workspace subscription" falls
+under "the terms of use accepted or signed by your administrator"; and xAI's
+"Enterprise Terms of Service govern the use of our Services for developers
+and businesses".
+
+## What can be done, case by case
+
+The reading above applied to the cases that come up. "Yes" means within the
+reading this document takes, not a guarantee.
+
+| Case | Verdict | Why |
+|---|---|---|
+| The owner asks the models himself — Claude Code over MCP, his scripts, the council | **Yes** | Ordinary individual use of the official binaries in their documented headless modes. |
+| The owner's software serves other people, the prompt composed by the software (app-one's `/dinner`) | **Yes, within the four conditions** | The model is a component of the owner's software; nobody else writes the prompt. |
+| Content the owner generates and publishes (recipes, drafts, images) | **Yes** | The owner's use; who reads the result afterwards does not matter. |
+| Other people type their own questions — a chat, a key handed to a friend, a team channel | **No, not on these subscriptions** | The account made "available to anyone else". Business accounts with their own terms, or self-hosted inference. |
+| Someone else installs Capitoline on their own accounts, for themselves | **Yes, on their accounts and their reading** | The software is a tool; each installation answers to the terms of its own accounts. |
+| Capitoline offered to others as a service on the operator's subscriptions | **No** | Anthropic's commercial paragraph and every provider's account-sharing clause. |
+| The owner uses it for his own job, on his own tasks, with material that is his to send | **Yes, subject to the employer's policy** | Anthropic's note puts "Claude Pro use for individuals or entities" outside its Commercial Terms, and OpenAI's European terms have an addendum for "commercial or business use"; neither forbids working with a personal plan. The employer's rules on AI tools come first. |
+| The owner runs the employer's or its customers' data through these subscriptions — tickets, logs, customer documents | **Not with these accounts** | The content clauses above apply to it (training unless opted out, Google staff review, xAI's licence) and there is no data processing agreement; the data is not the owner's to send there. Company accounts on business terms, or Capitoline over the company's own models (the platform, `docs/backlog.md`). |
+| An internal company service for colleagues — internal agents, a ticket-analysis bot | **Not on personal subscriptions** | Both reasons at once: the account made available to others, and company data on consumer terms. The shape is a company account with API keys under business terms, or Capitoline inside the platform. |
+| A company project paid for with an individual's consumer plan | **The company's decision, and a weak shape** | The account and its history belong to the person, not the company, and leave with them; the content clauses above apply to the project's data; no data processing agreement. Anthropic's European terms define a consumer as someone "acting wholly or mainly outside your trade, business, craft or profession", which a company project is not. The same line as above: business work on business plans. |
+
 ## What changed in Capitoline, read against the line
 
 - **The gateway's own keys** (`/v1/admin/keys`, 2026-09-27). A key is a
