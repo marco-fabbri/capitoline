@@ -84,3 +84,9 @@ Capitoline uses consumer subscriptions through the providers' official
 clients, for personal use. What each provider allows in headless, automated
 mode must be checked provider by provider and can change. Never pool
 multiple accounts of the same provider: it violates explicit clauses.
+
+`docs/terms-of-service.md` is the owner's reading of the four providers'
+terms — Anthropic, OpenAI, Google and xAI — with the clauses that matter
+quoted verbatim and dated, and the line Capitoline draws from them. It is an
+interpretation, not legal advice: anyone installing Capitoline reads the
+terms that bind their own accounts.

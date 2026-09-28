@@ -243,3 +243,23 @@ describe("the backlog", () => {
     for (const name of ["capitoline-gemini", "capitoline-claude", "capitoline-openai"]) expect(guide).toMatch(new RegExp("  " + name + ":"));
   });
 });
+
+// The four conditions are stated twice: once where they are argued
+// (docs/terms-of-service.md) and once where an application's author checks
+// their own path against them (docs/clients.md §5). A condition reworded in
+// one and not the other would leave the two documents drawing different
+// lines, so they are compared word for word.
+describe("the four conditions", () => {
+  const numbered = (text: string): string[] =>
+    text.split("\n").filter((l) => /^[1-4]\. /.test(l)).map((l) => l.replace(/^[1-4]\. /, "").replace(/\*\*/g, ""));
+  it("are the same four in the terms document and in the client guide", () => {
+    const tos = readFileSync("docs/terms-of-service.md", "utf8");
+    const argued = section(tos, "## Where the line is");
+    // In the terms document each condition is a bold heading followed by its
+    // explanation; the heading is the condition.
+    const conditions = numbered(argued).map((l) => l.split(/(?<=\.) /)[0]);
+    const checked = numbered(section(readFileSync("docs/clients.md", "utf8"), "## 5. "));
+    expect(conditions).toHaveLength(4);
+    expect(checked).toEqual(conditions);
+  });
+});

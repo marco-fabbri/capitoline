@@ -130,6 +130,11 @@ On the host, as root:
 
 5. Update the table above with the new version, the date and what changed.
 
+6. If the update changed how the CLI signs in, or the provider announced a
+   change to its plans or terms, re-read `docs/terms-of-service.md` against
+   the provider's current pages and date the re-reading there. Quote from the
+   page itself, never from a summary of it.
+
 If only the `image` line of the smoke test fails, the CLI flags are not the
 place to look: that line exercises the sudoers entry of `docs/deploy.md` §5,
 the helper installed in §7.1 and the `strict` settings of §6.4. Start at
