@@ -1,4 +1,4 @@
-# Terms of service: what the CLI-behind-an-API pattern is allowed to do
+# Terms of service: can you use Capitoline with your accounts, and for what
 
 **An interpretation, not legal advice.** This is the owner's reading of the
 four providers' terms as they stood when they were last read, with the
@@ -17,6 +17,63 @@ the ones quoted.
 Re-read it when a provider announces a change to its plans or terms, when a
 CLI update changes how it signs in, and before adding a provider
 (`docs/update-clis.md`).
+
+## Can you use Capitoline with your accounts?
+
+**Yes, for your own use.** Capitoline runs the providers' official CLIs,
+unmodified, in the headless modes each provider documents for scripts, signed
+in with your own account. Every provider read here allows that for the
+account holder, and none of them cares that the program launching the CLI is
+Capitoline rather than a shell script. What the terms regulate is **who
+uses the account and whose data goes through it**, and that gives three
+regimes:
+
+1. **Your personal plan** (Claude Pro or Max, ChatGPT Plus or Pro, Google AI
+   Pro, SuperGrok). You and your own software: your questions, your scripts,
+   Claude Code over MCP, the council, content you generate and publish, and
+   applications of yours that serve other people as long as nobody else
+   writes the prompt (the four conditions, below). Not: other people asking
+   their own questions through it, Capitoline offered as a service, or data
+   that is not yours to send — your employer's or its customers'.
+2. **Your seat on a business plan** (Claude Team or Enterprise, ChatGPT
+   Business or Enterprise, Gemini Enterprise, Grok Business). The same as
+   above — a seat is still one person's — but under the business terms the
+   company signed, which is where work data belongs. On Google this also
+   removes the widest clause of the consumer terms, which do not apply to
+   Gemini Enterprise.
+3. **Company credentials for a shared service** (an Anthropic API key, a
+   ChatGPT workspace service account or Codex access token, a Gemini
+   Enterprise key, an xAI API key). This is the one regime in which
+   Capitoline may serve other people's own questions — an internal service
+   for colleagues, internal agents, a ticket-analysis bot — because each
+   provider says so for credentials the company holds and pays for (quoted
+   under **Business plans and company credentials**). Capitoline never
+   touches the credential: the CLI signs in with whatever the host gives it,
+   so this is configuration on the host, not a change to the gateway. It is
+   pay-per-use, which is the company's choice to make; the owner's personal
+   rule against pay-per-use APIs is about the owner's own money.
+
+The rest of this document is the evidence: the cases, then each provider's
+words, then the line drawn from them.
+
+## What you can do, case by case
+
+"Yes" means within the reading this document takes, not a guarantee. The
+column that matters most is the account: the same case changes answer when
+it moves from a personal plan to company credentials.
+
+| Case | Personal plan | Company credentials |
+|---|---|---|
+| You ask the models yourself — Claude Code over MCP, your scripts, the council | **Yes** | **Yes** |
+| Your software serves other people, the prompt composed by the software (app-one's `/dinner`) | **Yes, within the four conditions** | **Yes**, under the company's terms |
+| Content you generate and publish (recipes, drafts, images) | **Yes** | **Yes** |
+| Claude Code on your employer's repositories, as part of your job | **The employer's policy decides**; the code goes to a consumer account (training unless you opt out) | **Yes** — the ordinary use of a Team or Enterprise seat |
+| Your employer's or its customers' data through the models — tickets, logs, customer documents | **No**: not yours to send to a consumer account, and no data processing agreement | **Yes**, under the agreement the company signed |
+| Other people type their own questions — a chat, a key handed to a friend, a team channel | **No**: the account made "available to anyone else" | **Yes**, for the company's own authorized users, on API keys or workspace service identities |
+| An internal company service — internal agents, a ticket-analysis bot | **No**, on both counts above | **Yes**: the case OpenAI's service accounts and Anthropic's API-key clause describe |
+| Capitoline offered to outside users as a product | **No** | **Only under commercial terms**, with each end user authenticating with their own credentials (Anthropic) |
+| Someone else installs Capitoline on their own accounts | **Yes**, on their accounts and their reading | **Yes**, on their company's |
+| A company project paid for with one person's consumer plan | **A weak shape**: the account and its history are the person's and leave with them; consumer terms and content clauses apply to company data; Anthropic's European terms define a consumer as someone "acting wholly or mainly outside your trade, business, craft or profession" | — the shape it should have |
 
 ## The pattern
 
@@ -220,6 +277,67 @@ rule — the spike in the backlog decides. Second, condition 4 below inverts
 for xAI: its output must not pass as the owner's own, so an application that
 shows Grok's output to someone else discloses that it is AI-generated.
 
+## Business plans and company credentials
+
+Sources, read 2026-09-28: the Claude Code legal page (above);
+[Codex access tokens](https://developers.openai.com/codex/enterprise/access-tokens)
+and [Codex service accounts](https://developers.openai.com/codex/enterprise/service-accounts);
+the Antigravity terms (above); the xAI consumer terms and Grok Build
+documentation (above). The business agreements themselves — Anthropic's
+Commercial Terms, OpenAI's Business Terms, Google Cloud's and xAI's
+Enterprise terms — were not read for this document; what is quoted is what
+the pages above say about them.
+
+- **Anthropic.** Claude Code's OAuth sign-in is for "purchasers of Claude
+  Free, Pro, Max, Team, and Enterprise subscription plans", so a Team or
+  Enterprise seat signs in exactly as a personal plan does. For a shared
+  service the page is explicit: the restriction on routing requests "does
+  not restrict how customers provision and manage their own API keys or
+  third-party inference provider credentials — for example, configuring an
+  API key in a development environment, secrets manager, or machine image
+  for use by the customer's own authorized users — provided the resulting
+  usage is billed to the key owner under their agreement with Anthropic (or
+  the applicable provider) and is not resold or intermediated". A company
+  API key on the host, used by the company's own people through Capitoline,
+  is that case.
+- **OpenAI.** Codex access tokens "authenticate trusted non-interactive local
+  workflows, including Codex CLI and app-server-based automation, with a
+  ChatGPT workspace identity", are "currently supported for ChatGPT Business
+  and Enterprise workspaces", and are meant for "codex exec jobs that run
+  from trusted automation". A personal access token "represents the
+  workspace member who creates it"; for a shared service there are service
+  accounts, which "let you run and scale headless Codex workflows across your
+  organization without relying on an employee's account. Each continuous
+  integration (CI) runner, scheduled job, or shared integration gets its own
+  ChatGPT workspace identity". One limit: "Service accounts are available
+  only on pay-as-you-go plans." An internal service built on Capitoline is a
+  shared integration, and a service account is its identity.
+- **Google.** The Antigravity terms stop at the business door: "If you are
+  accessing the Service through Gemini Enterprise (Google Cloud), Gemini
+  Enterprise for Business or a Google Workspace subscription on the Google
+  Cloud Pre-GA Offering Terms, or with a Gemini Enterprise API Key, then you
+  are subject to the terms of use accepted or signed by your administrator
+  applicable to such service (including its applicable terms for
+  downloadable software) and the terms below do not apply to you." The
+  clause against "using the Service in connection with products not provided
+  by us" is in the terms below; the administrator's agreement governs
+  instead.
+- **xAI.** "Our Enterprise Terms of Service govern the use of our Services
+  for developers and businesses, including SpaceXAI APIs", and Grok Build
+  sends non-browser environments to an API key. A work email may link an
+  account to the company's plan ("your account may be linked to that
+  organization's Grok Enterprise subscription").
+
+**Reading.** A business seat is not a shared account: the account-sharing
+clauses follow the seat, and a colleague asking their own questions through
+someone's seat is the same case as on a personal plan. What business terms
+add is twofold: the company's agreement governs the data, and each provider
+offers a credential that belongs to the company rather than to a person — an
+API key, a service account, an Enterprise key — which is the sanctioned way
+to put a service in front of many people. Capitoline with such a credential
+is an internal service run by the company; the untested part is operational
+(the CLIs' API-key and token sign-in on the host), not contractual.
+
 ## Side by side
 
 | | Anthropic | OpenAI | Google | xAI |
@@ -229,6 +347,43 @@ shows Grok's output to someone else discloses that it is AI-generated.
 | Third-party tools | route requests "on behalf of their users" forbidden | — | "products not provided by us", "third party software, tools, or services to access the Service" | — |
 | Branding of output | brand guidelines | brand guidelines | — | attribution and AI disclosure required |
 | How firm the owner's reading is | firmest | rests on product docs | most exposed | not yet applicable |
+
+## What the consumer terms let the provider do with the content
+
+This matters the moment the content is not the owner's — work documents,
+customer tickets, colleagues' data — and it is the same for Capitoline as for
+the providers' own apps, because Capitoline changes nothing about which
+account the CLI signs in with.
+
+- **Anthropic** (Consumer Terms): "We may use Materials to provide, maintain,
+  and improve the Services and to develop other products and services,
+  including training our models, unless you opt out of training through your
+  account settings. Even if you opt out, we will use Materials for model
+  training when: (1) you provide Feedback to us regarding any Materials, or
+  (2) your Materials are flagged for safety review".
+- **OpenAI** (Europe Terms): "We can use your Content worldwide to provide,
+  maintain, develop, and improve our Services"; training can be switched off
+  ("If you do not want us to use your Content to train our models, you have
+  the option to opt out by updating your account settings").
+- **Google** (Antigravity terms): "We use Interactions to evaluate, develop,
+  and improve Google and Alphabet research, products, services and machine
+  learning technologies." And: "Google employees and contractors may access,
+  view, review and use Interactions."
+- **xAI** (Consumer Terms): inputs come with "an irrevocable, perpetual,
+  transferable, sublicensable, royalty-free, and worldwide right to SpaceXAI"
+  to use them, among other things, for "developing new products or features".
+
+None of the four consumer texts read here contains a data processing
+agreement. When a company has a provider process personal data on its behalf,
+GDPR (Art. 28) requires one, and the providers offer it with their business
+plans, which each of them names: Anthropic's Commercial Terms for "Team,
+Enterprise, and Claude API users"; OpenAI's "Business Terms govern use of
+ChatGPT Enterprise, our APIs, and our other services for businesses and
+developers"; Antigravity used "through Gemini Enterprise (Google Cloud),
+Gemini Enterprise for Business or a Google Workspace subscription" falls
+under "the terms of use accepted or signed by your administrator"; and xAI's
+"Enterprise Terms of Service govern the use of our Services for developers
+and businesses".
 
 ## Where the line is
 
@@ -284,61 +439,6 @@ recorded here is which reading is being followed and why, so that if one of
 the four conditions stops holding, the change is visible and the path moves
 to free-tier or self-hosted inference instead.
 
-## What the consumer terms let the provider do with the content
-
-This matters the moment the content is not the owner's — work documents,
-customer tickets, colleagues' data — and it is the same for Capitoline as for
-the providers' own apps, because Capitoline changes nothing about which
-account the CLI signs in with.
-
-- **Anthropic** (Consumer Terms): "We may use Materials to provide, maintain,
-  and improve the Services and to develop other products and services,
-  including training our models, unless you opt out of training through your
-  account settings. Even if you opt out, we will use Materials for model
-  training when: (1) you provide Feedback to us regarding any Materials, or
-  (2) your Materials are flagged for safety review".
-- **OpenAI** (Europe Terms): "We can use your Content worldwide to provide,
-  maintain, develop, and improve our Services"; training can be switched off
-  ("If you do not want us to use your Content to train our models, you have
-  the option to opt out by updating your account settings").
-- **Google** (Antigravity terms): "We use Interactions to evaluate, develop,
-  and improve Google and Alphabet research, products, services and machine
-  learning technologies." And: "Google employees and contractors may access,
-  view, review and use Interactions."
-- **xAI** (Consumer Terms): inputs come with "an irrevocable, perpetual,
-  transferable, sublicensable, royalty-free, and worldwide right to SpaceXAI"
-  to use them, among other things, for "developing new products or features".
-
-None of the four consumer texts read here contains a data processing
-agreement. When a company has a provider process personal data on its behalf,
-GDPR (Art. 28) requires one, and the providers offer it with their business
-plans, which each of them names: Anthropic's Commercial Terms for "Team,
-Enterprise, and Claude API users"; OpenAI's "Business Terms govern use of
-ChatGPT Enterprise, our APIs, and our other services for businesses and
-developers"; Antigravity used "through Gemini Enterprise (Google Cloud),
-Gemini Enterprise for Business or a Google Workspace subscription" falls
-under "the terms of use accepted or signed by your administrator"; and xAI's
-"Enterprise Terms of Service govern the use of our Services for developers
-and businesses".
-
-## What can be done, case by case
-
-The reading above applied to the cases that come up. "Yes" means within the
-reading this document takes, not a guarantee.
-
-| Case | Verdict | Why |
-|---|---|---|
-| The owner asks the models himself — Claude Code over MCP, his scripts, the council | **Yes** | Ordinary individual use of the official binaries in their documented headless modes. |
-| The owner's software serves other people, the prompt composed by the software (app-one's `/dinner`) | **Yes, within the four conditions** | The model is a component of the owner's software; nobody else writes the prompt. |
-| Content the owner generates and publishes (recipes, drafts, images) | **Yes** | The owner's use; who reads the result afterwards does not matter. |
-| Other people type their own questions — a chat, a key handed to a friend, a team channel | **No, not on these subscriptions** | The account made "available to anyone else". Business accounts with their own terms, or self-hosted inference. |
-| Someone else installs Capitoline on their own accounts, for themselves | **Yes, on their accounts and their reading** | The software is a tool; each installation answers to the terms of its own accounts. |
-| Capitoline offered to others as a service on the operator's subscriptions | **No** | Anthropic's commercial paragraph and every provider's account-sharing clause. |
-| The owner uses it for his own job, on his own tasks, with material that is his to send | **Yes, subject to the employer's policy** | Anthropic's note puts "Claude Pro use for individuals or entities" outside its Commercial Terms, and OpenAI's European terms have an addendum for "commercial or business use"; neither forbids working with a personal plan. The employer's rules on AI tools come first. |
-| The owner runs the employer's or its customers' data through these subscriptions — tickets, logs, customer documents | **Not with these accounts** | The content clauses above apply to it (training unless opted out, Google staff review, xAI's licence) and there is no data processing agreement; the data is not the owner's to send there. Company accounts on business terms, or Capitoline over the company's own models (the platform, `docs/backlog.md`). |
-| An internal company service for colleagues — internal agents, a ticket-analysis bot | **Not on personal subscriptions** | Both reasons at once: the account made available to others, and company data on consumer terms. The shape is a company account with API keys under business terms, or Capitoline inside the platform. |
-| A company project paid for with an individual's consumer plan | **The company's decision, and a weak shape** | The account and its history belong to the person, not the company, and leave with them; the content clauses above apply to the project's data; no data processing agreement. Anthropic's European terms define a consumer as someone "acting wholly or mainly outside your trade, business, craft or profession", which a company project is not. The same line as above: business work on business plans. |
-
 ## What changed in Capitoline, read against the line
 
 - **The gateway's own keys** (`/v1/admin/keys`, 2026-09-27). A key is a
@@ -391,3 +491,8 @@ reading this document takes, not a guarantee.
 6. **Google first.** Where a path is marginal, it is marginal on Antigravity
    first: the widest clause and the consequence it names (both accounts) are
    Google's.
+7. **Company credentials are the company's decision.** An installation that
+   serves colleagues runs on credentials the company holds and pays for (API
+   keys, service accounts, Enterprise keys), set in the host's secrets and
+   never in the repository, under the agreement the company signed. The
+   owner's own installation stays on his personal plans and serves him.
