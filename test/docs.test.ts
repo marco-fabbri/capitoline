@@ -254,7 +254,7 @@ describe("the four conditions", () => {
     text.split("\n").filter((l) => /^[1-4]\. /.test(l)).map((l) => l.replace(/^[1-4]\. /, "").replace(/\*\*/g, ""));
   it("are the same four in the terms document and in the client guide", () => {
     const tos = readFileSync("docs/terms-of-service.md", "utf8");
-    const argued = section(tos, "## Where the line is");
+    const argued = section(tos, "### The line, and four conditions");
     // In the terms document each condition is a bold heading followed by its
     // explanation; the heading is the condition.
     const conditions = numbered(argued).map((l) => l.split(/(?<=\.) /)[0]);
