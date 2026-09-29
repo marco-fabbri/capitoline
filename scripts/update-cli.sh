@@ -78,8 +78,16 @@ install_version() {  # $1: npm version, or "latest"
   if [[ -n "$pkg" ]]; then
     as_runner npm install -g --no-fund --no-audit --loglevel=error "$pkg@$1"
   else
-    as_runner bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash' > "$WORK/install.log" 2>&1 \
-      || { cat "$WORK/install.log" >&2; return 1; }
+    # The installer refuses to overwrite an installed binary ("delete the binary
+    # first"), so the binary goes — its copy is in $WORK — and comes back if
+    # the installer fails.
+    rm -f "$BIN"
+    if ! as_runner bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash' > "$WORK/install.log" 2>&1 || [[ ! -x "$BIN" ]]; then
+      cat "$WORK/install.log" >&2
+      install -o "$RUNNER" -g "$RUNNER" -m 0755 "$WORK/previous-binary" "$BIN"
+      echo "update-cli: the Antigravity installer failed; the previous binary is back" >&2
+      return 1
+    fi
   fi
 }
 
