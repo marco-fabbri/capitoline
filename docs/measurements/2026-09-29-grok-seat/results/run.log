@@ -1,0 +1,39 @@
+05:29:38 tcp-retries2 stage A: capitoline (9 calls)
+05:34:40 tcp-retries2 S4 done 9 calls, judge antigravity-claude-opus lost 0
+05:34:40 tcp-retries2 stage B: grok answer
+05:38:43 tcp-retries2 stage C: five rankings
+05:43:43 tcp-retries2 aggregate Response A=claude-opus:1.25 Response E=grok-4.7:1.75 Response B=codex-gpt-6-astra:2 Response D=antigravity-gemini-pro:3.5 Response C=antigravity-gpt-oss:4.5
+05:43:43 tcp-retries2 stage D: judge antigravity-claude-opus
+05:44:32 tcp-retries2 done S5 ok
+05:44:32 k8s-exclusive-cpus stage A: capitoline (9 calls)
+05:46:30 k8s-exclusive-cpus S4 done 9 calls, judge antigravity-claude-opus lost 0
+05:46:30 k8s-exclusive-cpus stage B: grok answer
+05:49:51 k8s-exclusive-cpus stage C: five rankings
+05:54:39 k8s-exclusive-cpus aggregate Response A=claude-opus:1.25 Response D=codex-gpt-6-astra:2.25 Response C=grok-4.7:2.75 Response E=antigravity-gemini-pro:3 Response B=antigravity-gpt-oss:4
+05:54:39 k8s-exclusive-cpus stage D: judge antigravity-claude-opus
+05:55:25 k8s-exclusive-cpus done S5 ok
+05:55:25 bgp-origin-med stage A: capitoline (9 calls)
+05:56:55 bgp-origin-med S4 done 10 calls, judge antigravity-claude-opus lost 0
+05:56:55 bgp-origin-med stage B: grok answer
+05:58:05 bgp-origin-med stage C: five rankings
+06:00:45 bgp-origin-med aggregate Response E=claude-opus:1.6 Response A=grok-4.7:2 Response C=codex-gpt-6-astra:3.2 Response B=antigravity-gemini-pro:3.4 Response D=antigravity-gpt-oss:4.4
+06:00:45 bgp-origin-med stage D: judge antigravity-claude-opus
+06:01:12 bgp-origin-med done S5 ok
+06:01:12 pve-quorum-4-nodes stage A: capitoline (9 calls)
+06:04:00 pve-quorum-4-nodes S4 done 9 calls, judge antigravity-claude-opus lost 0
+06:04:00 pve-quorum-4-nodes stage B: grok answer
+06:09:00 pve-quorum-4-nodes grok answer failed 
+06:09:00 ceph-or-zfs-3-nodes stage A: capitoline (9 calls)
+06:11:54 ceph-or-zfs-3-nodes S4 done 9 calls, judge antigravity-claude-opus lost 0
+06:11:54 ceph-or-zfs-3-nodes stage B: grok answer
+06:15:21 ceph-or-zfs-3-nodes stage C: five rankings
+06:20:21 ceph-or-zfs-3-nodes aggregate Response D=grok-4.7:1.5 Response B=claude-opus:1.75 Response E=codex-gpt-6-astra:3.25 Response A=antigravity-gpt-oss:3.5 Response C=antigravity-gemini-pro:4.25
+06:20:21 ceph-or-zfs-3-nodes stage D: judge antigravity-claude-opus
+06:21:48 ceph-or-zfs-3-nodes done S5 ok
+06:21:48 evpn-4-racks stage A: capitoline (9 calls)
+06:24:33 evpn-4-racks S4 done 9 calls, judge antigravity-claude-opus lost 0
+06:24:33 evpn-4-racks stage B: grok answer
+06:27:05 evpn-4-racks stage C: five rankings
+06:29:20 evpn-4-racks aggregate Response A=grok-4.7:1.25 Response B=claude-opus:2.25 Response D=codex-gpt-6-astra:2.5 Response E=antigravity-gemini-pro:4 Response C=antigravity-gpt-oss:5
+06:29:20 evpn-4-racks stage D: judge antigravity-claude-opus
+06:30:59 evpn-4-racks done S5 ok
