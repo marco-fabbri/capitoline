@@ -76,7 +76,7 @@ On a development machine, a short overlay runs the CLIs as yourself instead of t
 
 To work on it, `git config core.hooksPath .githooks` enables a check that refuses a commit carrying a session link or a key (`.githooks/public-check`, which also reads a private pattern list of your own if you keep one).
 
-A production host — a separate `runner` user that alone holds the CLI logins, a systemd service, backups, updates — is described step by step in **`docs/deploy.md`**. Cloudflare Tunnel and Access are optional there: the gateway issues and checks its own API keys, so it can serve a network of your own with nothing in front.
+A production host — a separate `runner` user that alone holds the CLI logins, a systemd service, backups, updates — is described step by step in **`docs/deploy.md`**. Cloudflare Tunnel and Access are optional there: the gateway issues and checks its own API keys, so it can serve a network of your own with nothing in front once `server.host` opens it beyond the loopback (`docs/deploy.md` §8.2).
 
 Connecting another application of your own: `docs/connecting-an-application.md`, which covers the two credentials — a key issued by the gateway (`Authorization: Bearer cap_…`, managed through `/v1/admin/keys` or `npm run keys` on the host) and a Cloudflare service token (`scripts/cf-service-token.sh` creates one and binds it to a name) — where the secret goes and what it may be used for. Every call is recorded under the caller's name: `GET /v1/usage` is the per-caller and per-model breakdown.
 

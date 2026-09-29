@@ -12,9 +12,11 @@
 # value, not a deletion. The merged result is validated once by the same strict
 # schema, so a mistyped key here is rejected by name.
 #
-# Secrets are not in this file and never should be: the Claude OAuth token
-# lives in /home/runner/.claude/capitoline.json, owned by runner and 0600, and
-# the gateway process never reads it.
+# Secrets are not in this file and never should be: the CLI logins belong to
+# the runner user (§6), and the gateway process never reads them.
+#
+# The two `callers` and the `admins` entry below are placeholders: replace
+# them, or empty them (`callers: {}`, `admins: []`).
 
 runner:
   user: runner                                # the CLIs run as this user, through sudo (§5)
@@ -24,6 +26,7 @@ usage:
   db_path: /var/lib/capitoline/usage.sqlite    # absolute: the service's working directory is the clone
 
 server:
+  # host: 0.0.0.0   # only without Cloudflare, once a key exists (docs/deploy.md §8.2)
   access:
     # What to call each service token in /v1/usage, by its client id.
     # Cloudflare's service-token JWT carries the client id and not the name
@@ -51,13 +54,12 @@ providers:
     # host — which copying the whole list into `args` did not, since a list
     # replaces and is never appended to.
     #
-    # --settings points at the file holding the OAuth token, readable by
-    # runner only, and applies even with --setting-sources "". Needed only on
-    # a host authenticated with a setup token; a host where `claude /login`
-    # was run interactively leaves this out entirely.
-    args_extra:
-      - --settings
-      - /home/runner/.claude/capitoline.json
+    # Empty after the interactive login of docs/deploy.md §6.1. A host
+    # authenticated with a setup token instead writes
+    #   [--settings, /home/runner/.claude/capitoline.json]
+    # the file holding the token, readable by runner only; --settings applies
+    # even with --setting-sources "".
+    args_extra: []
 
   codex:
     binary: /home/runner/.npm-global/bin/codex

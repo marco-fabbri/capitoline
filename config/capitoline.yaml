@@ -1,6 +1,7 @@
 # Capitoline configuration. Everything that depends on a CLI's flags, model
-# aliases or output format lives here, not in code. Values verified 2026-09-20
-# against Claude Code 2.1.278, Codex CLI 0.154.0, Antigravity CLI 1.2.7.
+# aliases or output format lives here, not in code. Verified against the CLI
+# versions of docs/update-clis.md, "Versions in use"; a host changes only what
+# its overlay says (docs/deploy.md §7).
 
 server:
   port: 8080
@@ -78,9 +79,10 @@ providers:
     system_prompt_flag: --system-prompt
     system_prompt_flag_prefix: null                  # none: the flag carries the text, not a key="value" override
     prompt_via: stdin
-    # Production adds:  --settings /home/runner/.claude/capitoline.json
-    # That file (owned by runner, mode 0600) holds {"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}.
-    # --settings applies even with --setting-sources "", so the gateway process never sees the token.
+    # A host authenticated with a setup token adds, through its overlay's args_extra (docs/deploy.md §6.1),
+    # --settings /home/runner/.claude/capitoline.json: that file (owned by runner, mode 0600) holds
+    # {"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}, and --settings applies even with --setting-sources "",
+    # so the gateway process never sees the token.
 
   codex:
     binary: codex

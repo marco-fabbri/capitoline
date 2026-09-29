@@ -2,16 +2,24 @@
 
 Target: a Debian/Ubuntu host. Where that host lives does not matter to this
 document: a virtual machine on any hypervisor, an unprivileged LXC on
-Proxmox (the first deployment) or bare metal.
-Every command is run as root on the host unless the prompt says otherwise.
+Proxmox, or bare metal. Every command is run as root on the host unless the
+prompt says otherwise. "Design §n" is `docs/superpowers/specs/2026-09-19-capitoline-design.md`.
 
 The result is one systemd service (`capitoline`, user `capitoline`) that
 runs the CLIs through `sudo` as a second user (`runner`), which is the only
-user holding the subscription credentials, behind a Cloudflare Tunnel with
-Cloudflare Access in front. No inbound port is opened.
+user holding the subscription credentials. Clients reach it in one of two
+ways, and Cloudflare is only one of them:
 
-Three steps need the owner with a browser on their own computer: `claude setup-token`
-(§6.1), the Codex device code (§6.2) and the Antigravity login (§6.3).
+- **Through a Cloudflare Tunnel with Access in front** (§9): no inbound port
+  is opened, and Cloudflare checks every caller before the gateway sees it.
+- **On a network of your own, without Cloudflare** (§8.2): the gateway
+  listens on the host's address and its own API keys (§8.1) are the door.
+
+Three steps need the owner of each subscription, with a browser on their own
+computer: the Claude login (§6.1), the Codex device code (§6.2) and the
+Antigravity login (§6.3). A host that skips one of the three CLIs still
+starts: that provider shows as down in `/health`, and the councils seat what
+is left.
 
 ## 1. Host
 
@@ -31,14 +39,20 @@ differ:
   systemd 257 on Debian 13 does not start cleanly in an unprivileged
   container (`pct create ... --unprivileged 1 --features nesting=1`).
   Inbound comes only through the tunnel, so no port is forwarded.
-- Nutanix AHV: a cloud-init Debian/Ubuntu image, VirtIO disk and NIC.
+- A virtual machine: a cloud-init Debian/Ubuntu image, VirtIO disk and NIC.
+- An arm64 host: the Antigravity version check reads the installer's
+  manifest for the platform, `linux_amd64` in the repository; set
+  `providers.antigravity.version.latest.manifest` to the `linux_arm64` one in
+  the overlay (§7).
 - Bare metal: nothing special.
 
 ```sh
-apt update && apt install -y curl ca-certificates sudo git jq gnome-keyring dbus-user-session
+apt update && apt install -y curl ca-certificates sudo git jq sqlite3 python3 gnome-keyring dbus-user-session
 ```
 
-`gnome-keyring` and `dbus-user-session` exist only for Antigravity (§6.3).
+`gnome-keyring` and `dbus-user-session` exist only for Antigravity (§6.3);
+`sqlite3` reads the usage database (§9, §11) and `python3` runs the resource
+sampler of `docs/update-clis.md`.
 
 ## 2. Node 24 LTS
 
@@ -65,6 +79,7 @@ usermod -aG capitoline runner
 mkdir -p /var/lib/capitoline/sandboxes
 chown capitoline:capitoline /var/lib/capitoline/sandboxes
 chmod 2770 /var/lib/capitoline/sandboxes
+install -d -m 0755 /etc/capitoline      # the host's configuration, from §6 on
 ```
 
 The setgid bit (`2770`) makes every sandbox the gateway creates belong to
@@ -77,13 +92,20 @@ sudo -iu runner
 npm config set prefix ~/.npm-global
 printf '\nexport PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"\n' >> ~/.profile
 . ~/.profile
-npm install -g @anthropic-ai/claude-code @openai/codex
+# The last versions verified with this repository: the newest row of each CLI
+# in docs/update-clis.md, "Versions in use".
+npm install -g @anthropic-ai/claude-code@2.1.284 @openai/codex@0.159.0
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 claude --version; codex --version; agy --version
 exit
 ```
 
-Record the three versions in `docs/update-clis.md`. The binaries end up at
+The two npm packages are pinned because a new version can switch on a tool
+the configuration has not switched off yet, which is what the update script
+checks for and a plain install does not. The Antigravity installer takes no
+version and installs the latest; once the service runs (§8), `/health` says
+whether any of the three is behind, and `scripts/update-cli.sh` brings it up
+with its checks (`docs/update-clis.md`). The binaries end up at
 `/home/runner/.npm-global/bin/claude`, `/home/runner/.npm-global/bin/codex`
 and `/home/runner/.local/bin/agy`; check with `ls -l` because §5 and §7
 use these absolute paths.
@@ -119,40 +141,34 @@ Everything in this section is done once, by hand. The credentials stay in
 
 ### 6.1 Claude
 
-On the Mac:
+The interactive login, from an SSH session of your own: the CLI prints a URL,
+you open it on your own computer, sign in and paste the code back.
 
 ```sh
-claude setup-token        # one-year OAuth token, copy it
+sudo -iu runner claude      # /login, follow the URL, paste the code, then /exit
 ```
 
-On the host:
-
-```sh
-sudo -iu runner
-mkdir -p ~/.claude
-cat > ~/.claude/capitoline.json <<'JSON'
-{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"<token>"}}
-JSON
-chmod 600 ~/.claude/capitoline.json
-exit
-```
-
-`--settings` applies even with `--setting-sources ""`, which is why the
-token lives in that file and the production config adds
-`--settings /home/runner/.claude/capitoline.json` to the claude `args`
-(§7). Verify the way the gateway will call it:
+The credentials land in `/home/runner/.claude/.credentials.json` (mode
+0600) and refresh themselves. Verify the way the gateway will call it:
 
 ```sh
 sudo -Hu runner /home/runner/.npm-global/bin/claude -p "Reply with the single word: ok" \
-  --settings /home/runner/.claude/capitoline.json --setting-sources "" --tools "" --strict-mcp-config
+  --setting-sources "" --tools "" --strict-mcp-config
 ```
 
-The token is not refreshed automatically: repeat this step yearly.
+The alternative is a one-year token, for a host where nobody can log in
+interactively: `claude setup-token` on your own computer, the token put in
+`/home/runner/.claude/capitoline.json` (owned by `runner`, 0600) as
+`{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"<token>"}}`, and
+`--settings /home/runner/.claude/capitoline.json` added to the command line
+through the overlay's `providers.claude.args_extra` (§7). `--settings` applies
+even with `--setting-sources ""`, so the gateway process never sees the
+token. It is not refreshed: repeat yearly.
 
 ### 6.2 Codex
 
 ```sh
-sudo -iu runner codex login --device-auth      # confirm the code from the Mac
+sudo -iu runner codex login --device-auth      # confirm the code on your own computer
 sudo -iu runner codex login status
 ```
 
@@ -162,7 +178,7 @@ themselves.
 ### 6.3 Antigravity
 
 Antigravity stores the subscription login in the Linux Secret Service
-keyring. There is no API-key fallback: the owner's rule is no pay-per-use
+keyring. There is no API-key fallback: the project's rule is no pay-per-use
 API for any provider, so the keyring must work headless, and it must be
 reachable from a process started by `sudo` with an empty environment (§5),
 not only from a login shell.
@@ -238,16 +254,12 @@ visudo -cf /etc/sudoers.d/capitoline-env
 sudo -Hu runner env | grep DBUS      # must print the bus address
 ```
 
-(`/etc/capitoline` is created in §7; create it first if you are following
-this section before that one.)
-
-The last two lines stop the CLIs updating themselves. `agy` checks for a new
-version every fifteen minutes and installs it in the background: it went from
-1.2.7 to 1.2.8 and then to 1.2.9 on this host without anyone running an
-update, and 1.2.8 changed how it refuses a tool, which cost the Gemini ladder
-two of its rungs before anyone knew the version had moved. Claude Code has an
-updater of its own. Codex does not install updates by itself. The rule is in
-`docs/update-clis.md`: update by hand, one CLI at a time, and run the checks.
+The last two lines stop the CLIs updating themselves: `agy` otherwise checks
+for a new version every fifteen minutes and installs it in the background,
+and Claude Code has an updater of its own; Codex does not install updates by
+itself. A new version can switch on a tool or change how one is refused, so
+updates are installed by hand with `scripts/update-cli.sh`, which checks them
+(`docs/update-clis.md`).
 
 The values matter and were measured, not assumed. `agy` ignores
 `AGY_CLI_DISABLE_AUTO_UPDATE=1` in silence and honours `true`; to see it,
@@ -282,13 +294,10 @@ without touching anything. If it fails, `sudo -iu runner systemctl --user
 status gnome-keyring.service` and `journalctl --user-unit gnome-keyring
 -u runner` tell whether the daemon came up before or after the bus.
 
-Record here what made it work on the first host, with the date:
-
-- Verified on: Debian 13.6 unprivileged LXC (Proxmox 9.2, `nesting=1`),
-  gnome-keyring 48.0, dbus-user-session, 2026-09-21. The login keyring
-  (`~/.local/share/keyrings/login.keyring`) was written by the interactive
-  `agy` login and read back by `agy` started through `sudo -Hu runner` with
-  the `env_file` bus address; reboot test passed 2026-09-21 (`pct reboot`, then `agy` through `sudo -Hu runner` answered without any manual step).
+Tested on a Debian 13.6 unprivileged LXC (Proxmox 9.2, `nesting=1`) with
+gnome-keyring 48.0: the login keyring written by the interactive login was
+read back by `agy` started through `sudo -Hu runner`, and after a reboot it
+answered with no manual step.
 
 ### 6.4 Antigravity tool permissions
 
@@ -321,8 +330,7 @@ stay disabled until `settings.json` locks it again.
 ## 7. Application
 
 ```sh
-mkdir -p /etc/capitoline
-sudo -Hu capitoline git clone <repo url> /var/lib/capitoline/app
+sudo -Hu capitoline git clone https://github.com/marco-fabbri/capitoline.git /var/lib/capitoline/app
 cd /var/lib/capitoline/app
 sudo -Hu capitoline npm ci
 sudo -Hu capitoline npm run build
@@ -341,25 +349,26 @@ and merges `/etc/capitoline/overlay.yaml` over it. The overlay holds only what
 this host says differently: where the binaries are, who runs them, where the
 sandboxes and the database live, the Access application. Everything else —
 flags, model aliases, effort mapping, timeouts, budgets — arrives with the
-pull that changes it. That is the whole point of the shape: the production
-file used to be a full hand-made copy, so a required key added upstream
-reached the host only when someone retyped it, and on 2026-09-22 that cost two
-restart loops in one day.
+pull that changes it, and the overlay is the only file of this host that is
+not in git (§11 backs it up).
 
 Merge rules, from `mergeConfig` in `src/config.ts`:
 
 - objects merge key by key, so naming one binary leaves the rest of that
   provider untouched;
-- a scalar or a **list replaces** the base's value whole. A list is never
-  appended to — that is what a host changing a flag needs, and it is why the
-  `claude` block writes out the whole `args` list to add one argument;
+- a scalar or a **list replaces** the base's value whole, never appended to.
+  A host that adds an argument to a CLI's command line therefore does not
+  touch `args`: it sets `args_extra`, which the code appends to the
+  repository's `args`;
 - `null` is a value, not a deletion: `effort_flag: null` and `runner.user:
   null` are declared values of this schema;
 - the merged result is validated once, by the same strict schema the single
   file went through, so a key the overlay mistypes is rejected by name rather
   than dropped.
 
-Edit `/etc/capitoline/overlay.yaml`:
+Edit `/etc/capitoline/overlay.yaml`. It starts as a copy of the example, whose
+`callers` and `admins` are placeholders: replace them, or empty them
+(`callers: {}`, `admins: []`) until §8.1 and §9 give them real values.
 
 | Key | Production value |
 |---|---|
@@ -367,21 +376,19 @@ Edit `/etc/capitoline/overlay.yaml`:
 | `runner.sandbox_root` | `/var/lib/capitoline/sandboxes` |
 | `usage.db_path` | `/var/lib/capitoline/usage.sqlite` — absolute, because the service's working directory is the clone |
 | `providers.claude.binary` | `/home/runner/.npm-global/bin/claude` |
-| `providers.claude.args_extra` | what this host adds to `claude`'s command line, appended to the repository's `args` and never replacing them. On a host authenticated with a setup token that is `--settings /home/runner/.claude/capitoline.json`; that file (owned by `runner`, mode `0600`) holds `{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}`, and `--settings` applies even with `--setting-sources ""`, so the gateway process never sees the token. A host where `claude /login` was run interactively leaves the key at `[]` |
+| `providers.claude.args_extra` | `[]` after the interactive login of §6.1. With the setup token instead, `[--settings, /home/runner/.claude/capitoline.json]` |
 | `providers.codex.binary` | `/home/runner/.npm-global/bin/codex` |
 | `providers.antigravity.binary` | `/home/runner/.local/bin/agy` |
-| `providers.antigravity.image.collect` | `[/usr/local/bin/capitoline-collect-image]` — must match the sudoers path of §5 (a developer machine sets `runner.user: null` and points it at `scripts/capitoline-collect-image`; the runner then spawns it directly, as the developer, so it reads that machine's own `$HOME`) |
-| `server.access.team_domain`, `server.access.audience` | filled in §9; both empty until then |
+| `server.host` | not in the example: the default `127.0.0.1` is right behind the tunnel of §9. `0.0.0.0` (or one address of the host) for clients on your own network, §8.2 |
+| `server.access.callers` | the names of the Cloudflare service tokens, §9; `{}` without Cloudflare |
+| `server.access.admins` | who may use `/v1/admin`, §8.1 |
+| `server.access.team_domain`, `server.access.audience` | filled in §9; both empty until then, and for good without Cloudflare |
 
-`config/overlay.example.yaml` in the repository is exactly this file with the
-Access pair left empty, and `test/config.test.ts` pins the list of keys that
-example sets: a key added to it, or dropped from it, fails in CI until the
-list in the test is updated too. The table above is prose and nothing checks
-it against either — a row added here without a key there passes, so the two
-are kept in step by hand.
+There is no key to leave a provider out: a CLI that is not installed or not
+logged in is reported down, and the rest keeps working.
 
-Everything else stays in the repository file, the verified set for the CLI
-versions of `docs/update-clis.md`. Three of its keys are worth knowing even
+Everything else stays in the repository file, verified with the CLI versions
+of `docs/update-clis.md`. Three of its keys are worth knowing even
 though they are not host-specific, all under `providers.antigravity.image`:
 
 | Key | Why it reads as it does |
@@ -423,7 +430,7 @@ Every key below is read from both blocks; the values are the shipped
 | Key | Why it reads as it does |
 |---|---|
 | `seats` | four families, each a **chain** and never one model: the first model the health and quota state reports available takes the seat, and an unforeseen refusal steps down the chain once. `antigravity-claude-*` is deliberately not seated — it is the Anthropic seat's opinion through another channel, and a panel of four wants four judgments |
-| `judge` | `claude-opus`, `antigravity-claude-opus`, `codex-gpt-6-sol`, `codex-gpt-5.6-terra`: strong models built around what the seats cannot take. `judge_allow_member: false` strikes out a model seated in the same deliberation, and until 2026-09-23 every entry of the chain was one a seat could hold, so the judge was whatever the panel had no use for; now only the head can also be a seat, and the three behind it never are. The judge writes the answer the client reads, so it is the one seat where economising is false economy — a cheap judge was measured on 2026-09-22 merging three answers into a claim none of them made. No weak model closes the chain either: when no judge can be seated the council returns the best-ranked answer unsynthesised and says so (design §12.5), which is a better floor than a weak synthesis. |
+| `judge` | `claude-opus`, `antigravity-claude-opus`, `codex-gpt-6-sol`, `codex-gpt-5.6-terra`: strong models built around what the seats cannot take. `judge_allow_member: false` strikes out a model seated in the same deliberation, so only the head of the chain can also be a seat, and the three behind it never are. The judge writes the answer the client reads, so it is the one seat where economising is false economy — a cheap judge was measured merging three answers into a claim none of them made. When the judge's CLI crashes or returns output that cannot be read, the next model of the chain on another provider takes over. No weak model closes the chain either: when no judge can be seated the council returns the best-ranked answer unsynthesised and says so (design §12.5), which is a better floor than a weak synthesis. |
 | `judge_allow_member` | `false` — the judge is seated apart, so no synthesizer weighs an answer it wrote itself. `true` reproduces karpathy/llm-council's shape, where the chairman is also a member |
 | `judge_blind` | `true` — the judge sees the labels, never the real model names, so the deliberation is blind end to end. The transparency is not lost, it moves: the client's `capitoline.council` field carries the un-blinded record |
 | `min_members` | `2` — below two answers there is nothing to rank. With one the gateway returns that answer and says no council took place, rather than dressing a single opinion as a synthesis |
@@ -476,37 +483,6 @@ file created now and filled in later, a write cut short — is refused by name
 (`the configuration overlay /etc/capitoline/overlay.yaml is empty`) rather
 than as a schema error with no key in it.
 
-Nothing in the overlay copies a repository value any more. A host that has to
-add an argument to a CLI's command line sets `args_extra`, which is appended
-to the repository's `args` rather than replacing it, so a pull that changes
-the command line upstream arrives here like any other change:
-
-```yaml
-providers:
-  claude:
-    args_extra: [--settings, /home/runner/.claude/capitoline.json]
-```
-
-Until 2026-09-23 the overlay had to write out the whole of `providers.claude.args`
-to add those two items, because `mergeConfig` replaces a list and never
-appends to it. That was the drift the overlay exists to close, turned around:
-after a pull that added a flag the host kept passing the old command line and
-`check-config` stayed green, since the schema was satisfied either way. The
-runbook carried a command to compare the two lists by hand, which was only as
-reliable as whoever remembered to run it. `args_extra` removes the copy
-instead of reporting on it, and `providers.antigravity.image.collect` left the
-overlay at the same time: the repository already names the path the sudoers
-rule of §5 names, so repeating it only invited the two to drift.
-
-**A host that still runs a full copy keeps working.** Passing no overlay is
-still supported and behaves exactly as it did, so a deployment where
-`CAPITOLINE_CONFIG` alone names `/etc/capitoline/capitoline.yaml` is valid —
-it just keeps drifting, and every key added upstream has to be retyped into
-it. To migrate: write the overlay, point `CAPITOLINE_CONFIG` at the clone's
-`config/capitoline.yaml` and add `CAPITOLINE_OVERLAY` to the unit (§8),
-validate with the command above, restart, then delete the old copy. Move the
-backup with it (§11): from that moment the overlay is the only file on this
-host that is not in git.
 
 ### 7.1 Image collection helper
 
@@ -527,13 +503,11 @@ ChatGPT subscription and needs no API key: the file lands in
 `/home/runner/.codex/generated_images/<thread-id>/`, a directory named after
 the thread id Codex announces at the start of the run, and nothing in the
 stream says it was made. The file's own name is the CLI's business and has
-changed once — `call_<id>.png` until September 2026, `exec-<uuid>.png`
-since, which left every Codex image collected as "no image" until the
-helper was changed to take any PNG in the thread's directory (2026-09-29). The same helper serves both, as
+changed before, so the helper takes the newest PNG in the thread's directory.
+The same helper serves both, as
 `capitoline-collect-image codex <thread-id>`. The sudoers rule of §5 allows
-any arguments to this path, so the script's own check is what bounds them —
-an optional literal `codex` and one UUID, nothing else — and adding Codex
-needed no change to sudoers, only this reinstall.
+any arguments to this path, so the script's own check is what bounds them:
+an optional literal `codex` and one UUID, nothing else.
 
 ```sh
 install -o root -g root -m 0755 \
@@ -548,9 +522,9 @@ conversation id, 3 no such conversation, 4 no image (the directory is
 removed anyway). The gateway maps 4 and an empty output to `bad_output`, or
 to `rate_limited` when the run also carried a quota refusal.
 
-Re-run this install after every `git pull`: the installed copy is a
+Re-run this install after every `git pull` (§8.3): the installed copy is a
 snapshot, not a link, and `sudo` runs the installed path, never the one in
-the clone (`docs/update-clis.md` step 3).
+the clone.
 
 Image generation needs no change to the `strict` settings of §6.4: for
 `agy` a `generate_image` call is not a file write, so it runs headless with
@@ -558,17 +532,22 @@ no approval prompt, while `run_command` and real file writes keep stalling.
 The tool takes only `ImageName` and `Prompt` — there is no size parameter,
 which is why the API accepts `size` and reports it as ignored.
 
-Verify, after §8 has the service running:
+Verify, after §8 has the service running and §8.1 has given you a key in
+`CAPITOLINE_API_KEY`. Each generation spends one unit of that model's image
+quota:
 
 ```sh
 sudo -n -H -u capitoline -- sudo -n -H -u runner -- \
   /usr/local/bin/capitoline-collect-image not-a-uuid; echo $?   # prints 2
-curl -s http://127.0.0.1:8080/v1/images/generations -H 'content-type: application/json' \
-  -d '{"prompt":"a red fox in the snow, 16:9"}' | jq '.capitoline'
+for m in antigravity-image codex-image; do
+  curl -s http://127.0.0.1:8080/v1/images/generations -H "authorization: Bearer $CAPITOLINE_API_KEY" \
+    -H 'content-type: application/json' \
+    -d "{\"model\":\"$m\",\"prompt\":\"a red fox in the snow, 16:9\"}" | jq -c '.capitoline'
+done
 ```
 
-Expected: `mime` `image/jpeg`, dimensions around 1376x768 and `bytes`
-around a million. `bad_output` with "too small" means the collected file is
+Expected: `antigravity-image` answers `mime` `image/jpeg`, about 1376x768
+and around a million bytes; `codex-image` answers `image/png`. `bad_output` with "too small" means the collected file is
 not a picture (the `min_bytes` gate of the table above) — with the `strict`
 settings of §6.4 the CLI writes no placeholder, so it points at a broken or
 changed CLI, not at a quota hit. A quota hit is a 429 with `Retry-After`:
@@ -641,9 +620,16 @@ Subscribe to the same topic in the ntfy app. On the public server anyone who
 knows a topic's name can read it, so the name is the secret: make it long and
 random, or use an access token on a reserved topic or on your own server.
 The token is read from the environment variable `token_env` names, never
-from a file in the repository or the overlay: put it in an environment file
-the unit reads (`EnvironmentFile=/etc/capitoline/notify.env` in §8, mode
-0600, holding `CAPITOLINE_NOTIFY_TOKEN=tk_...`). The URL is never logged.
+from a file in the repository or the overlay: the unit of §8 reads
+`/etc/capitoline/notify.env` when it exists.
+
+```sh
+install -m 0600 /dev/null /etc/capitoline/notify.env
+echo 'CAPITOLINE_NOTIFY_TOKEN=tk_...' > /etc/capitoline/notify.env
+systemctl restart capitoline
+```
+
+The URL is never logged.
 
 ## 8. systemd
 
@@ -654,6 +640,7 @@ Description=Capitoline AI gateway
 # time-sync as well as the network: the persisted pauses are absolute
 # instants, and a service that starts while the clock is still the RTC's
 # guess would read a five-day pause as expired and collect it.
+Wants=network-online.target
 After=network-online.target time-sync.target
 [Service]
 User=capitoline
@@ -662,6 +649,7 @@ WorkingDirectory=/var/lib/capitoline/app
 Environment=CAPITOLINE_CONFIG=/var/lib/capitoline/app/config/capitoline.yaml
 Environment=CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml
 Environment=NODE_ENV=production
+EnvironmentFile=-/etc/capitoline/notify.env
 ExecStart=/usr/bin/node dist/main.js
 Restart=always
 RestartSec=3
@@ -674,19 +662,15 @@ systemctl enable --now capitoline
 journalctl -u capitoline -f
 ```
 
-The two `CAPITOLINE_*` paths are the base and the overlay of §7, in that
-order; the base is written out in full rather than left to the working
-directory, so the unit says which files the service reads without the reader
-having to know what `WorkingDirectory` is. The first line of the journal at
-every start is `configuration loaded`, naming both files and the keys — never
-the values — the overlay set. A host that has not migrated yet keeps the
-single `CAPITOLINE_CONFIG=/etc/capitoline/capitoline.yaml` and no
-`CAPITOLINE_OVERLAY`, and behaves exactly as before; `CAPITOLINE_OVERLAY=`
-with nothing after it counts as no overlay too, which is how the variable is
-turned off without editing the unit's other lines.
+The two `CAPITOLINE_*` paths are the base and the overlay of §7. The leading
+`-` of `EnvironmentFile` makes that file optional: it holds the notification
+token of §7.2 on a host that uses one. The first line of the journal at every
+start is `configuration loaded`, naming both files and the keys — never the
+values — the overlay set.
 
 `NoNewPrivileges` must stay off: `sudo` needs it. The service listens on
-`127.0.0.1:8080` only. The startup log shows `listening` first, then one
+`server.host`, `127.0.0.1` unless the overlay says otherwise (§8.2), port
+8080. The startup log shows `listening` first, then one
 `health check` line per provider with `ok: true`: the port is bound before the
 checks run, so a CLI that is slow to answer (the probe waits up to a minute)
 never turns a restart into a connection refused. Until that first round lands
@@ -716,12 +700,89 @@ a run that hung rather than one that was killed — and is worth reading the
 journal around its timestamp.
 
 `invalid configuration` in the journal, followed by a restart every three
-seconds, means the configuration was rejected. The line names the files it was
-built from — one with `CAPITOLINE_CONFIG` alone, both when `CAPITOLINE_OVERLAY`
-is set — and the lines below it name the key and the reason (`runner: Unrecognized key(s) in object:
+seconds, means the configuration was rejected. The line names the two files it
+was built from, and the lines below it name the key and the reason (`runner: Unrecognized key(s) in object:
 'usr'`, `runner.user: String must contain at least 1 character(s)`). Fix the
 key and restart; `npm run check-config` of §7 prints the same message without
 touching the service.
+
+### 8.1 The gateway's own keys
+
+Beside the Cloudflare Access JWT of §9 the gateway accepts keys it issued
+itself, sent as `Authorization: Bearer cap_…` (design §4). They are the
+identity that works with no Cloudflare in front, and the one
+`docs/connecting-an-application.md` recommends for applications behind the
+tunnel too. Keys are stored hashed in the usage database and issued and
+revoked through `/v1/admin/keys` by the callers `server.access.admins` names:
+an email from Access, a bound service token's name, or a key's own name. The
+first one is made on the host, as the user that owns the database:
+
+```sh
+cd /var/lib/capitoline/app && sudo -Hu capitoline \
+  env CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml npm run -s keys -- create owner
+```
+
+The key is printed once. `list` and `revoke <name>` are the other two
+commands. With `owner` in `server.access.admins` (§7, then a restart), that
+key makes the others over HTTP.
+
+With `server.access.team_domain` empty the gateway is open until the first
+key exists and closed from then on; the startup log line `identity` says
+which. With Access configured, a request that carries one of these keys is
+judged on the key alone: that is how the host itself calls `/v1` on
+`127.0.0.1`, where no request has passed through Cloudflare (§12).
+
+The checks of this runbook read the key from the shell, never from a file
+or the command line:
+
+```sh
+read -rs CAPITOLINE_API_KEY && export CAPITOLINE_API_KEY    # paste the key, then Enter
+curl -s http://127.0.0.1:8080/v1/models -H "authorization: Bearer $CAPITOLINE_API_KEY" | jq '.data | length'
+```
+
+### 8.2 Without Cloudflare
+
+On a network of your own the gateway can be reached directly, and its keys
+are then the only door. Make the first key (§8.1) before anything else, then
+set in the overlay:
+
+```yaml
+server:
+  host: 0.0.0.0          # or one address of this host
+```
+
+Run `check-config` (§7) and restart. The service refuses to listen on
+anything but the loopback while it would be open to the network, with no
+Access and no key: the journal then says `refusing to listen on 0.0.0.0` and
+names the command that makes a key.
+
+The traffic is plain HTTP, keys included. Keep it on a network you trust, or
+put a TLS reverse proxy on this host and leave `server.host` at `127.0.0.1`.
+`/health` needs no key on any address the service listens on: it tells
+whoever can reach the port which providers are up and which models they
+serve, never who calls.
+
+### 8.3 Updating the code
+
+As `capitoline`, which owns the clone; the two helpers are then reinstalled
+as root, because `sudo` and the timer run the installed copies, never the
+clone's:
+
+```sh
+cd /var/lib/capitoline/app
+sudo -Hu capitoline git pull --ff-only
+sudo -Hu capitoline npm ci
+sudo -Hu capitoline npm run build
+sudo -Hu capitoline env CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml npm run check-config
+install -o root -g root -m 0755 scripts/capitoline-collect-image /usr/local/bin/capitoline-collect-image
+install -o root -g root -m 0755 scripts/capitoline-backup /usr/local/bin/capitoline-backup
+systemctl restart capitoline
+curl -s http://127.0.0.1:8080/health | jq -c '.providers[] | {id, ok: .health.ok}'
+```
+
+A pull that needs more than this — a new sudoers rule, a new overlay key —
+says so in its commit message. The CLIs are updated separately, one at a
+time, with `scripts/update-cli.sh` (`docs/update-clis.md`).
 
 ## 9. Cloudflare Tunnel and Access
 
@@ -764,7 +825,7 @@ server:
 systemctl restart capitoline
 ```
 
-Verify from the Mac:
+Verify from your own computer:
 
 ```sh
 curl -i https://api.example.com/v1/models          # 302 (browser login) or 401
@@ -773,8 +834,9 @@ curl -s https://api.example.com/v1/models \
 ```
 
 From the host, `curl -s http://127.0.0.1:8080/v1/models` now answers 401
-(no Access JWT) while `curl -s http://127.0.0.1:8080/health` still answers:
-that is the intended exemption for local monitoring.
+unless it carries a key of §8.1 (no request to the loopback carries an Access
+JWT), while `curl -s http://127.0.0.1:8080/health` still answers: that is the
+intended exemption for local monitoring.
 
 A verified token also says who is calling, and every usage row records it: the
 email of a user token, and for a service token the `common_name` claim —
@@ -786,25 +848,8 @@ application renames its past with it. An id the overlay has not named is
 reported as itself, which is unreadable and still correct. The same binding
 can be made at run time, without a restart, by the admin API
 (`PUT /v1/admin/callers/<client id>`, `docs/connecting-an-application.md` §2b), and a binding
-made there wins over the overlay's.
+made there wins over the overlay's. A key of §8.1 is reported by its name.
 
-**The gateway's own keys.** Beside the Access JWT the gateway accepts keys it
-issued itself, sent as `Authorization: Bearer cap_…` (design §4): the
-identity that works with no Cloudflare in front, and the one `docs/connecting-an-application.md`
-recommends for applications behind the tunnel too. Keys live hashed in the
-usage database, are issued and revoked through `/v1/admin/keys` by the
-callers named in `server.access.admins` (an email from Access, a bound
-service token's name, or a key's own name — put the owner's email there), and
-the first one on a host with no admin yet is made on the host:
-
-```sh
-cd /var/lib/capitoline/app && sudo -u capitoline env CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml npm run keys -- create <name>
-```
-
-With `server.access.team_domain` empty the gateway is open until the first
-key exists and closed from then on; the startup log line `identity` says
-which. With Access configured a request that carries one of our keys is
-judged on the key alone.
 `GET /v1/usage` reports the last 24 hours grouped by it, which is how two
 applications sharing one gateway are told apart. It is deliberately not on
 `/health`: that route is the exemption above, readable by anyone who can open
@@ -818,9 +863,8 @@ curl -s https://api.example.com/v1/usage \
 # [ { "caller": "claude-code", "calls": 12, "inputTokens": 4210, "outputTokens": 980 } ]
 ```
 
-A `caller` of `null` is a call nothing identified: one served while
-`server.access.team_domain` is empty, or a row written before the column
-existed (the database is upgraded in place, the history is kept). The
+A `caller` of `null` is a call nothing identified: one served while the
+gateway was open, with no Access and no key. The
 gateway's own health probes are left out of the breakdown — on this host they
 are most of the table and would bury the rest under one `null` row.
 
@@ -869,9 +913,7 @@ curl -s https://api.example.com/v1/usage \
 Two rows under one name is an alias that moved. The configuration names CLI
 aliases — `opus`, `fable`, `haiku` — and not dated ids, on purpose: the day
 Anthropic points `opus` at a new model the gateway serves it with nothing
-changed here. `opus` meant Opus 5 until 2026-09-22 and Opus 5.5 after it, and
-before this column no record said so, which made every measurement in
-`docs/spike-2026-09.md` undated underneath. Only Claude appears: a Codex slug
+changed here, and this is where the move shows. Only Claude appears: a Codex slug
 and an Antigravity id are the model itself, so those rows carry no id and are
 left out rather than listed as unchanged.
 
@@ -935,13 +977,22 @@ council is the only thing here that does it by design.
 
 ## 10. Claude Code as MCP client (on your own computer)
 
+Through the tunnel, with a service token of §9:
+
 ```sh
 claude mcp add --transport http capitoline https://api.example.com/mcp \
   --header "CF-Access-Client-Id: <id>" --header "CF-Access-Client-Secret: <secret>"
 ```
 
+Without Cloudflare (§8.2), with a key of §8.1:
+
+```sh
+claude mcp add --transport http capitoline http://<host>:8080/mcp \
+  --header "Authorization: Bearer cap_…"
+```
+
 A CLI answer can take minutes, an image 11-45 s and a deliberation longer
-than either; raise the tool timeout in the Mac shell profile:
+than either; raise the tool timeout in your shell profile:
 
 ```sh
 export MCP_TOOL_TIMEOUT=1200000
@@ -986,7 +1037,6 @@ the CLIs bind a credential to the machine that obtained it.
 clone of §7, like the image helper of §7.1:
 
 ```sh
-apt-get install -y sqlite3
 install -o root -g root -m 0755 \
   /var/lib/capitoline/app/scripts/capitoline-backup \
   /usr/local/bin/capitoline-backup
@@ -994,8 +1044,7 @@ install -d -o capitoline -g capitoline -m 0700 /var/backups/capitoline
 ```
 
 Owned by `root` and not writable by `capitoline`, for the same reason as
-§7.1, and a snapshot of the clone rather than a link: re-install it after a
-`git pull` that changes it. The destination is a directory of its own under
+§7.1, and a snapshot of the clone rather than a link: §8.3 reinstalls it. The destination is a directory of its own under
 `/var/backups` (which is `0755`), owned by `capitoline` and `0700`: the unit
 below runs as `capitoline`, and nothing on this host — `runner` included —
 has any business reading the archives.
@@ -1032,9 +1081,8 @@ Description=Capitoline backup
 Type=oneshot
 User=capitoline
 Group=capitoline
-# The host-specific file, which on a host migrated to the overlay of §7 is the
-# overlay: the base configuration is in git and needs no backup. The archive
-# entry is named `capitoline.yaml` whatever this points at.
+# The host-specific file, the overlay of §7: the base configuration is in git
+# and needs no backup. The archive entry is named `capitoline.yaml`.
 Environment=CAPITOLINE_CONFIG=/etc/capitoline/overlay.yaml
 ExecStart=/usr/local/bin/capitoline-backup /var/backups/capitoline
 UNIT
@@ -1078,7 +1126,7 @@ systemctl list-timers capitoline-backup.timer
 ```
 
 Then copy `/var/backups/capitoline/capitoline-*.tgz` off the host with the
-owner's usual mechanism (rsync to the Mac, or a bucket). An archive that
+owner's usual mechanism (rsync to another machine, or a bucket). An archive that
 never leaves the host is not a backup.
 
 ### 11.1 Restore
@@ -1099,12 +1147,9 @@ cd /var/lib/capitoline/app && sudo -Hu capitoline \
 
 `integrity_check` prints `ok`, the count is non-zero and `MAX(ts)` is a
 millisecond epoch from the day the backup ran (`date -d @$(( <ts> / 1000 ))`).
-The archived configuration is the host's overlay (§11 archives whatever
-`CAPITOLINE_CONFIG` names, under the entry name `capitoline.yaml`), so it is
-validated the way the service reads it: merged over the clone's
-`config/capitoline.yaml`. On a host that never migrated it is a full
-configuration instead, and the `CAPITOLINE_OVERLAY` line comes off.
-A count that stops days before the backup means the snapshot lost the WAL —
+The archived configuration is the host's overlay (the entry is named
+`capitoline.yaml`), so it is validated the way the service reads it: merged
+over the clone's `config/capitoline.yaml`. A count that stops days before the backup means the snapshot lost the WAL —
 the failure this whole section exists to prevent — and the archive is not
 usable. The configuration is validated here, before the restart rather than
 after, because restoring replaces the file the service reads at startup and a
@@ -1124,24 +1169,11 @@ the step below. And hence a scratch directory owned by `capitoline` and
 usage data, and `/var/tmp` is world-readable on a host that also runs
 `runner`.
 
-Putting it back. The configuration goes back into the file this host's own
-unit names — `/etc/capitoline/overlay.yaml` on a host migrated to the overlay
-of §7, `/etc/capitoline/capitoline.yaml` on one that still runs a full copy,
-the same distinction the validation above makes. It is read from the unit
-rather than assumed, because writing the archive into the other file leaves
-the live configuration in place: the service then restarts clean on exactly
-what was being replaced, and nothing says so. `CAPITOLINE_OVERLAY` first and
-`CAPITOLINE_CONFIG` only when it is unset or empty, since on a migrated host
-the base is the clone's `config/capitoline.yaml`, which is in git and is not
-what the archive holds.
+Putting it back. The configuration goes back to the overlay:
 
 ```sh
 systemctl stop capitoline
-env=$(systemctl show capitoline -p Environment --value | tr ' ' '\n')
-dest=$(printf '%s\n' "$env" | sed -n 's/^CAPITOLINE_OVERLAY=//p')
-dest=${dest:-$(printf '%s\n' "$env" | sed -n 's/^CAPITOLINE_CONFIG=//p')}
-echo "$dest"        # /etc/capitoline/overlay.yaml, or the full copy — never the clone's own file
-install -o root -g capitoline -m 0640 /var/tmp/restore/capitoline.yaml "$dest"
+install -o root -g capitoline -m 0640 /var/tmp/restore/capitoline.yaml /etc/capitoline/overlay.yaml
 install -o capitoline -g capitoline -m 0640 /var/tmp/restore/usage.sqlite /var/lib/capitoline/usage.sqlite
 rm -f /var/lib/capitoline/usage.sqlite-wal /var/lib/capitoline/usage.sqlite-shm
 systemctl start capitoline
@@ -1165,46 +1197,33 @@ that is still unauthenticated.
 
 ## 12. Smoke test
 
-One real call per provider with its `health_model`, read from the same
-configuration the service uses, plus — when that configuration declares an
-image model — one `POST /v1/images/generations` whose result must be larger
-than `image.min_bytes`. The script needs `curl` and `jq` on the machine it
-runs from. The image line is the only end-to-end check of the sudoers entry
-of §5 and of the helper installed in §7.1, and it spends one unit of the
-image quota (12 per 5 hours).
+One real call per provider with its `health_model`, read from the clone's
+`config/capitoline.yaml`, and with `SMOKE_IMAGE=1` one image generation
+whose result must be larger than `image.min_bytes`. The script needs `curl`
+and `jq` on the machine it runs from, and a checkout of the repository.
 
-Before §9 (Access not yet configured, `server.access.team_domain` empty),
-on the host:
+On the host, with the key of §8.1 in `CAPITOLINE_API_KEY` — the loopback
+path works the same with or without Access, since a key is judged on its
+own:
 
 ```sh
 cd /var/lib/capitoline/app && scripts/smoke.sh http://127.0.0.1:8080
-# add SMOKE_IMAGE=1 to include one real generation: it spends a unit of a quota
-# that is 12 per 5 hours and 58 per week, so it is off by default. A 429 on the
-# image model is printed and does not fail the run.
 ```
 
-Once §9 is done the loopback form no longer authenticates: the gateway
-accepts only the `Cf-Access-Jwt-Assertion` header (or the `CF_Authorization`
-cookie), which the Cloudflare edge issues after checking the service token,
-and a call to `127.0.0.1:8080` never passes through the edge. Every line
-would be `401`. From then on the smoke test goes through the tunnel, from
-the Mac or from the host alike:
+Through the tunnel, from your own computer, the Access headers get the
+request past the edge (a key can go with them):
 
 ```sh
 CF_ACCESS_CLIENT_ID=<id> CF_ACCESS_CLIENT_SECRET=<secret> \
   scripts/smoke.sh https://api.example.com
 ```
 
-(from the clone, as above: the script reads the `health_model` of each
-provider out of `config/capitoline.yaml`, and model names are not something
-the host overlay changes.)
-
 Expected: three lines with status `200`, a short answer and a token count,
-then an `image` line with `200` and the size of the collected picture; exit
-code 0. Run it again after every CLI update (`docs/update-clis.md`).
-
-A gateway that is not behind Access, or a check of the key path behind it,
-uses a key instead: make one (§9, "the gateway's own keys") and run
-`scripts/smoke.sh` with `CAPITOLINE_API_KEY=cap_…` in the environment; revoke
-it after. Through the tunnel the Access headers are still needed at the edge,
-so both go together.
+and an `image` line that says `skipped`; exit code 0. With `SMOKE_IMAGE=1`
+the image line is one real generation, `200` and the size of the picture:
+the only end-to-end check of the sudoers entry of §5 and of the helper of
+§7.1, and it spends one unit of an image quota, so it is off by default. A
+429 on the image model is printed and does not fail the run.
+`SMOKE_IMAGE_MODEL=codex-image` checks the Codex one instead of the first the
+configuration declares. `scripts/update-cli.sh` runs this script after every
+CLI update (`docs/update-clis.md`).

@@ -983,12 +983,10 @@ describe("config/overlay.example.yaml", () => {
       admins: ["owner@example.com"],
     });
     // The host adds and never replaces: the repository's command line arrives
-    // with the pull that changes it, and the host names only its own argument.
-    // Copying the whole list into `args` to append to it was the drift the
-    // overlay exists to close, turned around.
+    // with the pull that changes it. The example adds nothing, since the
+    // interactive login needs no argument (docs/deploy.md §6.1).
     const repo = loadConfig("config/capitoline.yaml").providers.claude;
     expect(cfg.providers.claude.args).toEqual(repo.args);
-    expect(repo.args_extra).toEqual([]);
-    expect(cfg.providers.claude.args_extra).toEqual(["--settings", "/home/runner/.claude/capitoline.json"]);
+    expect(cfg.providers.claude.args_extra).toEqual([]);
   });
 });

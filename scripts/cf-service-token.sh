@@ -5,7 +5,7 @@
 # the name and not the id (docs/connecting-an-application.md, "A Cloudflare service token").
 #
 #   CF_API_TOKEN=... CF_ACCOUNT_ID=... CF_ACCESS_APP_ID=... \
-#   CAPITOLINE_URL=https://api-capitoline.example.com CAPITOLINE_ADMIN_KEY=cap_... \
+#   CAPITOLINE_URL=https://api.example.com CAPITOLINE_ADMIN_KEY=cap_... \
 #   scripts/cf-service-token.sh <app-name>
 #
 # Runs where the owner is, never on the gateway host: CF_API_TOKEN needs
