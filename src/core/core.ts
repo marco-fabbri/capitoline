@@ -1,7 +1,7 @@
 import { EffortSchema, type Effort } from "../config.js";
 import type { CouncilEvent } from "../council/council.js";
 import type { Logger } from "../log.js";
-import type { HealthStatus, ModelKind, ModelSpec, Provider } from "../providers/adapter.js";
+import type { CatalogChange, HealthStatus, ModelKind, ModelSpec, Provider } from "../providers/adapter.js";
 import { H5, type CallerUsage, type ModelIdentity, type UsageStore } from "../usage/store.js";
 import { flatten, splitSystem } from "./prompt.js";
 import { Semaphore } from "./semaphore.js";
@@ -25,14 +25,25 @@ export type VirtualKind = "council";
 // solely as a `resetAt` far in the future (spike, 2026-09-21).
 export interface ImageQuota { used: number; limit: number | null; windowStartedAt: number | null; resetAt: number | null }
 export interface ModelInfo { name: string; provider: string; kind: ModelKind | VirtualKind; available: boolean; reason?: string; overBudget: boolean; quota?: ImageQuota }
+/**
+ * The catalog of a provider that lists its models (docs/deploy.md §7.2), as
+ * /health shows it: when the CLI was last asked and whether it answered, the
+ * names discovery added, the declared names it retired, and the model the
+ * health probe is running on — `health_fallback`'s once `health_model` is
+ * retired. The listing's own error is logged, never shown: /health is open.
+ */
+export interface CatalogState { checkedAt: number | null; ok: boolean | null; discovered: string[]; retired: string[]; healthModel: string | null }
 export interface ProviderState {
   id: string; health: HealthStatus | null; pausedUntil: number | null; strikes: number; overBudget: boolean;
   windows: ReturnType<UsageStore["windows"]>; active: number; waiting: number; imageQuota: ImageQuota | null;
+  catalog: CatalogState | null;
 }
 export interface CoreOptions {
   maxWaitMs: number; budgets: Record<string, { window5h: number; window7d: number }>; log: Logger; now?: () => number;
   /** Per provider: how many images the short quota window allows (config image.quota_per_window). */
   imageQuotas?: Record<string, number>;
+  /** Told of every change a fresh listing makes to a provider's catalog; never of a restore at startup. */
+  onCatalogChange?: (provider: string, change: CatalogChange) => void;
 }
 
 const D7 = 7 * 24 * 3600_000;
@@ -46,6 +57,8 @@ interface State {
   /** The instant the exhausted image quota frees up, as the provider reported it. */
   imageResetAt: number | null;
   hasImageModels: boolean;
+  /** The last listing attempt, for a provider that lists its models; null until the first. */
+  catalog: { checkedAt: number; ok: boolean } | null;
 }
 /** A model paused on its own, by a refusal that named it. Mirrors the provider's pause and strikes. */
 interface ModelPause { pausedUntil: number; strikes: number }
@@ -140,20 +153,40 @@ export class Core {
       this.states.set(p.id, {
         provider: p, sem: new Semaphore(p.concurrencyLimit), health: null, pausedUntil: null, strikes: 0,
         imageLimit: opts.imageQuotas?.[p.id] ?? null, imageResetAt: null, hasImageModels: models.some((m) => m.kind === "image"),
+        catalog: null,
       });
-      const scopes = new Set<string>();
-      for (const m of models) {
-        this.modelIndex.set(m.name, { provider: p, model: m });
-        // Every effort, not just the default: a request naming `low` resolves
-        // to a different id, and a pause installed under it has to survive a
-        // restart like any other.
-        scopes.add(scopeOf(m.kind, p.cliId(m)));
-        for (const e of EffortSchema.options) scopes.add(scopeOf(m.kind, p.cliId(m, e)));
-      }
-      // The probe is a chat request, whatever the model it names.
-      if (p.healthCliId !== undefined) scopes.add(scopeOf("text", p.healthCliId));
-      this.knownScopes.set(p.id, scopes);
+      this.reindex(p);
     }
+  }
+
+  /**
+   * A provider's entries in the model index, rebuilt from what it serves now:
+   * at construction, and again whenever its catalog changes, so routing, the
+   * listing and the pause scopes never disagree about which models exist.
+   * Scopes are only ever added: a pause restored for a model the catalog has
+   * since dropped is still a fact about the provider's quota.
+   */
+  private reindex(p: Provider): void {
+    for (const [name, e] of this.modelIndex) if (e.provider === p) this.modelIndex.delete(name);
+    const scopes = this.knownScopes.get(p.id) ?? new Set<string>();
+    for (const m of p.models()) {
+      // Declared names are checked unique at load; a discovered one could only
+      // clash through a prefix another provider also uses, and loses.
+      const owner = this.modelIndex.get(m.name);
+      if (owner || this.virtuals.has(m.name)) {
+        this.opts.log.warn({ provider: p.id, model: m.name, owner: owner?.provider.id ?? VIRTUAL_PROVIDER }, "model name already taken; not served");
+        continue;
+      }
+      this.modelIndex.set(m.name, { provider: p, model: m });
+      // Every effort, not just the default: a request naming `low` resolves
+      // to a different id, and a pause installed under it has to survive a
+      // restart like any other.
+      scopes.add(scopeOf(m.kind, p.cliId(m)));
+      for (const e of EffortSchema.options) scopes.add(scopeOf(m.kind, p.cliId(m, e)));
+    }
+    // The probe is a chat request, whatever the model it names.
+    if (p.healthCliId !== undefined) scopes.add(scopeOf("text", p.healthCliId));
+    this.knownScopes.set(p.id, scopes);
   }
 
   private isPaused(s: State): boolean { return s.pausedUntil !== null && s.pausedUntil > this.now(); }
@@ -247,11 +280,16 @@ export class Core {
       // draws on the same quota.
       const quota = this.imageQuota(id, s);
       for (const m of s.provider.models()) {
+        // Only what routing would serve: a discovered name that lost a clash
+        // in reindex() is not this provider's to list.
+        if (this.modelIndex.get(m.name)?.provider !== s.provider) continue;
         // A model paused on its own is unavailable while its provider is not:
         // this list is the only place that difference can be read.
         // By the resolved id, so one refusal darkens every gateway name that
         // resolves to the refused model instead of only the one that called.
-        const modelReason = reason ?? (this.keyRemainingS(this.pauseKey(id, scopeOf(m.kind, s.provider.cliId(m)))) !== undefined ? "rate_limited" : undefined);
+        // A retired model says so before anything else: it is not coming back
+        // when a pause or a health verdict clears.
+        const modelReason = (s.provider.isRetired?.(m) ? "retired" : undefined) ?? reason ?? (this.keyRemainingS(this.pauseKey(id, scopeOf(m.kind, s.provider.cliId(m)))) !== undefined ? "rate_limited" : undefined);
         out.push({ name: m.name, provider: id, kind: m.kind, available: modelReason === undefined, reason: modelReason, overBudget, ...(m.kind === "image" && quota ? { quota } : {}) });
       }
     }
@@ -345,6 +383,9 @@ export class Core {
       id, health: s.health ? { ok: s.health.ok, kind: s.health.kind, checkedAt: s.health.checkedAt } : null,
       pausedUntil: s.pausedUntil, strikes: s.strikes, overBudget: this.overBudget(id),
       windows: this.usage.windows(id), active: s.sem.active, waiting: s.sem.waiting, imageQuota: this.imageQuota(id, s),
+      catalog: s.provider.discovers
+        ? { checkedAt: s.catalog?.checkedAt ?? null, ok: s.catalog?.ok ?? null, ...(s.provider.catalogNames?.() ?? { discovered: [], retired: [] }), healthModel: s.provider.healthModel ?? null }
+        : null,
     }));
   }
 
@@ -468,6 +509,9 @@ export class Core {
     const scope = scopeOf(kind, cliId);
     const key = this.pauseKey(id, scope);
     const s = this.states.get(id)!;
+    // Before the pauses: a retired model is not coming back when they clear,
+    // and the client should stop asking rather than wait.
+    if (entry.provider.isRetired?.(entry.model)) throw new CapitolineError("model_unavailable", `model "${modelName}" unavailable: retired, its CLI no longer lists it`);
     if (this.isPaused(s)) throw this.pausedError(id, s);
     const ownPause = this.keyRemainingS(key);
     if (ownPause !== undefined) throw this.modelPausedError(modelName, ownPause);
@@ -740,6 +784,67 @@ export class Core {
       this.usage.record({ provider: s.provider.id, model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: status.ok ? "ok" : (status.kind ?? "cli_crashed"), source: "health", ts: this.now() });
       this.opts.log.info({ provider: s.provider.id, ok: status.ok, kind: status.kind, detail: status.detail, ...(modelOnly ? { model: status.model, scope: "model" } : {}) }, "health check");
     }));
+  }
+
+  /**
+   * The catalogs as the last process left them, applied before the port is
+   * ready: a restart must neither drop the models discovery had added until
+   * the next listing lands, nor report every one of them as new when it does.
+   * Silent on purpose — nothing changed, the gateway only remembered.
+   */
+  restoreCatalog(): void {
+    for (const row of this.usage.catalogs()) {
+      const s = this.states.get(row.provider);
+      if (!s?.provider.discovers || !s.provider.applyListing) continue;
+      s.provider.applyListing(row.listing);
+      this.reindex(s.provider);
+      s.catalog = { checkedAt: row.checkedAt, ok: true };
+      this.opts.log.info({ provider: row.provider, ...s.provider.catalogNames?.() }, "model catalog restored");
+    }
+  }
+
+  /** Asks every provider that lists its models for a fresh listing. Tracked like a health check, so a shutdown waits for it. */
+  checkCatalog(): Promise<void> {
+    const run = this.runCatalog();
+    const tracked = run.then(() => {}, () => {});
+    this.inFlight.add(tracked);
+    void tracked.finally(() => this.inFlight.delete(tracked));
+    return run;
+  }
+
+  private async runCatalog(): Promise<void> {
+    const targets = [...this.states.values()].filter((s) => s.provider.discovers && s.provider.listModels && s.provider.applyListing);
+    await Promise.all(targets.map(async (s) => {
+      const p = s.provider;
+      let listed;
+      try {
+        listed = await p.listModels!();
+      } catch (e) {
+        // Nothing is retired on a failed listing: the catalog stays as it was.
+        s.catalog = { checkedAt: this.now(), ok: false };
+        this.opts.log.warn({ provider: p.id, err: e instanceof Error ? e.message : String(e) }, "model listing failed; catalog kept");
+        return;
+      }
+      const change = p.applyListing!(listed);
+      this.usage.saveCatalog(p.id, listed, this.now());
+      this.reindex(p);
+      s.catalog = { checkedAt: this.now(), ok: true };
+      if (change.added.length === 0 && change.removed.length === 0) {
+        this.opts.log.info({ provider: p.id, listed: listed.length }, "model catalog unchanged");
+        return;
+      }
+      this.opts.log.info({ provider: p.id, added: change.added, removed: change.removed }, "model catalog changed");
+      try { this.opts.onCatalogChange?.(p.id, change); }
+      catch (e) { this.opts.log.warn({ provider: p.id, err: String(e) }, "catalog change listener threw"); }
+    }));
+  }
+
+  startCatalogLoop(intervalMs: number): () => void {
+    const timer = setInterval(() => {
+      this.checkCatalog().catch((err: unknown) => this.opts.log.error({ err }, "model catalog check failed"));
+    }, intervalMs);
+    timer.unref();
+    return () => clearInterval(timer);
   }
 
   startHealthLoop(intervalMs: number): () => void {

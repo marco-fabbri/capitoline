@@ -225,6 +225,17 @@ describe("config", () => {
       .toThrow(/usage: Unrecognized key\(s\) in object: 'dbpath'/);
     expect(() => parseConfig(`usag: {}\n${base}`)).toThrow(/: Unrecognized key\(s\) in object: 'usag'/);
   });
+  it("takes a health_fallback only among the provider's own text models, and keeps the council's prefix for the council", () => {
+    expect(() => parseConfig(config({ health_fallback: "[b]" }))).toThrow(/health_fallback "b" is not one of provider x's text models/);
+    expect(parseConfig(config({ models: "{ a: {cli_model: a}, b: {cli_model: b} }", health_fallback: "[b]" })).providers.x.health_fallback).toEqual(["b"]);
+    expect(() => parseConfig(config({ discover: "{ args: [models], prefix: capitoline- }" }))).toThrow(/discover.prefix "capitoline-" is reserved/);
+    expect(parseConfig(config({ discover: "{ args: [models], prefix: x- }" })).providers.x.discover).toEqual({ args: ["models"], prefix: "x-", exclude: [] });
+  });
+  it("rejects a notify endpoint that is not a URL, and defaults the catalog to once a day", () => {
+    expect(() => parseConfig(`server: { notify: { url: not-a-url } }\n${config()}`)).toThrow(/url/i);
+    expect(parseConfig(config()).server.discovery_interval_h).toBe(24);
+    expect(parseConfig(config()).server.notify).toBeUndefined();
+  });
   it("rejects a health_model that is only an Object.prototype key", () => {
     expect(() => parseConfig(config({ health_model: "toString" })))
       .toThrow(/health_model "toString" is not one of provider x's models/);
@@ -418,8 +429,8 @@ describe("config", () => {
   const CLI_LISTS: Record<string, { file: string; ids: (text: string) => string[] }> = {
     // `agy models`, tab separated: id, display name.
     antigravity: { file: "test/fixtures/antigravity/models.txt", ids: (t) => t.split("\n").map((l) => l.split("\t")[0]).filter((x) => x && !x.startsWith("#")) },
-    // The CLI's own model cache, dumped on the host: slug, display name, default level, levels.
-    codex: { file: "test/fixtures/codex/models.txt", ids: (t) => t.split("\n").map((l) => l.split("\t")[0]).filter((x) => x && !x.startsWith("#")) },
+    // `codex debug models`, the CLI's own catalog, trimmed to the fields read.
+    codex: { file: "test/fixtures/codex/debug-models.json", ids: (t) => (JSON.parse(t) as { models: { slug: string }[] }).models.map((m) => m.slug) },
     // A real `/model` capture: the aliases are the comma-separated tail of the
     // usage line, with `or a full model ID` dropped. The brackets of
     // `sonnet[1m]` are part of the alias.
@@ -465,11 +476,11 @@ describe("config", () => {
     //
     // Left out, and said here so the list cannot grow silently: Claude's
     // routing aliases resolve to a model the table already names, so they
-    // add a name and no reach (config/capitoline.yaml says why). Codex's
-    // `gpt-5.5` retires from Codex with ChatGPT sign-in on 2026-10-14 and was
-    // withdrawn before it, while the cache still lists it; the next capture
-    // after that date drops it, and this entry goes with it.
-    const LEFT_OUT: Record<string, string[]> = { claude: ["best", "default", "opusplan"], codex: ["gpt-5.5"] };
+    // add a name and no reach (config/capitoline.yaml says why). A provider
+    // that lists its models declares its own exclusions in `discover.exclude`
+    // (Codex's `gpt-5.5`, retiring on 2026-10-14), which the catalog honours
+    // at runtime and this test reads from the same place.
+    const LEFT_OUT: Record<string, string[]> = { claude: ["best", "default", "opusplan"] };
     for (const file of BOTH_FILES) {
       const cfg = loadConfig(file);
       for (const [pid, list] of Object.entries(CLI_LISTS)) {
@@ -481,7 +492,8 @@ describe("config", () => {
           for (const e of efforts) reachable.add(`${m.cli_model}-${p.effort[e]}`);
         }
         const listed = list.ids(readFileSync(list.file, "utf8"));
-        const missing = listed.filter((id) => !reachable.has(id) && !(LEFT_OUT[pid] ?? []).includes(id));
+        const excluded = [...(LEFT_OUT[pid] ?? []), ...(p.discover?.exclude ?? [])];
+        const missing = listed.filter((id) => !reachable.has(id) && !excluded.includes(id));
         expect(missing, `${file} ${pid}: listed by the CLI and not exposed`).toEqual([]);
       }
     }
@@ -512,8 +524,8 @@ describe("config", () => {
     // A model left open to the whole table would be sent a level the CLI
     // refuses, which is the same failure the Antigravity suffix check catches
     // and arrives by a different road.
-    const cache = new Map(readFileSync("test/fixtures/codex/models.txt", "utf8").split("\n")
-      .filter((l) => l && !l.startsWith("#")).map((l) => { const c = l.split("\t"); return [c[0], new Set(c[3].split(","))]; }));
+    const catalog = JSON.parse(readFileSync("test/fixtures/codex/debug-models.json", "utf8")) as { models: { slug: string; supported_reasoning_levels: { effort: string }[] }[] };
+    const cache = new Map(catalog.models.map((m) => [m.slug, new Set(m.supported_reasoning_levels.map((l) => l.effort))]));
     for (const file of BOTH_FILES) {
       const p = loadConfig(file).providers.codex;
       const priced = Object.keys(p.effort) as Effort[];

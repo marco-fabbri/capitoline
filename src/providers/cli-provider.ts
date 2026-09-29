@@ -2,7 +2,7 @@ import type { Effort, ProviderConfig } from "../config.js";
 import type { Logger } from "../log.js";
 import type { ImageRequest, InternalRequest, ProviderEvent, Usage } from "../core/types.js";
 import type { Runner, RunHandle } from "../runner/runner.js";
-import { cliId as resolveCliId, modelSpecs, type Adapter, type HealthStatus, type ModelSpec, type Provider } from "./adapter.js";
+import { cliId as resolveCliId, modelSpecs, reachableIds, type Adapter, type CatalogChange, type HealthStatus, type ListedModel, type ModelSpec, type Provider } from "./adapter.js";
 import { classifyError, detectQuotaExhausted, type QuotaHit } from "./errors.js";
 import { inspectImage } from "./image-check.js";
 
@@ -34,6 +34,10 @@ const COLLECT_MAX_BYTES = 20 * 1024 * 1024;
 // because the id the model resolves to depends on it, and that id is the key
 // a refusal during a probe is filed under.
 const HEALTH_EFFORT = "low" as const;
+// Bounds for the CLI's own model listing: `codex debug models` measured 11 s
+// and about 500 KB on 2026-09-29, `agy models` a few seconds and 1 KB.
+const LIST_TIMEOUT_MS = 60_000;
+const LIST_MAX_BYTES = 4 * 1024 * 1024;
 // Exit code of the collect helper when the conversation exists but holds no image.
 const COLLECT_NO_IMAGE = 4;
 const DEFAULTS: Required<CliProviderOptions> = { exitGraceMs: 1000, healthDeadlineMs: 60_000, now: Date.now, collectTimeoutMs: COLLECT_TIMEOUT_MS };
@@ -53,11 +57,16 @@ interface Run {
 export class CliProvider implements Provider {
   readonly id: string;
   readonly concurrencyLimit: number;
-  /** The model health() runs, so Core can skip the probe while that model is paused. */
-  readonly healthModel: string;
-  /** What that model resolves to at HEALTH_EFFORT: the key its pause is filed under. */
-  readonly healthCliId: string;
   private readonly opts: Required<CliProviderOptions>;
+  /**
+   * The catalog (docs/deploy.md §7.2), empty until a listing is applied: the
+   * models discovery added, and the declared names none of whose ids the last
+   * listing held. With no listing yet the declared models are served exactly
+   * as before, so a provider whose CLI cannot list, or has not been asked yet,
+   * behaves as if the catalog did not exist.
+   */
+  private discovered: ModelSpec[] = [];
+  private retired = new Set<string>();
   constructor(
     id: string,
     private readonly cfg: ProviderConfig,
@@ -68,13 +77,78 @@ export class CliProvider implements Provider {
   ) {
     this.id = id;
     this.concurrencyLimit = cfg.concurrency;
-    this.healthModel = cfg.health_model;
-    const probed = modelSpecs(id, cfg).find((m) => m.name === cfg.health_model);
-    this.healthCliId = probed ? resolveCliId(cfg, probed, HEALTH_EFFORT) : cfg.health_model;
     this.opts = { ...DEFAULTS, ...opts };
   }
 
-  models(): ModelSpec[] { return modelSpecs(this.id, this.cfg); }
+  /**
+   * The model health() runs, so Core can skip the probe while that model is
+   * paused: `health_model`, or — once the catalog has retired it — the first
+   * `health_fallback` still served. A retired probe would otherwise fail every
+   * round and mark every model of the provider unhealthy.
+   */
+  get healthModel(): string {
+    if (!this.retired.has(this.cfg.health_model)) return this.cfg.health_model;
+    return this.cfg.health_fallback.find((name) => !this.retired.has(name)) ?? this.cfg.health_model;
+  }
+
+  /** What that model resolves to at HEALTH_EFFORT: the key its pause is filed under. */
+  get healthCliId(): string {
+    const probed = modelSpecs(this.id, this.cfg).find((m) => m.name === this.healthModel);
+    return probed ? resolveCliId(this.cfg, probed, HEALTH_EFFORT) : this.healthModel;
+  }
+
+  get discovers(): boolean { return this.cfg.discover !== undefined && this.adapter.listModels !== undefined; }
+
+  models(): ModelSpec[] { return [...modelSpecs(this.id, this.cfg), ...this.discovered]; }
+
+  isRetired(model: ModelSpec): boolean { return this.retired.has(model.name); }
+
+  catalogNames(): { discovered: string[]; retired: string[] } {
+    return { discovered: this.discovered.map((m) => m.name), retired: [...this.retired].sort() };
+  }
+
+  /**
+   * Runs the CLI's own listing command as the runner user, like any other run.
+   * Throws on anything that is not a clean, non-empty listing: the catalog is
+   * replaced only by one that was read whole. Agy once failed, transiently, to
+   * recognise its own model id (2026-09-29); a listing that fails the same way
+   * must retire nothing.
+   */
+  async listModels(): Promise<ListedModel[]> {
+    const discover = this.cfg.discover;
+    const read = this.adapter.listModels;
+    if (!discover || !read) throw new Error(`provider ${this.id} has no model listing`);
+    const r = await this.runner.capture({ binary: this.cfg.binary, args: discover.args, timeoutMs: LIST_TIMEOUT_MS, maxBytes: LIST_MAX_BYTES });
+    if (r.timedOut) throw new Error(`model listing timed out after ${LIST_TIMEOUT_MS / 1000}s`);
+    if (r.exitCode !== 0) throw new Error(`model listing exited with ${r.exitCode}: ${r.stderr.slice(0, 300)}`);
+    const listed = read(r.stdout.toString("utf8"), this.cfg);
+    if (listed.length === 0) throw new Error("model listing is empty");
+    return listed;
+  }
+
+  /**
+   * Makes a listing the catalog. A declared model is retired when none of the
+   * ids it can resolve to is listed — hidden ones count, since they are still
+   * served. A listed id no declared model reaches is added as `<prefix><id>`,
+   * unless it is hidden, excluded, or its name is already taken. What changed
+   * is what was served before against what is served now.
+   */
+  applyListing(listed: ListedModel[]): CatalogChange {
+    const served = (): Set<string> => new Set(this.models().filter((m) => !this.retired.has(m.name)).map((m) => m.name));
+    const before = served();
+    const declared = modelSpecs(this.id, this.cfg);
+    const ids = new Set(listed.map((l) => l.id));
+    const reached = new Set(declared.flatMap((m) => reachableIds(this.cfg, m)));
+    const taken = new Set(declared.map((m) => m.name));
+    const excluded = new Set(this.cfg.discover?.exclude ?? []);
+    const prefix = this.cfg.discover?.prefix ?? `${this.id}-`;
+    this.retired = new Set(declared.filter((m) => !reachableIds(this.cfg, m).some((id) => ids.has(id))).map((m) => m.name));
+    this.discovered = listed
+      .filter((l) => !l.hidden && !reached.has(l.id) && !excluded.has(l.id) && !taken.has(`${prefix}${l.id}`))
+      .map((l) => ({ name: `${prefix}${l.id}`, provider: this.id, cliModel: l.id, effortSuffix: false, ...(l.efforts ? { efforts: l.efforts } : {}), kind: "text" as const }));
+    const after = served();
+    return { added: [...after].filter((n) => !before.has(n)).sort(), removed: [...before].filter((n) => !after.has(n)).sort() };
+  }
 
   cliId(model: ModelSpec, effort?: Effort): string { return resolveCliId(this.cfg, model, effort); }
 
@@ -309,8 +383,9 @@ export class CliProvider implements Provider {
   }
 
   async health(): Promise<HealthStatus> {
-    const model = this.models().find((m) => m.name === this.cfg.health_model);
-    if (!model) return { ok: false, kind: "bad_output", detail: `unknown health_model "${this.cfg.health_model}"`, checkedAt: Date.now() };
+    const probed = this.healthModel;
+    const model = this.models().find((m) => m.name === probed);
+    if (!model) return { ok: false, kind: "bad_output", detail: `unknown health_model "${probed}"`, checkedAt: Date.now() };
     const ac = new AbortController();
     let deadlineHit = false;
     const timer = setTimeout(() => { deadlineHit = true; ac.abort(); }, this.opts.healthDeadlineMs);

@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import type { ModelKind } from "../config.js";
 import { CapitolineError, type ErrorKind, type RateLimitWindow } from "../core/types.js";
+import type { ListedModel } from "../providers/adapter.js";
 
 export interface CallRecord {
   provider: string; model: string; inputTokens: number; outputTokens: number; durationMs: number;
@@ -64,6 +65,7 @@ export class UsageStore {
     deliberation: StatementSync; identities: StatementSync;
     insertKey: StatementSync; keyByHash: StatementSync; touchKey: StatementSync; revokeKey: StatementSync; keys: StatementSync; liveKeys: StatementSync;
     nameCaller: StatementSync; callerNames: StatementSync;
+    saveCatalog: StatementSync; catalogs: StatementSync;
   };
   private closed = false;
   constructor(path: string) {
@@ -114,6 +116,11 @@ export class UsageStore {
       -- runtime half of server.access.callers, written by the admin API, read
       -- by /v1/usage at presentation time exactly as the configured map is.
       CREATE TABLE IF NOT EXISTS callers (id TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      -- The last listing each provider's CLI gave of its models (the daily
+      -- catalog, docs/deploy.md §7.2), as the JSON the adapter read. Restored
+      -- at startup, so a restart neither drops the discovered models until the
+      -- next listing nor reports every one of them as new.
+      CREATE TABLE IF NOT EXISTS catalog (provider TEXT PRIMARY KEY, listing TEXT NOT NULL, checked_at INTEGER NOT NULL);
     `);
     // A database written before image models existed has no `kind` column, and
     // CREATE TABLE IF NOT EXISTS leaves it alone: add it here, with the same
@@ -181,6 +188,8 @@ export class UsageStore {
       liveKeys: this.db.prepare(`SELECT COUNT(*) AS n FROM api_keys WHERE revoked_at IS NULL`),
       nameCaller: this.db.prepare(`INSERT INTO callers (id, name, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`),
       callerNames: this.db.prepare(`SELECT id, name FROM callers ORDER BY id`),
+      saveCatalog: this.db.prepare(`INSERT INTO catalog (provider, listing, checked_at) VALUES (?, ?, ?) ON CONFLICT(provider) DO UPDATE SET listing = excluded.listing, checked_at = excluded.checked_at`),
+      catalogs: this.db.prepare(`SELECT provider, listing, checked_at FROM catalog ORDER BY provider`),
     };
   }
   record(c: CallRecord): void {
@@ -316,6 +325,21 @@ export class UsageStore {
 
   callerNames(): Record<string, string> {
     return Object.fromEntries((this.stmts.callerNames.all() as { id: string; name: string }[]).map((r) => [r.id, r.name]));
+  }
+
+  saveCatalog(provider: string, listing: ListedModel[], now = Date.now()): void {
+    this.stmts.saveCatalog.run(provider, JSON.stringify(listing), now);
+  }
+
+  /** The stored listings. A row that no longer parses is skipped: the next listing replaces it. */
+  catalogs(): { provider: string; listing: ListedModel[]; checkedAt: number }[] {
+    const rows = this.stmts.catalogs.all() as { provider: string; listing: string; checked_at: number }[];
+    return rows.flatMap((r) => {
+      try {
+        const listing = JSON.parse(r.listing) as unknown;
+        return Array.isArray(listing) ? [{ provider: r.provider, listing: listing as ListedModel[], checkedAt: Number(r.checked_at) }] : [];
+      } catch { return []; }
+    });
   }
 
   close(): void {

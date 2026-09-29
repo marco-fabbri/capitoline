@@ -6,6 +6,7 @@ import { Core } from "./core/core.js";
 import { Council } from "./council/council.js";
 import { createLogger, type Logger } from "./log.js";
 import { createMcpHandler } from "./mcp/server.js";
+import { createNotifier, describeCatalogChange } from "./notify.js";
 import { buildProviders } from "./providers/index.js";
 import type { Provider } from "./providers/adapter.js";
 import { createRunner } from "./runner/runner.js";
@@ -92,7 +93,13 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const usage = new UsageStore(cfg.usage.db_path);
   const budgets = Object.fromEntries(Object.entries(cfg.providers).map(([id, p]) => [id, { window5h: p.budget.window_5h_tokens, window7d: p.budget.window_7d_tokens }]));
   const imageQuotas = Object.fromEntries(Object.entries(cfg.providers).flatMap(([id, p]) => (p.image.quota_per_window === undefined ? [] : [[id, p.image.quota_per_window] as const])));
-  const core = new Core(providers, usage, { maxWaitMs: cfg.server.queue.max_wait_s * 1000, budgets, imageQuotas, log: log.child({ mod: "core" }) });
+  // Optional (server.notify): a change in a provider's catalog is announced
+  // as one plain-text POST, and nothing else is ever sent.
+  const notify = createNotifier(cfg.server.notify, log.child({ mod: "notify" }));
+  const core = new Core(providers, usage, {
+    maxWaitMs: cfg.server.queue.max_wait_s * 1000, budgets, imageQuotas, log: log.child({ mod: "core" }),
+    onCatalogChange: notify ? (provider, change) => notify(describeCatalogChange(cfg, provider, change)) : undefined,
+  });
 
   // One Council per configured council, registered as a virtual model: a client
   // asks for `capitoline` in `model` exactly as it asks for `claude-opus`, and
@@ -156,6 +163,10 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     // like the sweep: a store that fails to answer must leave nothing listening
     // and no open database behind.
     core.restorePauses();
+    // The models discovery added last time, and the ones it retired, before
+    // anything is probed or served: the health probe must already know
+    // whether health_model is still listed.
+    core.restoreCatalog();
 
     await core.checkHealth();
     ready = true;
@@ -167,6 +178,11 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   }
 
   const stopHealth = core.startHealthLoop(60 * 60 * 1000);
+  // A fresh listing now, in the background — `codex debug models` takes
+  // eleven seconds, and readiness does not wait for it — then once per
+  // discovery_interval_h (docs/deploy.md §7.2).
+  core.checkCatalog().catch((err: unknown) => log.error({ err }, "model catalog check failed"));
+  const stopCatalog = core.startCatalogLoop(cfg.server.discovery_interval_h * 3600_000);
 
   const graceMs = overrides.shutdownGraceMs ?? SHUTDOWN_GRACE_MS;
   // Memoized, so a second signal (or a second caller) awaits the same shutdown
@@ -174,6 +190,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   let closing: Promise<void> | undefined;
   const close = () => (closing ??= (async () => {
     stopHealth();
+    stopCatalog();
     // Idle keep-alive sockets go at once; the ones carrying a response get the
     // grace, after which they are destroyed too — an SSE stream with
     // timeout_s: 600 must not hold the shutdown open until SIGKILL.

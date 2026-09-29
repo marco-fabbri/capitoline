@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.js";
-import { withPreamble, cliId, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
+import { withPreamble, cliId, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ListedModel, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
 // The CLI is an agent: the prompt names the one tool it may use and forbids
@@ -10,7 +10,26 @@ export const IMAGE_PROMPT = (prompt: string): string =>
   `Use the generate_image tool exactly once, with ImageName "image", to create this image: ${prompt}\n` +
   "Do not create, read, copy or modify any file, do not run commands, do not open a browser. When the tool has finished, reply only with the single word: done";
 
+// An id as `agy models` prints it: lower case, digits, dots and dashes, the
+// effort already inside it (`gemini-3.8-flash-high`).
+const AGY_ID = /^[a-z0-9][a-z0-9.-]*$/;
+
+/**
+ * `agy models`: one model per line, `<id>\t<display name>`, on stdout; the
+ * "Fetching available models..." banner goes to stderr. Every listed model is
+ * one the CLI offers, and its level is part of its id, so nothing is hidden
+ * and no efforts are carried.
+ */
+function listAntigravityModels(stdout: string): ListedModel[] {
+  return stdout.split("\n").flatMap((line) => {
+    const id = line.split("\t")[0]?.trim() ?? "";
+    return line.includes("\t") && AGY_ID.test(id) ? [{ id }] : [];
+  });
+}
+
 export const antigravityAdapter: Adapter = {
+  listModels: listAntigravityModels,
+
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
     const { system: sent, rest } = splitSystem(req.messages);
     const system = withPreamble(cfg, sent);

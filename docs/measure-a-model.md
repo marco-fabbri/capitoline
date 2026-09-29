@@ -114,7 +114,7 @@ council:
 ### Codex, one generation
 
 The same shape on the ChatGPT subscription: the three GPT-6 models the Codex
-CLI lists, in the order it lists them (`test/fixtures/codex/models.txt`).
+CLI lists, in the order it lists them (`test/fixtures/codex/debug-models.json`).
 OpenAI does not publish their relative size, so which one is "the cheap rung"
 is exactly what the measurement finds out; the seat order only sets the
 labels, and the ranking is blind to it.

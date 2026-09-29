@@ -6,6 +6,9 @@
 # shapes parseRanking tolerates and the one Codex actually favours.
 set -euo pipefail
 dir="$(cd "$(dirname "$0")" && pwd)"
+# The model listing is a command, not a prompt: answered from argv, before
+# stdin is read, with a trimmed capture of the real `codex debug models`.
+if [[ "${1:-}" == debug && "${2:-}" == models ]]; then exec cat "$dir/../fixtures/codex/debug-models.json"; fi
 stdin="$(cat)"
 case "$stdin" in
   # The image run: a real capture (2026-09-23) of Codex's built-in image

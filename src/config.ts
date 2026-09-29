@@ -42,6 +42,21 @@ const ImageSchema = z
   .strict()
   .default({});
 
+// How a provider's CLI lists the models it serves, for the daily catalog
+// (docs/deploy.md §7.2). Optional: a provider without it — Claude, whose names
+// are aliases that already follow the latest model — keeps exactly the models
+// this file declares. With it, a listed id no declared model reaches is exposed
+// as `<prefix><id>`, and a declared model none of whose ids is listed any more
+// is retired: unavailable, never deleted, so the file stays valid.
+const DiscoverSchema = z.object({
+  // The CLI's own listing command, run as the runner user like any other run.
+  args: z.array(z.string().min(1)).min(1),
+  // What a discovered id is called: the door's name, as every declared model is.
+  prefix: z.string().min(1),
+  // Ids never exposed by discovery: a model that is retiring, or one not wanted.
+  exclude: z.array(z.string().min(1)).default([]),
+}).strict();
+
 const ProviderSchema = z.object({
   binary: z.string().min(1),
   concurrency: z.number().int().min(1),
@@ -53,6 +68,12 @@ const ProviderSchema = z.object({
   timeout_s: z.number().int().min(1),
   budget: z.object({ window_5h_tokens: z.number().int().min(0), window_7d_tokens: z.number().int().min(0) }).strict(),
   health_model: z.string().min(1),
+  // Probed instead of health_model, first still listed wins, when the catalog
+  // says health_model's CLI id is gone. Without it a retired probe model would
+  // mark every model of the provider unhealthy — the failure GPT-5.5 was
+  // heading for on 2026-10-14.
+  health_fallback: z.array(z.string().min(1)).default([]),
+  discover: DiscoverSchema.optional(),
   models: z.record(z.string().min(1), ModelSchema),
   // min(1) on the value: an empty string parses, and the flag then reaches
   // the CLI as `--effort ""` or as a model id ending in "-".
@@ -208,6 +229,19 @@ export const ConfigSchema = z
         // the runner's resident services — in MB. 0 = not declared, and the
         // startup check then counts the CLIs alone (design §4.1).
         memory_mb: z.number().int().min(0).default(0),
+        // How often the providers that declare `discover` are asked for their
+        // models. The listing is free (no quota), a day is what a retirement
+        // announced weeks ahead needs, and startup runs one as well.
+        discovery_interval_h: z.number().int().min(1).default(24),
+        // Optional: where a change in the catalog is announced, as one plain
+        // text POST. Any endpoint that takes one works — an ntfy topic is the
+        // documented example (docs/deploy.md §7.2). The token, when there is
+        // one, is read from the environment variable named here and never
+        // written in a file the repository or the overlay holds.
+        notify: z.object({
+          url: z.string().url(),
+          token_env: z.string().min(1).optional(),
+        }).strict().optional(),
       })
       .strict()
       .default({}),
@@ -262,6 +296,14 @@ export const ConfigSchema = z
       // there is nothing for it to carry. It would be dropped in silence and
       // the system prompt would go back to being prepended to the user
       // prompt, while the file says it travels as a configuration override.
+      for (const f of p.health_fallback) {
+        if (!Object.hasOwn(p.models, f) || p.models[f].kind !== "text") {
+          ctx.addIssue({ code: "custom", path: ["providers", id, "health_fallback"], message: `health_fallback "${f}" is not one of provider ${id}'s text models` });
+        }
+      }
+      if (p.discover && p.discover.prefix.startsWith("capitoline")) {
+        ctx.addIssue({ code: "custom", path: ["providers", id, "discover", "prefix"], message: `discover.prefix "${p.discover.prefix}" is reserved for the council` });
+      }
       if (p.system_prompt_flag_prefix !== null && p.system_prompt_flag === null) {
         ctx.addIssue({ code: "custom", path: ["providers", id, "system_prompt_flag_prefix"], message: `provider ${id} sets system_prompt_flag_prefix but no system_prompt_flag for it to introduce` });
       }

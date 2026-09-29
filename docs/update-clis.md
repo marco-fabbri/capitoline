@@ -26,6 +26,23 @@ checks below run at that moment and a failure after it has a known cause.
 
 Add a row for every update, newest last.
 
+## The model lists
+
+Exposing a new model, or withdrawing a retired one, no longer waits for an
+update: the gateway asks Codex and Antigravity for their models once a day
+and adjusts on its own (`docs/deploy.md` §7.2), and `/health` shows what it
+found. What an update still calls for is refreshing the committed lists the
+tests check the configuration against, so a declared model that no longer
+exists fails a test instead of being retired in production unnoticed:
+
+```sh
+cd /tmp && codex debug models | jq '{models: [.models[] | {slug, display_name, visibility, supported_reasoning_levels: [.supported_reasoning_levels[] | {effort}]}]}' > debug-models.json   # test/fixtures/codex/debug-models.json
+cd /tmp && agy models > models.txt                                                                                                                                         # test/fixtures/antigravity/models.txt
+```
+
+Claude has no list to refresh: its names are aliases that follow the latest
+model (`opus` moved from Opus 5 to Opus 5.5 with nothing configured).
+
 ## After updating Codex: the tool surface
 
 The smoke test proves a model answers. It cannot see that a new version

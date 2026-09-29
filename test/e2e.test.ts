@@ -21,6 +21,21 @@ beforeAll(async () => { app = await start("test/e2e.config.yaml", { port: 0 }); 
 afterAll(async () => { await app.close(); });
 
 describe("end to end with fake CLIs", () => {
+  it("lists the models of Codex and Antigravity by the CLIs' own commands after startup, and finds nothing to change", async () => {
+    // The listing runs in the background after readiness (docs/deploy.md §7.2),
+    // so it is waited for here rather than assumed.
+    type Catalog = { checkedAt: number | null; ok: boolean | null; discovered: string[]; retired: string[]; healthModel: string | null } | null;
+    const catalogs = async () => new Map(((await (await fetch(`http://127.0.0.1:${app.port}/health`)).json()) as { providers: { id: string; catalog: Catalog }[] }).providers.map((p) => [p.id, p.catalog]));
+    let seen = await catalogs();
+    for (let i = 0; i < 100 && (seen.get("codex")?.checkedAt == null || seen.get("antigravity")?.checkedAt == null); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      seen = await catalogs();
+    }
+    expect(seen.get("codex")).toMatchObject({ ok: true, discovered: [], retired: [], healthModel: "codex-gpt-6-luna" });
+    expect(seen.get("antigravity")).toMatchObject({ ok: true, discovered: [], retired: [], healthModel: "antigravity-gemini-flash" });
+    // Claude's names are aliases that follow the latest model: no catalog.
+    expect(seen.get("claude")).toBeNull();
+  });
   it("serves all configured models as available after the startup health check, the council among them", async () => {
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/models`);
     const data = ((await r.json()) as { data: { id: string; owned_by: string; capitoline: { kind: string } }[] }).data;

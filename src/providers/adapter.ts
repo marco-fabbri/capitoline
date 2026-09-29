@@ -14,6 +14,18 @@ export interface ModelSpec {
   timeoutS?: number;
 }
 export interface Command { args: string[]; stdin: string }
+
+/**
+ * One model as the CLI's own listing names it (the daily catalog,
+ * docs/deploy.md §7.2). `efforts` is the levels it serves, translated into the
+ * gateway's scale through the provider's effort table, when the listing says;
+ * `hidden` is a model the CLI serves but does not offer, which discovery never
+ * exposes on its own and never counts as retired while it is still listed.
+ */
+export interface ListedModel { id: string; efforts?: Effort[]; hidden?: boolean }
+
+/** What a new listing changed: names now served that were not, and names no longer served. */
+export interface CatalogChange { added: string[]; removed: string[] }
 export type ImageCommand = Command;
 
 export interface Adapter {
@@ -22,6 +34,12 @@ export interface Adapter {
   parse(lines: AsyncIterable<string>): AsyncIterable<AdapterEvent>;
   /** Present only for adapters whose CLI can generate images. */
   buildImageCommand?(cfg: ProviderConfig, model: ModelSpec, req: ImageRequest): ImageCommand;
+  /**
+   * Reads the output of the CLI's listing command (`discover.args`). Present
+   * only for CLIs that have one. Throws when the output is not a listing:
+   * a catalog must never be replaced by a misread one.
+   */
+  listModels?(stdout: string, cfg: ProviderConfig): ListedModel[];
 }
 
 // The verdict of one probe. `scope` and `model` carry the same attribution the
@@ -67,6 +85,16 @@ export interface Provider {
   /** Present only for providers with an image-capable adapter; yields `image` then `done`, or `error`. */
   generateImage?(req: ImageRequest, model: ModelSpec, signal?: AbortSignal): AsyncIterable<ProviderEvent>;
   health(): Promise<HealthStatus>;
+  /** True for a provider whose configuration declares `discover` and whose adapter can read the listing. */
+  readonly discovers?: boolean;
+  /** Runs the CLI's listing command. Throws on any failure, including an empty listing. */
+  listModels?(): Promise<ListedModel[]>;
+  /** Replaces the catalog with a listing and says what that changed. `models()` reflects it at once. */
+  applyListing?(listed: ListedModel[]): CatalogChange;
+  /** A declared model none of whose CLI ids the current listing holds. */
+  isRetired?(model: ModelSpec): boolean;
+  /** The names discovery added, and the declared names it retired, as they stand. */
+  catalogNames?(): { discovered: string[]; retired: string[] };
 }
 
 /**
@@ -121,6 +149,29 @@ export function cliId(cfg: ProviderConfig, model: ModelSpec, wanted: Effort | un
   if (!model.effortSuffix) return model.cliModel;
   const eff = effortValue(cfg, model, wanted);
   return eff ? `${model.cliModel}-${eff.value}` : model.cliModel;
+}
+
+/**
+ * Every CLI id a model can resolve to: its `cli_model`, or, when the effort
+ * completes the id, one id per level it offers. What the catalog compares a
+ * listing against — a model is still served while any one of them is listed.
+ */
+export function reachableIds(cfg: ProviderConfig, model: ModelSpec): string[] {
+  if (!model.effortSuffix) return [model.cliModel];
+  const levels = (model.efforts ?? (Object.keys(cfg.effort) as Effort[])).filter((e) => Object.hasOwn(cfg.effort, e));
+  return [...new Set(levels.map((e) => `${model.cliModel}-${cfg.effort[e]}`))];
+}
+
+/**
+ * The gateway's levels whose value in the provider's effort table is one the
+ * CLI says a model serves: the inverse of the table, for a listing that
+ * reports levels (Codex). Undefined when the listing names none the table
+ * prices, so the model is offered the table as it stands rather than nothing.
+ */
+export function effortsFromLevels(cfg: ProviderConfig, levels: string[]): Effort[] | undefined {
+  const served = new Set(levels);
+  const efforts = (Object.keys(cfg.effort) as Effort[]).filter((e) => served.has(cfg.effort[e]!));
+  return efforts.length > 0 ? efforts : undefined;
 }
 
 /**

@@ -86,8 +86,14 @@ providers:
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: codex-gpt-6-luna
+    # Probed instead when the catalog says health_model is no longer listed.
+    health_fallback: [codex-gpt-5.6-luna]
+    # The daily catalog (docs/deploy.md §7.2): `codex debug models` is the
+    # CLI's own list. A listed model no entry below reaches is served as
+    # codex-<slug>; an entry whose slug is no longer listed is retired.
+    discover: { args: [debug, models], prefix: codex-, exclude: [gpt-5.5] }
     models:
-      # Every slug in the CLI's own model cache (test/fixtures/codex/models.txt).
+      # Every slug `codex debug models` lists (test/fixtures/codex/debug-models.json).
       # `efforts` is pinned wherever the cache says the model serves fewer
       # levels than the provider's table prices, so a request asking for one it
       # does not have resolves to the nearest it does instead of being sent a
@@ -98,8 +104,9 @@ providers:
       codex-gpt-5.6-sol:   { cli_model: gpt-5.6-sol }
       codex-gpt-5.6-terra: { cli_model: gpt-5.6-terra }
       codex-gpt-5.6-luna:  { cli_model: gpt-5.6-luna,  efforts: [low, medium, high, xhigh, max] }
-      # gpt-5.5 is still in the cache and deliberately absent: it retires from
-      # Codex with ChatGPT sign-in on 2026-10-14 (developers.openai.com/codex/models).
+      # gpt-5.5 is still listed and deliberately absent (`discover.exclude`
+      # above keeps discovery from adding it back): it retires from Codex with
+      # ChatGPT sign-in on 2026-10-14 (developers.openai.com/codex/models).
       # The two the cache lists that are not general chat models, exposed
       # because they are models the subscription serves and named so nobody
       # reaches for them by accident: `gpt-reserve` is the fallback tier, and
@@ -215,6 +222,10 @@ providers:
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: antigravity-gemini-flash
+    health_fallback: [antigravity-gemini-3.7-flash]
+    # `agy models` lists every id the CLI serves, the level inside the id: one
+    # no entry below reaches is served as antigravity-<id> (docs/deploy.md §7.2).
+    discover: { args: [models], prefix: antigravity- }
     models:
       # effort is part of the model id: <base>-<effort>
       antigravity-gemini-flash:     { cli_model: gemini-3.8-flash, effort_suffix: true }

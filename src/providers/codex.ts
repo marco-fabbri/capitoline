@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.js";
-import { withPreamble, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ModelSpec } from "./adapter.js";
+import { withPreamble, effortArgs, effortValue, effortsFromLevels, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ListedModel, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
 // What the CLI said, from an event whose `error` is an object with a message,
@@ -37,7 +37,27 @@ export const CODEX_IMAGE_PROMPT = (prompt: string): string =>
 // produced a warning for.
 const NOT_A_TOOL = new Set(["agent_message", "reasoning", "error"]);
 
+/**
+ * `codex debug models`: "Render the raw model catalog as JSON", the CLI's own
+ * list of what the account is served (measured 2026-09-29, Codex CLI 0.156.0:
+ * about 500 KB, eleven seconds). Only three fields are read: the slug, whether
+ * the CLI offers the model (`visibility: "list"`) or keeps it for its own
+ * features (`"hide"` — `gpt-reserve`, `codex-auto-review`), and the levels it
+ * serves, which become the model's `efforts` through the effort table.
+ */
+function listCodexModels(stdout: string, cfg: ProviderConfig): ListedModel[] {
+  const doc = JSON.parse(stdout) as { models?: unknown };
+  if (!Array.isArray(doc.models)) throw new Error("codex model catalog has no models array");
+  return doc.models.map((m: { slug?: unknown; visibility?: unknown; supported_reasoning_levels?: { effort?: unknown }[] }) => {
+    if (typeof m.slug !== "string" || m.slug === "") throw new Error("codex model catalog entry without a slug");
+    const levels = (m.supported_reasoning_levels ?? []).map((l) => l.effort).filter((e): e is string => typeof e === "string");
+    return { id: m.slug, efforts: effortsFromLevels(cfg, levels), hidden: m.visibility !== "list" };
+  });
+}
+
 export const codexAdapter: Adapter = {
+  listModels: listCodexModels,
+
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
     const { system: sent, rest } = splitSystem(req.messages);
     const system = withPreamble(cfg, sent);

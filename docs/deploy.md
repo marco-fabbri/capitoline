@@ -575,6 +575,74 @@ changed CLI, not at a quota hit. A quota hit is a 429 with `Retry-After`:
 there are two rolling windows and the longer one resets in days, see
 `docs/spike-2026-09.md` §8.
 
+### 7.2 Model catalog and notifications
+
+The models a provider serves come from two places. `config/capitoline.yaml`
+declares the curated ones: short names such as `antigravity-gemini-flash`,
+pinned efforts, the image agents, the models the councils and the health
+probe name. A provider that also declares `discover` has its CLI asked, at
+startup and then every `server.discovery_interval_h` hours (24 by default),
+which models it serves, through the CLI's own command run as `runner` like
+any other run:
+
+| Provider | Command | Output |
+|---|---|---|
+| Codex | `codex debug models` | JSON catalog, about 500 KB, about 11 s |
+| Antigravity | `agy models` | one `<id>\t<display name>` line per model |
+| Claude | none | its names are aliases that follow the latest model |
+
+The sudoers rule of §5 already allows both, since it allows the binaries with
+any arguments. Nothing is edited, neither the repository's file nor the
+overlay. What the listing changes lives in the process and in the `catalog`
+table of the usage database:
+
+- **A model the CLI lists and no declared entry reaches** is served as
+  `<prefix><id>` — `codex-gpt-7-nova`, `antigravity-gemini-3.9-flash-high`.
+  For Codex it gets the reasoning levels the catalog says it serves. It is
+  not added when Codex marks it hidden, when its id is in `discover.exclude`
+  (`gpt-5.5`, retiring on 2026-10-14), or when its name is taken.
+- **A declared model none of whose ids is listed any more** is retired: it
+  leaves `/v1/models`, a request for it gets a 404 saying so, and a council
+  seat steps past it to the next model of its chain. The configuration stays
+  valid. When the model comes back to the listing, it comes back.
+- **The health probe** moves to the first `health_fallback` still listed when
+  `health_model` is retired, instead of failing every round and taking the
+  whole provider down with it.
+- **A listing that fails**, comes back empty or cannot be read changes
+  nothing. The previous catalog stays, and the log says why.
+
+`/health` shows each catalog: when the CLI was last asked and whether it
+answered, what discovery added, what it retired, and which model the probe is
+running on. Every change is also a log line (`model catalog changed`).
+
+**Notifications are optional.** With `server.notify` set, every change is
+also sent as one plain-text `POST`, with a `Title` header, to the configured
+URL — for example "codex models changed. new: codex-gpt-7-nova; no longer
+served: codex-gpt-6-luna (used by health_model, council capitoline).". A
+model the configuration still uses is named with where it is used, because
+that is the change worth reading. Nothing else is ever sent, and a failed
+POST is logged and forgotten.
+
+Any endpoint that takes a text POST works. [ntfy](https://ntfy.sh) is the
+simplest: an open-source service that turns an HTTP POST to a topic into a
+phone notification, usable free on the public server or self-hosted. In the
+host overlay:
+
+```yaml
+server:
+  notify:
+    url: https://ntfy.sh/capitoline-<long random string>
+    token_env: CAPITOLINE_NOTIFY_TOKEN   # optional
+```
+
+Subscribe to the same topic in the ntfy app. On the public server anyone who
+knows a topic's name can read it, so the name is the secret: make it long and
+random, or use an access token on a reserved topic or on your own server.
+The token is read from the environment variable `token_env` names, never
+from a file in the repository or the overlay: put it in an environment file
+the unit reads (`EnvironmentFile=/etc/capitoline/notify.env` in §8, mode
+0600, holding `CAPITOLINE_NOTIFY_TOKEN=tk_...`). The URL is never logged.
+
 ## 8. systemd
 
 ```sh
