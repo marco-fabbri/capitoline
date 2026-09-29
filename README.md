@@ -33,6 +33,34 @@ default: llm-council's chairman is a member, and here that is an option
 asserts nothing the answers do not support. And every change to the strategy
 was measured before it shipped (`docs/measurements/`).
 
+## Can I use Capitoline with my subscriptions?
+
+Two different questions, with two different answers.
+
+**The code** is MIT-licensed (`LICENSE`): anyone may use, change and share it.
+
+**Your subscriptions** are governed by each provider's terms, and that is the
+question `docs/terms-of-service.md` answers, with the clauses that matter
+quoted and dated. In short, from the author's reading:
+
+- **Yes, for your own use on your own plans.** Capitoline runs each provider's
+  official CLI in the headless mode the provider documents, signed in with your
+  account, and never touches its tokens. Anthropic permits it in so many words,
+  OpenAI through its product documentation; Google is the least settled of the
+  three, and xAI is not supported.
+- **A business seat is still one person's.** A service for colleagues needs
+  credentials the company holds, under the company's agreement.
+- **An application of your own may use it** while four conditions hold: no text
+  another person wrote reaches a prompt, the volume stays personal, nothing is
+  sold, and no provider is named or branded in the output.
+- **Never** share an account, hand a key to another person for their own
+  questions, or pool several accounts of one provider.
+
+This is the author's personal interpretation, not legal advice: the author is
+not a lawyer, and the terms can change. Read the terms that bind your own
+accounts; `docs/terms-of-service.md` has the full analysis and a checklist, and
+`docs/deployment-policy.md` is how the author's own installation applies it.
+
 ## Run it
 
 Requirements: Linux for a deployment (Debian or Ubuntu; macOS works for development), Node 24.x (pinned in `.nvmrc`; `engines` is `>=24 <25`), and the CLIs `claude`, `codex`, `agy` installed and logged in, on subscriptions of your own, for the user that runs them. The shipped configuration seats all three in its councils and sizes its concurrency for a host of about 8 GB (the startup log says whether yours fits, design §4.1). A CLI that is missing or signed out is reported unhealthy and its models unavailable; the councils then seat the members that are left.
@@ -126,24 +154,6 @@ to rerun.
   rejected explicitly, never silently degraded.
 - **Everything that depends on the CLIs lives in configuration**, because
   the CLIs change every month.
-
-## A note on terms of service
-
-Capitoline uses consumer subscriptions through the providers' official
-clients, for personal use. What each provider allows in headless, automated
-mode must be checked provider by provider and can change. Never pool
-multiple accounts of the same provider: it violates explicit clauses.
-
-`docs/terms-of-service.md` answers one question — can you use Capitoline
-with your accounts, and for what — from the owner's reading of the four
-providers' terms (Anthropic, OpenAI, Google and xAI), with the clauses that
-matter quoted verbatim and dated. In short: yes for your own use on your
-own plan; a business seat is still one person's; a service for colleagues
-needs credentials the company holds. It is a
-personal interpretation by the author, who is not a lawyer, and not legal
-advice: anyone installing Capitoline reads the terms that bind their own
-accounts. `docs/deployment-policy.md` is how this installation applies that
-reading.
 
 ## How this was built
 
