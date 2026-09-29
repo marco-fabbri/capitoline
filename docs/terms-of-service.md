@@ -374,8 +374,12 @@ does not apply at all.
 Sources: [Terms of Service – Consumer](https://x.ai/legal/terms-of-service)
 (last updated September 11, 2026);
 [Acceptable Use Policy](https://x.ai/legal/acceptable-use-policy) (effective
-August 14, 2026); [Grok Build](https://docs.x.ai/build/overview).
-Capitoline has no xAI provider; this reads the terms for the day one exists.
+August 14, 2026); [Grok Build](https://docs.x.ai/build/overview);
+[Brand Guidelines](https://x.ai/legal/brand-guidelines) (dated February 14,
+2025, read 2026-09-29). Capitoline has no xAI provider: one was measured as
+a council member and declined for reasons of quality, not terms (README,
+"Providers considered and declined"); this reads the terms for anyone who
+builds one.
 
 - Sharing: "You may not share your account credentials or make your account
   available to anyone else, and are responsible for all activities that
@@ -396,7 +400,11 @@ Capitoline has no xAI provider; this reads the terms for the day one exists.
   Service". The policy also prohibits "Misleading others or not being
   transparent regarding your use of AI, including by phishing, creating fake
   accounts, providing services that appear to be from you, when they are in
-  fact from SpaceXAI".
+  fact from SpaceXAI". The Brand Guidelines the terms point to say where
+  the attribution goes: "please attribute them to SpaceXAI and Grok by
+  displaying one of the following phrases in a legible and noticeable
+  manner wherever the Grok-generated material is published or distributed:
+  Written with Grok / Created with Grok".
 - Business path: "Our Enterprise Terms of Service govern the use of our
   Services for developers and businesses, including SpaceXAI APIs and
   PromptIDE."
@@ -405,7 +413,9 @@ Capitoline has no xAI provider; this reads the terms for the day one exists.
 headless mode is authorised by its own documentation, and a subscription
 can sign in on a headless host. What would shape an xAI provider is the
 fourth condition, which inverts: xAI output must be attributed to the
-service, not left unbranded.
+service, not left unbranded — wherever it is published or distributed, so
+the obligation falls on what an application shows to others, not on
+private use or on how the output is processed before that.
 
 ## What the providers may do with your content
 
