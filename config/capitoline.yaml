@@ -104,6 +104,7 @@ providers:
       # levels than the provider's table prices, so a request asking for one it
       # does not have resolves to the nearest it does instead of being sent a
       # level the CLI would refuse.
+      codex-gpt-6.1-sol:   { cli_model: gpt-6.1-sol }
       codex-gpt-6-astra:   { cli_model: gpt-6-astra }
       codex-gpt-6-sol:     { cli_model: gpt-6-sol }
       codex-gpt-6-luna:    { cli_model: gpt-6-luna,    efforts: [low, medium, high, xhigh, max] }

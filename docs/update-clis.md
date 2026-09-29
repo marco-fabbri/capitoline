@@ -33,6 +33,8 @@ procedure below, which a person runs.
 | Claude Code (`claude`) | 2.1.284 | 2026-09-29 | with `scripts/update-cli.sh`, smoke test passed; the rollback path was exercised on purpose the same day (2.1.283 installed, a failing check, 2.1.284 put back) |
 | Codex CLI (`codex`) | 0.159.0 | 2026-09-29 | the script stopped the first attempt: two features newly on by default, `daemon_auto_start` and `write_stdin_approval`, neither a tool of `codex exec`, both now switched off in `providers.codex.args`; second attempt passed, image and tool probe included |
 | Antigravity CLI (`agy`) | 1.2.13 | 2026-09-29 | with `scripts/update-cli.sh`; the installer refuses to overwrite an installed binary, so the script removes it first; `agy models` unchanged; `AGY_CLI_DISABLE_AUTO_UPDATE` still honoured ("Auto-update disabled via environment variable" in its log) |
+| Claude Code (`claude`) | 2.1.285 | 2026-09-29 | with `scripts/update-cli.sh`, smoke test passed |
+| Codex CLI (`codex`) | 0.159.1 | 2026-09-29 | with `scripts/update-cli.sh`: no new feature, image and tool probe passed; `codex debug models` lists a new model, GPT-6.1-Sol, which discovery adds as `codex-gpt-6.1-sol`; fixture `debug-models.json` re-captured |
 
 Add a row for every update, newest last.
 
