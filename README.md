@@ -12,7 +12,7 @@ OpenAI-compatible HTTP API and an MCP server, and behind them it runs the
 official Claude Code, Codex and Gemini CLIs, authenticated with the
 subscriptions of whoever hosts it. Three voices, one endpoint.
 
-You can give the floor to a single member: `claude-opus`,
+You can give the floor to a single member: `claude-fable`,
 `codex-gpt-6-astra`, `antigravity-gemini-pro`, or any other model the three CLIs
 serve, since every one of them is exposed by name. Or the `capitoline` model convenes the
 Triad: every member answers, every member judges the others without knowing
