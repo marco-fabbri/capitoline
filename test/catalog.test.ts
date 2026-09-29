@@ -25,7 +25,7 @@ function runnerAnswering(answer: () => Partial<CaptureResult>): Runner & { calls
     calls,
     run: () => { throw new Error("no CLI run expected in a catalog test"); },
     capture: async (spec) => { calls.push([spec.binary, ...spec.args]); return { exitCode: 0, stdout: Buffer.from(""), stderr: "", timedOut: false, ...answer() }; },
-    sweep: async () => {},
+    sweep: async () => [],
   } as Runner & { calls: string[][] };
 }
 
