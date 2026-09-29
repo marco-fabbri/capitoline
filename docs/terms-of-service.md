@@ -32,8 +32,9 @@ and an MCP server in front of it. How firmly the texts support that differs:
   below relies on the official CLI, not Capitoline, being what accesses it.
   This is the provider where the reading is a bet on how the text is
   enforced.
-- **xAI:** not applicable yet. Capitoline has no xAI provider, and Grok
-  Build's documentation points headless use at an API key.
+- **xAI:** not applicable yet. Capitoline has no xAI provider; a spike on
+  2026-09-29 signed Grok Build in with a subscription on a headless host.
+  Output must be attributed to xAI's service.
 
 What Capitoline supports today: the Claude, Codex and Antigravity CLIs,
 signed in with a subscription — the path tested in production. Signing the
@@ -384,7 +385,11 @@ Capitoline has no xAI provider; this reads the terms for the day one exists.
   through a bot, script, or otherwise". Grok Build's own documentation:
   "Headless usage is ideal for scripts, automations, or integration into
   other apps." Its sign-in: "On first launch, Grok opens a browser for
-  authentication. In non-browser environments, use an API key".
+  authentication. In non-browser environments, use an API key" — but the
+  CLI itself offers "device-code authentication for headless/remote
+  environments" (`grok login --device-auth`, Grok Build 1.0.41), which
+  signed a SuperGrok subscription in on a headless host in a spike on
+  2026-09-29, with no API key.
 - Attribution, unlike the other three: "When using Output or SpaceXAI's
   name, logos, trademarks, or other brand elements, you are required to
   obtain our permission and attribute your generation of the Output to the
@@ -397,11 +402,10 @@ Capitoline has no xAI provider; this reads the terms for the day one exists.
   PromptIDE."
 
 **Reading.** Automation is permitted where authorised, and Grok Build's
-headless mode is authorised by its own documentation. Two things would shape
-an xAI provider before it is built: a subscription sign-in may not work on a
-headless host at all (the documentation points non-browser environments at an
-API key), and the fourth condition inverts, since xAI output must be
-disclosed as AI-generated.
+headless mode is authorised by its own documentation, and a subscription
+can sign in on a headless host. What would shape an xAI provider is the
+fourth condition, which inverts: xAI output must be attributed to the
+service, not left unbranded.
 
 ## What the providers may do with your content
 
