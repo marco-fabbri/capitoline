@@ -41,10 +41,14 @@ OVERLAY="${CAPITOLINE_OVERLAY:-/etc/capitoline/overlay.yaml}"
 BASE="${CAPITOLINE_URL:-http://127.0.0.1:8080}"
 # The binary and the runner user as the service sees them: the base
 # configuration merged with the host's overlay.
-read -r BIN RUNNER < <(sudo -u capitoline env CAPITOLINE_OVERLAY="$OVERLAY" node -e "
+read -r BIN RUNNER SWITCHED_OFF < <(sudo -u capitoline env CAPITOLINE_OVERLAY="$OVERLAY" node -e "
   import('./dist/config.js').then((m) => {
     const c = m.loadConfig('config/capitoline.yaml', process.env.CAPITOLINE_OVERLAY || undefined);
-    console.log(c.providers['$cli'].binary, c.runner.user);
+    const p = c.providers['$cli'];
+    // The Codex features the configuration switches off (-c features.<name>=false):
+    // a default the CLI turns on and these name is already handled.
+    const off = [...p.args, ...p.args_extra].map((a) => /^features\\.([a-z0-9_]+)=false$/.exec(a)?.[1]).filter(Boolean);
+    console.log(p.binary, c.runner.user, off.join(',') || '-');
   });")
 [[ -x "$BIN" && -n "$RUNNER" ]] || { echo "update-cli: no binary or runner user for $cli in the configuration" >&2; exit 1; }
 
@@ -119,7 +123,10 @@ rollback() {
 
 if [[ "$cli" == codex ]]; then
   enabled_features > "$WORK/features-after"
-  new=$(comm -13 "$WORK/features-before" "$WORK/features-after")
+  # `features list` shows the CLI's defaults, not the -c overrides the gateway
+  # passes, so a feature the configuration already switches off is not news.
+  tr ',' '\n' <<< "$SWITCHED_OFF" | sort > "$WORK/switched-off"
+  new=$(comm -13 "$WORK/features-before" "$WORK/features-after" | comm -23 - "$WORK/switched-off")
   if [[ -n "$new" ]]; then
     echo "update-cli: Codex $after enables features $before did not:" >&2
     sed 's/^/  /' <<< "$new" >&2

@@ -507,7 +507,7 @@ describe("config", () => {
     const MUST_BE_OFF = ["image_generation", "view_image", "goals", "plugins", "remote_plugin", "apps", "tool_suggest",
       "skill_search", "skill_mcp_dependency_install", "multi_agent", "browser_use", "browser_use_external",
       "browser_use_full_cdp_access", "in_app_browser", "computer_use", "sleep_tool", "tool_call_mcp_elicitation",
-      "collaboration_modes", "shell_tool"];
+      "collaboration_modes", "shell_tool", "daemon_auto_start", "write_stdin_approval"];
     for (const file of BOTH_FILES) {
       const args = loadConfig(file).providers.codex.args;
       for (const f of MUST_BE_OFF) {

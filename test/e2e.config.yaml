@@ -188,6 +188,14 @@ providers:
       - features.tool_call_mcp_elicitation=false
       - -c
       - features.collaboration_modes=false
+      # Enabled by default from Codex 0.159.0 and neither a tool of `codex exec`
+      # (the daemon is for interactive launches; the approval is for escalated
+      # terminals, and the shell is off), switched off anyway so a new default
+      # is never left on unread (scripts/update-cli.sh stopped on them).
+      - -c
+      - features.daemon_auto_start=false
+      - -c
+      - features.write_stdin_approval=false
     args_extra: []            # what this host adds; only an overlay ever sets it
     system_preamble: null     # this CLI's tools are switched off by flag, so there is nothing to tell it
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"
