@@ -17,7 +17,8 @@
 #    the official installer for Antigravity (it verifies the SHA-512 itself).
 # 3. Check: Codex must enable no feature it did not enable before; then the
 #    smoke test, with one image from this CLI's own image model if it has one,
-#    through a temporary gateway key created and revoked here.
+#    through a temporary gateway key created and revoked here; then, for Codex,
+#    a request to run a command must produce no step (codex-tool-probe.mjs).
 # 4. On any failure: the previous version back, and the smoke test again.
 #
 # No restart is needed either way: the gateway starts a CLI per request.
@@ -145,6 +146,12 @@ fi
 
 echo "update-cli: smoke test of $cli $after"
 smoke || rollback "smoke test"
+
+if [[ "$cli" == codex ]]; then
+  # What the new version lets the model do, read from the stream rather than
+  # asked of the model (scripts/codex-tool-probe.mjs says why).
+  node scripts/codex-tool-probe.mjs || rollback "Codex acted on a request to run a command"
+fi
 
 echo
 echo "update-cli: $cli $after is in place and passed. Add to docs/update-clis.md, Versions in use:"
