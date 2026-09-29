@@ -11,21 +11,23 @@ choice. Where the two disagree, the stricter one wins.
 1. **Subscription providers serve the owner and the owner's own software.**
    The `claude-*`, `codex-*` and `antigravity-*` models answer the owner —
    Claude Code over MCP, the owner's scripts, the council the owner asks —
-   and the applications listed in `docs/clients.md`. Volumes stay "ordinary,
+   and the owner's own applications, each connected as
+   `docs/connecting-an-application.md` describes. Volumes stay "ordinary,
    individual".
 2. **Content the owner generates and then publishes is the owner's use.** Who
    reads it afterwards does not matter.
 3. **A request another person triggered is answered by a subscription
    provider only when all four conditions hold** (`docs/terms-of-service.md`,
-   "The line, and four conditions"). Every application in `docs/clients.md`
-   is checked against them when it is connected and whenever it gains a way
+   "The line, and four conditions"). Every application of the owner's is
+   checked against them when it is connected and whenever it gains a way
    for a person to type something.
 4. **A path that takes free text from another person uses something else**:
    free-tier inference or other inference the owner does not pay per use
    for. It is not a matter of volume and cannot be bought off with a rate
    limit.
 5. **Credentials are per application, never per person.** Every application
-   gets its own gateway key or service token (`docs/clients.md`); none is
+   gets its own gateway key or service token
+   (`docs/connecting-an-application.md`); none is
    ever handed to a person for their own questions, and accounts are never
    pooled.
 6. **Google first.** A path that is marginal is marginal on Antigravity
@@ -49,7 +51,7 @@ choice. Where the two disagree, the stricter one wins.
   owner use. A static connector credential is sent for every member of the
   organization that adds it, so it is acceptable only on an account whose
   only member is the owner.
-- **Capitoline inside a company's inference platform** (backlog, "Capitoline
-  inside a company inference platform"). Only the platform's own models; the
-  personal subscriptions never sit behind a corporate endpoint. That is the
-  owner's rule and stricter than any of the texts.
+- **Personal subscriptions never sit behind a company's endpoint.** A
+  gateway run for a company serves that company's own models or credentials,
+  never the owner's personal plans. That is the owner's rule and stricter
+  than any of the texts.

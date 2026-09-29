@@ -1,7 +1,7 @@
 # Capitoline
 
 Personal AI gateway: OpenAI-compatible HTTP API and MCP server in front of the
-official Claude Code, Codex and Gemini CLIs, running on the owner's own
+official Claude Code, Codex and Antigravity CLIs, running on the owner's own
 subscriptions.
 
 ## Rules for anyone working in this repo

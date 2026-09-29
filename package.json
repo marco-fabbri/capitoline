@@ -2,10 +2,20 @@
   "name": "capitoline",
   "version": "0.1.0",
   "private": true,
-  "description": "Personal AI gateway over the Claude Code, Codex and Antigravity CLIs",
+  "description": "Self-hosted OpenAI-compatible gateway and MCP server over the official Claude Code, Codex and Antigravity CLIs",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marco-fabbri/capitoline.git"
+  },
+  "homepage": "https://github.com/marco-fabbri/capitoline#readme",
+  "bugs": {
+    "url": "https://github.com/marco-fabbri/capitoline/issues"
+  },
   "type": "module",
-  "engines": { "node": ">=24 <25" },
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",

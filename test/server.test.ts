@@ -1002,6 +1002,6 @@ describe("/v1/admin", () => {
     expect((await auth(request(app).get("/v1/admin/callers"))).body.callers).toEqual({ "other.access": "app-two", "id.access": "renamed" });
     const named = (await auth(request(app).get("/v1/usage"))).body.callers.map((c: { caller: string }) => c.caller).sort();
     // boss made only admin calls, which spend no CLI and write no row.
-    expect(named).toEqual(["renamed", "app-two"]);
+    expect(named).toEqual(["app-two", "renamed"]);
   });
 });

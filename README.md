@@ -21,12 +21,20 @@ in the agreement but in hearing the dissent before deciding.
 
 ## Run it
 
-Requirements: Node 24.x (pinned in `.nvmrc`; `engines` is `>=24 <25`), and the CLIs `claude`, `codex`, `agy` installed and logged in for the user that runs them.
+Requirements: Linux for a deployment (Debian or Ubuntu; macOS works for development), Node 24.x (pinned in `.nvmrc`; `engines` is `>=24 <25`), and the CLIs `claude`, `codex`, `agy` installed and logged in, on subscriptions of your own, for the user that runs them. The shipped configuration seats all three in its councils and sizes its concurrency for a host of about 8 GB (the startup log says whether yours fits, design §4.1). A CLI that is missing or signed out is reported unhealthy and its models unavailable; the councils then seat the members that are left.
 
+On a development machine, a short overlay runs the CLIs as yourself instead of through `sudo`, and keeps the sandboxes and the database in the working copy:
+
+    mkdir -p tmp && cat > tmp/dev-overlay.yaml <<'EOF'
+    runner: { user: null, sandbox_root: ./tmp/sandboxes }
+    usage: { db_path: ./tmp/usage.sqlite }
+    EOF
     npm ci && npm run build
-    node dist/main.js                      # reads config/capitoline.yaml, listens on 127.0.0.1:8080
+    CAPITOLINE_OVERLAY=tmp/dev-overlay.yaml node dist/main.js    # base config/capitoline.yaml, listens on 127.0.0.1:8080
 
-Connecting another application of your own: `docs/clients.md`, which covers the two credentials — a key issued by the gateway (`Authorization: Bearer cap_…`, managed through `/v1/admin/keys` or `npm run keys` on the host) and a Cloudflare service token (`scripts/cf-service-token.sh` creates one and binds it to a name) — where the secret goes and what it may be used for. Every call is recorded under the caller's name: `GET /v1/usage` is the per-caller and per-model breakdown. Production deployment on any Debian/Ubuntu host (a Nutanix AHV VM, a Proxmox LXC, bare metal), with a separate `runner` user and Cloudflare Tunnel + Access: see `docs/deploy.md`. Running Capitoline inside a company inference platform — the council over the platform's own models, as an MCP server the platform deploys — is in `docs/backlog.md`.
+A production host — a separate `runner` user that alone holds the CLI logins, a systemd service, backups, updates — is described step by step in **`docs/deploy.md`**. Cloudflare Tunnel and Access are optional there: the gateway issues and checks its own API keys, so it can serve a network of your own with nothing in front.
+
+Connecting another application of your own: `docs/connecting-an-application.md`, which covers the two credentials — a key issued by the gateway (`Authorization: Bearer cap_…`, managed through `/v1/admin/keys` or `npm run keys` on the host) and a Cloudflare service token (`scripts/cf-service-token.sh` creates one and binds it to a name) — where the secret goes and what it may be used for. Every call is recorded under the caller's name: `GET /v1/usage` is the per-caller and per-model breakdown.
 
 ## Use it
 
@@ -120,3 +128,11 @@ personal interpretation by the author, who is not a lawyer, and not legal
 advice: anyone installing Capitoline reads the terms that bind their own
 accounts. `docs/deployment-policy.md` is how this installation applies that
 reading.
+
+## How this was built
+
+Capitoline was written with Claude Code: most of the code and the documents
+are Claude's, and every commit carries a `Co-Authored-By` line saying so.
+The design, the decisions — what to build, the constraints above, the
+council's strategy, which providers to trust with a seat — and the review
+of every change are the author's.

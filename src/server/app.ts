@@ -245,8 +245,8 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     // The dated id of what actually answered, when the CLI reported one. Only
     // Claude does: its model names are aliases that move onto a new model
     // without a word, while a Codex slug and an Antigravity id are the model
-    // itself. A caller that keeps a record of who wrote what — app-one
-    // stores the model of every recipe — can then store the model and not
+    // itself. A caller that keeps a record of who wrote what — an application
+    // that stores the model of everything it generates — can then store the model and not
     // only the name it asked for (issue #2).
     let cliModelId: string | undefined;
     let started = false;

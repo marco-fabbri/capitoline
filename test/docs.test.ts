@@ -246,7 +246,7 @@ describe("the backlog", () => {
 
 // The four conditions are stated twice: once where they are argued
 // (docs/terms-of-service.md) and once where an application's author checks
-// their own path against them (docs/clients.md §5). A condition reworded in
+// their own path against them (docs/connecting-an-application.md §5). A condition reworded in
 // one and not the other would leave the two documents drawing different
 // lines, so they are compared word for word.
 describe("the four conditions", () => {
@@ -258,7 +258,7 @@ describe("the four conditions", () => {
     // In the terms document each condition is a bold heading followed by its
     // explanation; the heading is the condition.
     const conditions = numbered(argued).map((l) => l.split(/(?<=\.) /)[0]);
-    const checked = numbered(section(readFileSync("docs/clients.md", "utf8"), "## 5. "));
+    const checked = numbered(section(readFileSync("docs/connecting-an-application.md", "utf8"), "## 5. "));
     expect(conditions).toHaveLength(4);
     expect(checked).toEqual(conditions);
   });

@@ -4,3 +4,6 @@ dist/
 *.sqlite
 *.sqlite-*
 .env
+.DS_Store
+.env.*
+coverage/

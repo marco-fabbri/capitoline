@@ -1,8 +1,8 @@
 # Deployment runbook
 
 Target: a Debian/Ubuntu host. Where that host lives does not matter to this
-document: a VM on Nutanix AHV (another deployment), an
-unprivileged LXC on Proxmox (the owner's first deployment) or bare metal.
+document: a virtual machine on any hypervisor, an unprivileged LXC on
+Proxmox (the first deployment) or bare metal.
 Every command is run as root on the host unless the prompt says otherwise.
 
 The result is one systemd service (`capitoline`, user `capitoline`) that
@@ -10,7 +10,7 @@ runs the CLIs through `sudo` as a second user (`runner`), which is the only
 user holding the subscription credentials, behind a Cloudflare Tunnel with
 Cloudflare Access in front. No inbound port is opened.
 
-Three steps need the owner with a browser on the Mac: `claude setup-token`
+Three steps need the owner with a browser on their own computer: `claude setup-token`
 (§6.1), the Codex device code (§6.2) and the Antigravity login (§6.3).
 
 ## 1. Host
@@ -259,7 +259,7 @@ Claude Code, `claude doctor` as `runner` prints `Auto-updates: disabled (set
 by env: DISABLE_AUTOUPDATER)`.
 
 **d. Login, once, over SSH, by the owner.** The CLI prints a URL; open it
-on the Mac, sign in, paste the code back. Do this from an interactive SSH
+on your own computer, sign in, paste the code back. Do this from an interactive SSH
 session of your own: in `-p` mode the CLI waits only 60 s for the code and
 the URL is bound to that single run (PKCE), so relaying the URL and the code
 through a chat or a ticket does not fit in the window, and without a TTY the
@@ -783,12 +783,12 @@ sent, so a token mapped an hour late reads back all the way, and renaming an
 application renames its past with it. An id the overlay has not named is
 reported as itself, which is unreadable and still correct. The same binding
 can be made at run time, without a restart, by the admin API
-(`PUT /v1/admin/callers/<client id>`, `docs/clients.md` §2b), and a binding
+(`PUT /v1/admin/callers/<client id>`, `docs/connecting-an-application.md` §2b), and a binding
 made there wins over the overlay's.
 
 **The gateway's own keys.** Beside the Access JWT the gateway accepts keys it
 issued itself, sent as `Authorization: Bearer cap_…` (design §4): the
-identity that works with no Cloudflare in front, and the one `docs/clients.md`
+identity that works with no Cloudflare in front, and the one `docs/connecting-an-application.md`
 recommends for applications behind the tunnel too. Keys live hashed in the
 usage database, are issued and revoked through `/v1/admin/keys` by the
 callers named in `server.access.admins` (an email from Access, a bound
@@ -931,7 +931,7 @@ reach) and for the MCP tool, which has a timeout of its own (§10). The same
 applies to any single model slow enough to stay silent for 100 s, but a
 council is the only thing here that does it by design.
 
-## 10. Claude Code as MCP client (on the Mac)
+## 10. Claude Code as MCP client (on your own computer)
 
 ```sh
 claude mcp add --transport http capitoline https://api.example.com/mcp \

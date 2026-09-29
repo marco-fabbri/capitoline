@@ -27,11 +27,11 @@ and an MCP server in front of it. How firmly the texts support that differs:
 - **OpenAI:** yes by its product documentation, which describes `codex exec`
   in scripts with a ChatGPT sign-in; the European terms, read literally,
   forbid programmatic extraction of output with no exception.
-- **Google:** an interpretation against the literal text. The Antigravity
-  terms call third-party tools that access the Service a breach; the reading
-  below relies on the official CLI, not Capitoline, being what accesses it.
-  This is the provider where the reading is a bet on how the text is
-  enforced.
+- **Google:** the least settled of the four. The Antigravity terms restrict
+  third-party tools that access the Service; the reading below relies on the
+  official CLI, not Capitoline, being what accesses it, a distinction the
+  text does not draw in so many words. Read that clause for your own account
+  before relying on this one.
 - **xAI:** not applicable yet. Capitoline has no xAI provider; a spike on
   2026-09-29 signed Grok Build in with a subscription on a headless host.
   Output must be attributed to xAI's service.
@@ -65,7 +65,7 @@ At a glance, with the evidence under **The evidence, provider by provider**:
 | Clause on third-party tools | no routing "on behalf of their users" | — | "products not provided by us" | — |
 | Output attribution | not stated | not stated | not stated | permission and attribution required |
 | Path for a shared service | company API keys | workspace service accounts (pay-as-you-go plans only) | Gemini Enterprise, under administrator terms not quoted here | Enterprise terms, not read |
-| How firm the reading is | firmest | rests on product documentation | against the literal text | no Capitoline provider yet |
+| How firm the reading is | firmest | rests on product documentation | least settled: rests on the official CLI being what accesses the Service | no Capitoline provider yet |
 
 ## What you can and cannot do
 
@@ -86,8 +86,8 @@ letting other people use your subscription as their own model. This
 document takes the narrow reading, because Anthropic's sentence sits in a
 paragraph about OAuth and about developers who should use API keys, and
 names products that let *their* users spend the developer's plan. The
-residual risk is that a provider applies the broad one, and for Google the
-literal text goes further than either.
+residual risk is that a provider applies the broad one, and Google's text
+is wider than either.
 
 Three different things follow, and they are kept apart:
 
@@ -357,17 +357,17 @@ Sources: [Antigravity Additional Terms of Service](https://antigravity.google/te
   applicable terms for downloadable software) and the terms below do not
   apply to you."
 
-**Reading.** Read literally, Capitoline falls inside both sentences: it is
-a product not provided by Google, used in connection with the Service, and a
-third-party tool in front of the account. The reading taken rests on a
-distinction the text does not make explicitly: what accesses the Service is
-the official `agy` binary, in the headless mode Google documents for use in
-a program, and the example the clause names — a third-party tool reusing the
-Antigravity OAuth token — is precisely what Capitoline never does. That is a
-bet on how Google applies the clause, not a reading the words compel. It is the most
-exposed of the four, and the consequence it names is the loss of both the
-Antigravity and the Gemini CLI accounts. Under Gemini Enterprise the clause
-does not apply at all.
+**Reading.** The two sentences are wide enough that Capitoline could be read
+into them: a product not provided by Google, used in connection with the
+Service. The reading taken here rests on a distinction the text does not
+state in so many words: what accesses the Service is the official `agy`
+binary, in the headless mode Google documents for use in a program, and the
+example the clause names — a third-party tool reusing the Antigravity OAuth
+token — is precisely what Capitoline never does. It is an interpretation,
+the one of the four most open to a different reading, and the consequence
+the clause names is the loss of both the Antigravity and the Gemini CLI
+accounts, so it is the one to weigh most carefully against your own
+accounts. Under Gemini Enterprise the clause does not apply at all.
 
 ### xAI
 
