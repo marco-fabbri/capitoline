@@ -6,6 +6,11 @@ subscriptions.
 
 ## Rules for anyone working in this repo
 
+- **The repository is public.** Nothing about the owner's infrastructure,
+  applications, employers or clients goes into it: no hosts, IPs, internal
+  domains or names. Those live in the host overlay. `.githooks/` enforces it
+  on the owner's machine against a private pattern list kept outside the
+  repository (`git config core.hooksPath .githooks`).
 - **English only** for everything in the repository: code, comments, docs,
   specs, plans, README, commit messages. The conversation with the owner may
   be in Italian; the repo never is.

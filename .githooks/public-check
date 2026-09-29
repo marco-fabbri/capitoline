@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# The repository is public. This check refuses a commit that would publish
+# something that belongs to the owner's own setup, before it leaves the machine.
+#
+#   public-check pre-commit          the added lines of the staged diff, and the staged paths
+#   public-check commit-msg <file>   the commit message, without its # comment lines
+#
+# Two lists of extended regular expressions, matched case-insensitively:
+#
+# - the built-in one below, generic enough to publish: session links, keys;
+# - a private one, never in the repository, because a public list of the
+#   owner's host names and applications would publish exactly what it guards:
+#   ${CAPITOLINE_PRIVATE_PATTERNS:-~/.config/capitoline/private-patterns}, one
+#   pattern per line, # for comments. Without it only the built-ins run.
+#
+# The built-in patterns are written so they do not match their own text (a
+# bracketed [:] or [.] where the real thing has a plain character), so this
+# file and its test can be committed through the check.
+#
+# Enabled per clone with: git config core.hooksPath .githooks
+# Deliberately bypassed with: git commit --no-verify
+set -euo pipefail
+
+BUILTIN='Claude-Session[:]
+claude[.]ai/code/session_
+cap_[A-Za-z0-9_-]{20,}
+BEGIN [A-Z ]*PRIVATE KEY
+sk-ant-[A-Za-z0-9_-]{10,}'
+
+private="${CAPITOLINE_PRIVATE_PATTERNS:-$HOME/.config/capitoline/private-patterns}"
+patterns="$(mktemp)"
+subject="$(mktemp)"
+trap 'rm -f "$patterns" "$subject"' EXIT
+printf '%s\n' "$BUILTIN" > "$patterns"
+if [[ -r "$private" ]]; then
+  grep -v -E '^[[:space:]]*(#|$)' "$private" >> "$patterns" || true
+else
+  echo "public-check: no private pattern list at $private; checking the built-in patterns only" >&2
+fi
+
+case "${1:-}" in
+  pre-commit)
+    # Every added line as path:line:text, from the staged diff with no context.
+    git diff --cached -U0 --no-color --no-ext-diff | awk '
+      /^\+\+\+ / { path = substr($0, 5); sub(/^b\//, "", path); next }
+      /^@@ /     { split($3, a, ","); line = substr(a[1], 2) + 0; next }
+      /^\+/      { print path ":" line ":" substr($0, 2); line++ }
+    ' > "$subject"
+    # The paths themselves, which a new file's name can give away.
+    git diff --cached --name-only --no-ext-diff | sed 's/^/path:0:/' >> "$subject"
+    ;;
+  commit-msg)
+    [[ -n "${2:-}" && -r "$2" ]] || { echo "usage: $0 commit-msg <message file>" >&2; exit 2; }
+    grep -v '^#' "$2" | awk '{ print "message:" NR ":" $0 }' > "$subject"
+    ;;
+  *)
+    echo "usage: $0 pre-commit | commit-msg <message file>" >&2; exit 2 ;;
+esac
+
+found=0
+while IFS= read -r pattern; do
+  [[ -z "$pattern" ]] && continue
+  if hits="$(grep -i -E -e "$pattern" "$subject")"; then
+    found=1
+    while IFS= read -r hit; do
+      where="${hit%%:*}"; rest="${hit#*:}"; line="${rest%%:*}"
+      echo "public-check: $where:$line matches /$pattern/" >&2
+    done <<< "$hits"
+  fi
+done < "$patterns"
+
+if [[ $found -ne 0 ]]; then
+  echo "public-check: commit refused; this repository is public. Remove the text, or use git commit --no-verify if it is meant to be published." >&2
+  exit 1
+fi
