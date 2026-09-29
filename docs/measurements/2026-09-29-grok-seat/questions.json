@@ -1,0 +1,53 @@
+{
+  "registered": "2026-09-29, committed before any question was sent",
+  "questions": [
+    {
+      "id": "tcp-retries2",
+      "kind": "checkable",
+      "question": "On a Linux host with default TCP sysctls, an established TCP connection has unacknowledged data in flight and the peer vanishes silently: no RST, no ICMP, nothing comes back. Assume the initial retransmission timeout is the kernel's minimum RTO. Roughly how long after the first transmission does the kernel give up on the connection and report an error to the application? Give a figure and the reasoning behind it.",
+      "correct": "About 924.6 seconds (a little over 15 minutes): tcp_retries2 defaults to 15, and with exponential backoff from TCP_RTO_MIN (200 ms) capped at TCP_RTO_MAX (120 s) the connection is killed at the 16th RTO; the kernel documents 924.6 s as the hypothetical timeout and a lower bound for the effective one.",
+      "partial": "A figure of roughly 15 to 16 minutes with tcp_retries2 = 15 named, but without the arithmetic or with a small arithmetic slip.",
+      "disqualifying": "An answer driven by keepalive (about 2 hours 11 minutes), by tcp_retries1 (about 3 s or 100 s) as the kill point, 15 x 120 s = 30 minutes, or a range too wide to be a figure (for example 13 to 30 minutes) presented as the answer.",
+      "source": "docs.kernel.org/networking/ip-sysctl.html, tcp_retries2: 'The default value of 15 yields a hypothetical timeout of 924.6 seconds and is a lower bound for the effective timeout.'"
+    },
+    {
+      "id": "k8s-exclusive-cpus",
+      "kind": "checkable",
+      "question": "A kubelet runs with --cpu-manager-policy=static and a non-zero CPU reservation. A pod has a single container whose resources set requests of cpu: 2 and memory: 1Gi, and no limits at all. The pod's namespace has a LimitRange for containers whose default limits are cpu: 2 and memory: 1Gi. Is the container assigned exclusive CPUs? Explain why or why not.",
+      "correct": "Yes. The LimitRange admission controller fills in the missing limits with the defaults, so the container ends up with limits equal to its requests for both CPU and memory; the pod is Guaranteed, its CPU request is an integer, and the static policy assigns exclusive CPUs to exactly that case.",
+      "partial": "Yes, but with the reason wrong or missing on the LimitRange defaulting step.",
+      "disqualifying": "No, on the grounds that the pod declares no limits and is therefore Burstable.",
+      "source": "kubernetes.io limit-range: 'the LimitRange admission controller applies default request and limit values for all Pods (and their containers) that do not set compute resource requirements', with the example of a 700m request rejected against a 500m default limit; pod-qos: Guaranteed requires limits equal to requests for memory and CPU; cpu-management-policies: 'Only containers that are both part of a Guaranteed pod and have integer CPU requests are assigned exclusive CPUs.'"
+    },
+    {
+      "id": "bgp-origin-med",
+      "kind": "checkable",
+      "question": "A router with default BGP best-path settings (no always-compare-med, no deterministic-med tweaks) learns two eBGP paths to 203.0.113.0/24 from two neighbours in different autonomous systems. Both paths have the same weight, the same local preference and an AS path of the same length, and neither is locally originated. Path A has origin IGP and MED 200. Path B has origin incomplete and MED 10. Which path is selected as best, and why?",
+      "correct": "Path A. Origin is compared before MED, and IGP is preferred over incomplete, so path B is eliminated before MED is looked at; in any case MED is only compared between paths from the same neighbouring AS, which these are not.",
+      "partial": "Path A for the right main reason (origin before MED), with a secondary error, for example claiming the MEDs would otherwise be compared.",
+      "disqualifying": "Path B, for its lower MED.",
+      "source": "RFC 4271 §9.1.2.2: (b) lowest Origin number removes the others before (c) MULTI_EXIT_DISC, which 'is only comparable between routes learned from the same neighboring AS'."
+    },
+    {
+      "id": "pve-quorum-4-nodes",
+      "kind": "checkable",
+      "question": "A Proxmox VE cluster has four nodes with one vote each and no QDevice. Two of the nodes lose power at the same moment. On the two nodes that stay up: is the cluster quorate, and what happens over the next few minutes to (a) running VMs that are not HA-managed and (b) running VMs that are HA-managed?",
+      "correct": "Not quorate: four votes need three for a majority. The cluster file system goes read-only, so no configuration change, start or migration is possible, but (a) non-HA VMs keep running. (b) A surviving node with active HA services cannot reset its watchdog without quorum and self-fences, rebooting after about 60 seconds, which stops its HA VMs; nothing is recovered elsewhere because no partition has quorum.",
+      "partial": "Not quorate and read-only, with (a) right, but (b) missing the self-fence or getting its effect wrong.",
+      "disqualifying": "Quorate with two of four, or HA VMs failed over or restarted on the survivors.",
+      "source": "pve-docs chapter-pvecm: 'The cluster switches to read-only mode if it loses quorum.'; chapter-ha-manager: 'Until there is a cluster quorum, the node cannot reset the watchdog. If there are active services on the node ... this will trigger a reboot after the watchdog has timed out (this happens after 60 seconds).'"
+    },
+    {
+      "id": "ceph-or-zfs-3-nodes",
+      "kind": "open",
+      "question": "Three identical Proxmox VE nodes, each with two NVMe SSDs for VM storage, connected by a single 1 GbE network that carries everything (management, VM traffic, storage). Should the VM storage be Ceph or local ZFS with Proxmox storage replication? Recommend one, and say what would change your mind.",
+      "note": "No single right answer. Read for the considerations each answer raises and whether the recommendation follows from them."
+    },
+    {
+      "id": "evpn-4-racks",
+      "kind": "open",
+      "question": "A small datacenter of four racks and about forty servers runs a flat layer-2 design: VLANs trunked everywhere from a pair of core switches. When does moving to a VXLAN EVPN leaf-spine fabric pay for itself, and when is it over-engineering? Give a recommendation for this size and the conditions under which it would change.",
+      "note": "No single right answer. Read for the considerations each answer raises and whether the recommendation follows from them."
+    }
+  ]
+}
