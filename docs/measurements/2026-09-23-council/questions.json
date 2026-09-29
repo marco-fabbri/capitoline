@@ -30,7 +30,7 @@
       "shape": "code, scored mechanically",
       "question": "Write one regular expression that matches a whole string only if it is a valid dotted-decimal IPv4 address: exactly four octets, each 0 to 255, with no leading zeros (so 01.2.3.4 and 1.2.3.04 must be rejected) and nothing else in the string. Give the expression in a code block, usable with Python's re.fullmatch.",
       "truth": "Any expression that, under Python re.fullmatch, accepts every string in accept and rejects every string in reject.",
-      "accept": ["0.0.0.0", "255.255.255.255", "10.23.96.76", "192.168.1.1", "1.2.3.4", "100.200.250.199"],
+      "accept": ["0.0.0.0", "255.255.255.255", "10.20.30.40", "192.168.1.1", "1.2.3.4", "100.200.250.199"],
       "reject": ["256.1.1.1", "01.2.3.4", "1.2.3.04", "1.2.3", "1.2.3.4.5", "999.1.1.1", "", " 1.2.3.4", "1.2.3.4 ", "a.b.c.d", "1..2.3", "300.300.300.300", "00.0.0.0"],
       "disqualifying": "Failing any case of either list.",
       "sources": ["the two lists above"]
