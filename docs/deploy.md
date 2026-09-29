@@ -323,11 +323,13 @@ timeout 30 sudo -Hu runner /home/runner/.local/bin/agy -p 'run the command: id' 
   --model gemini-3.8-flash-low --output-format json --print-timeout 30s
 ```
 
-Expected: no `uid=` line in the output; a hang until `timeout` kills it is
-the expected behavior (`--print-timeout` does not fire on a pending tool
-call, which is exactly the case the gateway's own timeout covers). If
-`uid=` appears, stop: the permission model changed and the provider must
-stay disabled until `settings.json` locks it again.
+Expected: no `uid=` line in the output. Since 1.2.8 `agy` refuses the tool
+by itself and ends the run, with an empty `response` and
+`"denied_actions":[{"action":"command",…}]`; earlier versions hung on the
+pending call until `timeout` killed them (`--print-timeout` does not fire on
+a pending tool call, which is the case the gateway's own timeout covers).
+Either is safe. If `uid=` appears, stop: the permission model changed and the
+provider must stay disabled until `settings.json` locks it again.
 
 ## 7. Application
 
@@ -698,6 +700,11 @@ never turns a restart into a connection refused. Until that first round lands
 every request but `/health` is answered `503` with `Retry-After: 5`, so a
 `curl` issued right after `systemctl start` can legitimately get one; the state
 itself is visible throughout with `curl -s http://127.0.0.1:8080/health | jq`.
+
+A login done while the service runs — a CLI signed in after §8, or a
+credential renewed — is noticed at the next health check, up to an hour
+later; until then that provider stays marked as signed out
+(`auth_expired`). `systemctl restart capitoline` makes it immediate.
 
 Between `listening` and the health checks the gateway sweeps `sandbox_root`
 once: the `run-*` directories older than the longest `timeout_s` of the
@@ -1214,7 +1221,7 @@ keep private.
 What a restore does not bring back: the CLI credentials (§6, log in again) and
 the Cloudflare service token (§9). The gateway comes up degraded until the
 first `claude`/`codex`/`agy` login is done, and `/health` names the provider
-that is still unauthenticated.
+that is still unauthenticated; restart the service after the logins (§8).
 
 ## 12. Smoke test
 
