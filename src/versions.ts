@@ -105,6 +105,9 @@ export class VersionWatch {
       this.state.set(id, { installed, latest, checkedAt: this.now(), updateAvailable });
       if (!updateAvailable) return;
       this.log.info({ provider: id, installed, latest }, "a newer CLI version is available");
+      // Nothing is announced without a channel to announce on: a version found
+      // before server.notify was configured is still news once it is.
+      if (!this.notify) return;
       // Once per version: a restart, or the next day's check, is not news.
       if (this.store.announcedVersion(id) === latest) return;
       this.store.setAnnouncedVersion(id, latest!, this.now());

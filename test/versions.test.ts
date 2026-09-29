@@ -72,6 +72,14 @@ describe("the version watch", () => {
     expect(sent.at(-1)).toMatch(/^codex 0\.160\.0 is available/);
   });
 
+  it("announces a version found before notifications were configured, once they are", async () => {
+    const store = new UsageStore(":memory:");
+    await new VersionWatch(providers(), runnerSaying(installed), store, log, undefined, fetchAnswering(latest)).check();
+    const sent: string[] = [];
+    await new VersionWatch(providers(), runnerSaying(installed), store, log, (m) => sent.push(m), fetchAnswering(latest)).check();
+    expect(sent).toEqual(["codex 0.159.0 is available (installed 0.156.0). Update with: scripts/update-cli.sh codex"]);
+  });
+
   it("records a source it cannot read and never throws", async () => {
     const watch = new VersionWatch(providers(), runnerSaying(installed), new UsageStore(":memory:"), log, undefined,
       fetchAnswering({ "codex/latest": new Error("network down") }));
