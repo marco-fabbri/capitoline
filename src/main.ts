@@ -48,10 +48,10 @@ export interface StartOverrides {
  * later "error" (EMFILE on accept, for one) would otherwise reject an
  * already-settled promise, i.e. disappear without a trace.
  */
-function listen(app: ReturnType<typeof createApp>, port: number, log: Logger): Promise<Server> {
+function listen(app: ReturnType<typeof createApp>, host: string, port: number, log: Logger): Promise<Server> {
   return new Promise<Server>((resolve, reject) => {
-    const fail = (e: Error) => reject(new Error(`cannot listen on 127.0.0.1:${port}: ${e.message}`, { cause: e }));
-    const s = app.listen(port, "127.0.0.1", (e?: Error) => {
+    const fail = (e: Error) => reject(new Error(`cannot listen on ${host}:${port}: ${e.message}`, { cause: e }));
+    const s = app.listen(port, host, (e?: Error) => {
       if (e) return fail(e);
       s.off("error", fail);
       s.on("error", (err: unknown) => log.error({ err }, "http server error"));
@@ -125,6 +125,16 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const access = createAuthMiddleware({ access: accessOn ? { teamDomain: cfg.server.access.team_domain, audience: cfg.server.access.audience } : undefined, keys: usage }, log.child({ mod: "access" }));
   if (!accessOn && !usage.hasKeys()) log.warn("identity: open — Cloudflare Access is not configured (server.access.team_domain is empty) and no API key exists; the first key closes it");
   else log.info({ access: accessOn, keys: usage.hasKeys(), admins: cfg.server.access.admins.length }, "identity");
+  // Open is acceptable on loopback, where only this host can reach the port
+  // (a developer machine, a first install before its first key). On any other
+  // address it would hand the owner's subscriptions to the whole network, so
+  // the service does not start: the first key comes before the first network.
+  const host = cfg.server.host;
+  const loopback = host === "127.0.0.1" || host === "::1" || host === "localhost";
+  if (!loopback && !accessOn && !usage.hasKeys()) {
+    usage.close();
+    throw new Error(`refusing to listen on ${host}: with no Cloudflare Access and no API key the gateway would be open to the network; create a key first (npm run keys -- create <name>) or keep server.host at 127.0.0.1`);
+  }
 
   // The port is bound first and the requests are gated, never the other way
   // round: a real health check spawns the CLI with a deadline of a minute, and
@@ -147,10 +157,10 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // the first health check, the store is closed and nothing is left listening.
   let server: Server;
   try {
-    server = await listen(app, port, log);
+    server = await listen(app, host, port, log);
   } catch (e) { usage.close(); throw e; }
   const actualPort = (server.address() as { port: number }).port;
-  log.info({ port: actualPort, providers: providers.map((p) => p.id) }, "listening");
+  log.info({ host, port: actualPort, providers: providers.map((p) => p.id) }, "listening");
   try {
     // Before the first check, after the port is up: the run-* directories of a
     // previous process are removed once. Not before listen(), because the port

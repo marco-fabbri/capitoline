@@ -289,6 +289,20 @@ describe("start() with a host overlay", () => {
     return { path, db };
   }
 
+  it("refuses to listen beyond loopback while the gateway would be open, and listens there once a key exists", async () => {
+    const { path, db } = overlay((f) => `server:\n  host: "0.0.0.0"\nusage:\n  db_path: "${f}"\n`);
+    const p = new FakeProvider("claude", ["claude-opus"], OK);
+    await expect(start(CONFIG, { port: 0, providers: [p], overlayPath: path })).rejects.toThrow(/refusing to listen on 0\.0\.0\.0.*npm run keys/);
+    const store = new UsageStore(db);
+    store.createKey("app-one", "test");
+    store.close();
+    const lines: string[] = [];
+    const app = await start(CONFIG, { port: 0, providers: [p], overlayPath: path, logDest: { write: (chunk: string) => { lines.push(chunk); } } });
+    try {
+      expect(lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.msg === "listening")).toMatchObject({ host: "0.0.0.0" });
+    } finally { await app.close(); }
+  });
+
   it("merges the overlay over the configuration it is given", async () => {
     // usage.db_path is the observable one: the e2e configuration keeps the
     // store in memory, so a file on disk can only come from the overlay.

@@ -210,6 +210,13 @@ export const ConfigSchema = z
     server: z
       .object({
         port: z.number().int().default(8080),
+        // Where the gateway listens. Loopback by default: behind a Cloudflare
+        // tunnel, or a reverse proxy on the same host, nothing else should
+        // reach the port. Another address serves a network directly, with the
+        // gateway's own keys as the only door (docs/deploy.md, "Without
+        // Cloudflare"); the service refuses to start on one while it would be
+        // open — no Access and no key issued yet.
+        host: z.string().min(1).default("127.0.0.1"),
         access: z.object({
           team_domain: z.string().default(""), audience: z.string().default(""),
           /**
