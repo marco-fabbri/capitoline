@@ -85,7 +85,7 @@ providers:
     memory_mb: 150            # peak of one run, 147 MB generating an image, 118 under council load (2026-09-27, Codex CLI 0.156.0)
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
-    health_model: codex-gpt-5.5
+    health_model: codex-gpt-6-luna
     models:
       # Every slug in the CLI's own model cache (test/fixtures/codex/models.txt).
       # `efforts` is pinned wherever the cache says the model serves fewer
@@ -98,7 +98,8 @@ providers:
       codex-gpt-5.6-sol:   { cli_model: gpt-5.6-sol }
       codex-gpt-5.6-terra: { cli_model: gpt-5.6-terra }
       codex-gpt-5.6-luna:  { cli_model: gpt-5.6-luna,  efforts: [low, medium, high, xhigh, max] }
-      codex-gpt-5.5:       { cli_model: gpt-5.5,       efforts: [low, medium, high, xhigh] }
+      # gpt-5.5 is still in the cache and deliberately absent: it retires from
+      # Codex with ChatGPT sign-in on 2026-10-14 (developers.openai.com/codex/models).
       # The two the cache lists that are not general chat models, exposed
       # because they are models the subscription serves and named so nobody
       # reaches for them by accident: `gpt-reserve` is the fallback tier, and
@@ -111,7 +112,7 @@ providers:
       # subscription with no API key and whose own model the image declares in
       # its signed C2PA manifest ("ChatGPT", "gpt-image"). The agent only has
       # to decide to call one tool, so it runs at the lowest effort.
-      codex-image:         { cli_model: gpt-5.5, kind: image, efforts: [low], timeout_s: 300 }
+      codex-image:         { cli_model: gpt-6-luna, kind: image, efforts: [low], timeout_s: 300 }
     effort: { low: low, medium: medium, high: high, xhigh: xhigh, max: max, ultra: ultra }   # -c model_reasoning_effort="<v>"
     model_flag: -m
     effort_flag: -c
@@ -322,7 +323,7 @@ council:
   capitoline:
     seats:
       - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
-      - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-5.5] }
+      - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
       - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
       - { family: open-weights, models: [antigravity-gpt-oss] }
     # Every model here but the first sits in no seat of this council, and that
@@ -379,7 +380,7 @@ council:
   capitoline-fast:
     seats:
       - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
-      - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-5.5] }
+      - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
       - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
       - { family: open-weights, models: [antigravity-gpt-oss] }
     judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6-sol, codex-gpt-5.6-terra] }

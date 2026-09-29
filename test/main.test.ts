@@ -205,7 +205,7 @@ describe("start() with more than one council", () => {
   council-a:
     seats:
       - { family: anthropic, models: [claude-opus] }
-      - { family: openai,    models: [codex-gpt-5.5] }
+      - { family: openai,    models: [codex-gpt-6-luna] }
     judge: { family: anthropic, models: [claude-haiku] }
     stage_timeout_s: 20
   council-b:
@@ -232,7 +232,7 @@ describe("start() with more than one council", () => {
   /** One fake per provider the two councils seat, all answering. */
   const fakes = () => [
     new FakeProvider("claude", ["claude-opus", "claude-sonnet", "claude-haiku"], OK),
-    new FakeProvider("codex", ["codex-gpt-5.5"], OK),
+    new FakeProvider("codex", ["codex-gpt-6-luna"], OK),
     new FakeProvider("antigravity", ["antigravity-gemini-flash"], OK),
   ];
 

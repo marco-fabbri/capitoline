@@ -44,7 +44,7 @@ describe("end to end with fake CLIs", () => {
       expect(data.find((m) => m.id === name), name).toMatchObject({ owned_by: "capitoline", capitoline: { kind: "council" } });
     }
   });
-  it.each([["claude-opus", "ok"], ["codex-gpt-5.5", "OK"], ["antigravity-gemini-flash", "ok ok\n"]])("answers through %s", async (model, expected) => {
+  it.each([["claude-opus", "ok"], ["codex-gpt-6-luna", "OK"], ["antigravity-gemini-flash", "ok ok\n"]])("answers through %s", async (model, expected) => {
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ model, messages: [{ role: "user", content: "hi" }] }),

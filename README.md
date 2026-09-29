@@ -32,7 +32,7 @@ Connecting another application of your own: `docs/clients.md`, which covers the 
 
     curl http://127.0.0.1:8080/v1/models
     curl http://127.0.0.1:8080/v1/chat/completions -H 'content-type: application/json' \
-      -d '{"model":"codex-gpt-5.5","reasoning_effort":"low","messages":[{"role":"user","content":"Reply with the single word: ok"}]}'
+      -d '{"model":"codex-gpt-6-luna","reasoning_effort":"low","messages":[{"role":"user","content":"Reply with the single word: ok"}]}'
     curl http://127.0.0.1:8080/v1/images/generations -H 'content-type: application/json' \
       -d '{"prompt":"a red fox in the snow, 16:9"}' | jq -r '.data[0].b64_json' | base64 -d > fox.jpg
     curl -N http://127.0.0.1:8080/v1/chat/completions -H 'content-type: application/json' \

@@ -465,8 +465,11 @@ describe("config", () => {
     //
     // Left out, and said here so the list cannot grow silently: Claude's
     // routing aliases resolve to a model the table already names, so they
-    // add a name and no reach (config/capitoline.yaml says why).
-    const LEFT_OUT: Record<string, string[]> = { claude: ["best", "default", "opusplan"] };
+    // add a name and no reach (config/capitoline.yaml says why). Codex's
+    // `gpt-5.5` retires from Codex with ChatGPT sign-in on 2026-10-14 and was
+    // withdrawn before it, while the cache still lists it; the next capture
+    // after that date drops it, and this entry goes with it.
+    const LEFT_OUT: Record<string, string[]> = { claude: ["best", "default", "opusplan"], codex: ["gpt-5.5"] };
     for (const file of BOTH_FILES) {
       const cfg = loadConfig(file);
       for (const [pid, list] of Object.entries(CLI_LISTS)) {

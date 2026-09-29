@@ -48,7 +48,7 @@ on the subscription and executes nothing:
 
 ```sh
 echo "Do not call any tool. List the exact names of every tool or function you are able to call in this session, one per line, and nothing else. If there are none, reply NONE." \
-  | codex <the args of providers.codex.args> -m gpt-5.5 - | grep agent_message
+  | codex <the args of providers.codex.args> -m gpt-6-luna - | grep agent_message
 ```
 
 With the configuration of 2026-09-23 the answer is `apply_patch`,

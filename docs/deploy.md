@@ -896,7 +896,7 @@ notification postpones the client's deadline only when that client sets
 and the timeout above as the thing that carries it.
 
 Test: in Claude Code run `/mcp` (the server must show as connected), then
-ask "use capitoline ask_model with codex-gpt-5.5: reply ok", "use capitoline
+ask "use capitoline ask_model with codex-gpt-6-luna: reply ok", "use capitoline
 generate_image: a red fox in the snow" and "use capitoline ask_council: why
 is a blind ranking better than a public one?". The last one is nine calls on
 three subscriptions and takes minutes: run it once, and not on a day when
