@@ -2,7 +2,7 @@
 # Creates a Cloudflare Access service token for one application, admits it
 # with a policy of its own on the Capitoline Access application, and binds
 # its client id to the application's name in the gateway, so /v1/usage reads
-# the name and not the id (docs/clients.md, "A Cloudflare service token").
+# the name and not the id (docs/connecting-an-application.md, "A Cloudflare service token").
 #
 #   CF_API_TOKEN=... CF_ACCOUNT_ID=... CF_ACCESS_APP_ID=... \
 #   CAPITOLINE_URL=https://api-capitoline.example.com CAPITOLINE_ADMIN_KEY=cap_... \
@@ -15,7 +15,7 @@
 # a gateway key whose name is in server.access.admins (or omit it, together
 # with CAPITOLINE_URL, to skip the binding and do it by hand).
 #
-# Prints the two headers the application stores (docs/clients.md §3), once:
+# Prints the two headers the application stores (docs/connecting-an-application.md §3), once:
 # Cloudflare shows the secret at creation and never again. Nothing else is
 # printed, and neither the secret nor CF_API_TOKEN reaches a log.
 set -euo pipefail

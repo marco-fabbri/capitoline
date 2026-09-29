@@ -10,7 +10,7 @@ if [[ -n "${CF_ACCESS_CLIENT_ID:-}" || -n "${CF_ACCESS_CLIENT_SECRET:-}" ]]; the
   [[ -n "${CF_ACCESS_CLIENT_ID:-}" && -n "${CF_ACCESS_CLIENT_SECRET:-}" ]] || { echo "smoke: set both CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET" >&2; exit 2; }
   HDR=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
 fi
-# A key the gateway issued (docs/clients.md §2a): the identity that works with
+# A key the gateway issued (docs/connecting-an-application.md §2a): the identity that works with
 # no Access in front, and, through the tunnel, together with the headers above.
 if [[ -n "${CAPITOLINE_API_KEY:-}" ]]; then
   HDR+=(-H "Authorization: Bearer $CAPITOLINE_API_KEY")
@@ -38,7 +38,10 @@ done
 # Turn it on with SMOKE_IMAGE=1 when the image path is what you are checking.
 # A 429 is reported and does not fail the run: an exhausted quota says nothing
 # about whether an update broke the gateway, which is what this script is for.
-IMG=$(yq -r '.providers[].models | to_entries[] | select(.value.kind == "image") | .key' "$CFG" 2>/dev/null | head -1 || true)
+# SMOKE_IMAGE_MODEL names the image model to try (scripts/update-cli.sh sets
+# it to the updated CLI's own); otherwise the first one the configuration declares.
+IMG="${SMOKE_IMAGE_MODEL:-}"
+[[ -n "${IMG// /}" ]] || IMG=$(yq -r '.providers[].models | to_entries[] | select(.value.kind == "image") | .key' "$CFG" 2>/dev/null | head -1 || true)
 [[ -n "${IMG// /}" ]] || IMG=$(grep -E 'kind:[[:space:]]*image' "$CFG" | grep -vE '^[[:space:]]*#' | head -1 | awk -F: '{print $1}' | tr -d ' ' || true)
 MIN=$(yq -r '[.providers[].image.min_bytes] | map(select(. != null)) | .[0] // ""' "$CFG" 2>/dev/null || true)
 [[ -n "${MIN// /}" ]] || MIN=$(grep -E '^[[:space:]]+min_bytes:' "$CFG" | head -1 | awk '{print $2}' || true)
