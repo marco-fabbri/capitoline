@@ -76,14 +76,36 @@ export const antigravityAdapter: Adapter = {
     // appear once, already DONE), so "call" is tied to the first sighting of a
     // step, not to its state: every tool invocation reaches the guard.
     const seen = new Set<number>();
+    // Evidence for a fault not yet understood (docs/backlog.md, "Antigravity
+    // text can arrive twice"): two answers in the measurements held a
+    // truncated beginning followed by the whole text again. A text run of the
+    // real captures has one response step; an image run has two, the first
+    // empty. So text in more than one response step, or text arriving after a
+    // step reported DONE, is logged with the run's shape — events, steps,
+    // states and lengths, never the text — and nothing else changes.
+    const shape: Record<string, unknown>[] = [];
+    const textByStep = new Map<string, number>();
+    const doneSteps = new Set<string>();
+    let textAfterDone = false;
     for await (const o of jsonLines(lines)) {
       const event = o.event;
+      if (event !== "step_update" && shape.length < SHAPE_CAP) shape.push({ event });
       if (event === "init") {
         const init = (o.init ?? {}) as { conversation_id?: unknown };
         const id = o.conversation_id ?? init.conversation_id;
         if (isConversationId(id) && !conversationId) { conversationId = id; yield { type: "meta", conversationId }; }
       } else if (event === "step_update") {
         const su = o.step_update as { step_type?: string; text_delta?: string; state?: string; step_index?: unknown; tool_name?: unknown; tool_info?: { name?: unknown } } | undefined;
+        const deltaChars = typeof su?.text_delta === "string" ? su.text_delta.length : 0;
+        if (shape.length < SHAPE_CAP) shape.push({ event, step_type: su?.step_type, step_index: su?.step_index, state: su?.state, deltaChars });
+        if (su?.step_type === "agent_response") {
+          const step = String(su.step_index ?? "?");
+          // The DONE update carries the step's last delta itself, so text is
+          // "after DONE" only when it comes in a later event.
+          if (deltaChars > 0 && doneSteps.has(step)) textAfterDone = true;
+          textByStep.set(step, (textByStep.get(step) ?? 0) + deltaChars);
+          if (su.state === "DONE") doneSteps.add(step);
+        }
         if (su?.step_type === "agent_response" && typeof su.text_delta === "string" && su.text_delta.length) yield { type: "text", delta: su.text_delta };
         else if (su?.step_type === "tool") {
           // The tool's result text is not in the stream; on ERROR the step
@@ -101,6 +123,10 @@ export const antigravityAdapter: Adapter = {
           if (terminal) yield { type: "tool", phase: terminal, name, raw };
         }
       } else if (event === "result") {
+        const texted = [...textByStep.values()].filter((n) => n > 0).length;
+        if (texted > 1 || textAfterDone) {
+          yield { type: "diagnostic", message: "antigravity response text came from more than one response step", data: { steps: Object.fromEntries(textByStep), textAfterDone, shape } };
+        }
         const r = (o.result ?? {}) as { status?: string; error?: string; usage?: Record<string, number>; conversation_id?: unknown };
         if (isConversationId(r.conversation_id) && !conversationId) { conversationId = r.conversation_id; yield { type: "meta", conversationId }; }
         if (r.status !== "SUCCESS") {
@@ -132,6 +158,10 @@ export const antigravityAdapter: Adapter = {
     }
   },
 };
+
+// How many events of a run's shape a diagnostic carries: enough for any answer
+// seen so far, bounded for the one that streams without end.
+const SHAPE_CAP = 300;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isConversationId(v: unknown): v is string { return typeof v === "string" && UUID.test(v); }

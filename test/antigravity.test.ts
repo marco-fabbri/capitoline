@@ -261,3 +261,42 @@ describe("antigravity adapter", () => {
     expect(ci.args).toHaveLength(cfg.args.length + 1 + 2);   // then image.args, then <model_flag> <id>
   });
 });
+
+// The evidence collector for "Antigravity text can arrive twice"
+// (docs/backlog.md): a diagnostic when a text run's answer comes from more
+// than one response step, or text arrives after a step reported DONE. It
+// changes nothing else, and it carries no text.
+describe("the doubled-text diagnostic", () => {
+  const REAL = "test/fixtures/antigravity/stream-json.jsonl";
+  async function* from(lines: string[]) { for (const l of lines) yield l; }
+  const diagnostics = (evs: AdapterEvent[]) => evs.filter((e) => e.type === "diagnostic");
+
+  it("stays silent on the real captures: one response step for text, an empty one before the tool for images", async () => {
+    expect(diagnostics(await events(linesOf(REAL)))).toEqual([]);
+    expect(diagnostics(await events(linesOf("test/fixtures/antigravity/image-run.jsonl")))).toEqual([]);
+  });
+
+  it("reports a run whose text came from two response steps, with its shape and without its text", async () => {
+    // The real run, with its response step replayed as a second step: the
+    // shape of a CLI that restarts its answer.
+    const lines = readFileSync(REAL, "utf8").split("\n").filter(Boolean);
+    const response = lines.filter((l) => l.includes('"agent_response"')).map((l) => l.replace('"step_index":1', '"step_index":2'));
+    const doubled = [...lines.slice(0, -1), ...response, lines.at(-1)!];
+    const evs = await events(from(doubled));
+    const [d] = diagnostics(evs);
+    expect(d).toMatchObject({ type: "diagnostic", message: expect.stringMatching(/more than one response step/) });
+    expect((d as { data: Record<string, unknown> }).data.steps).toEqual({ "1": 6, "2": 6 });
+    expect(JSON.stringify(d)).not.toContain("ok ok");
+    // Nothing else changes: the text still passes through as it came.
+    expect(evs.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta).join("")).toBe("ok ok\nok ok\n");
+    expect(evs.at(-1)?.type).toBe("done");
+  });
+
+  it("reports text that arrives in a step after that step said DONE", async () => {
+    const lines = readFileSync(REAL, "utf8").split("\n").filter(Boolean);
+    const late = lines.find((l) => l.includes('"state":"ACTIVE"') && l.includes('"agent_response"'))!;
+    const evs = await events(from([...lines.slice(0, -1), late, lines.at(-1)!]));
+    expect(diagnostics(evs)).toHaveLength(1);
+    expect((diagnostics(evs)[0] as { data: Record<string, unknown> }).data.textAfterDone).toBe(true);
+  });
+});

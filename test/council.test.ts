@@ -443,6 +443,27 @@ describe("Council", () => {
     expect(judgeErr).toEqual({ type: "error", kind: "cli_crashed", detail: "the judge failed: cli_crashed" });
   });
 
+  it("lets a judge that crashed step down once onto another provider, and only then", async () => {
+    // The chain crosses providers: claude-opus, then antigravity-flash, which
+    // sits in no seat of this panel because antigravity-pro answered first.
+    const judge: Seat = { family: "best-available", models: ["claude-opus", "antigravity-flash", "claude-haiku"] };
+    for (const failure of [fail("cli_crashed"), [{ type: "done", usage: { input: 1, output: 0 } }] as ProviderEvent[]]) {
+      const p = panel({ cfg: { judge }, overrides: { "claude-opus": failure } });
+      const events = await run(p.council.deliberate(QUESTION, { source: "http" }));
+      const d = detailOf(events);
+      expect(d.judge.model).toBe("antigravity-flash");
+      expect(textOf(events)).toBe(SYNTHESIS);
+      expect(p.modelsAsked("synthesis")).toEqual(["claude-opus", "antigravity-flash"]);
+      expect(d.calls).toBe(10);
+    }
+    // The same crash with the next judge on the same CLI is the error it was:
+    // the repository's own chain here is claude-opus, claude-sonnet, claude-haiku.
+    const same = panel({ overrides: { "claude-opus": fail("cli_crashed") } });
+    const err = (await run(same.council.deliberate(QUESTION, { source: "http" }))).find((e) => e.type === "error");
+    expect(err).toEqual({ type: "error", kind: "cli_crashed", detail: "the judge failed: cli_crashed" });
+    expect(same.modelsAsked("synthesis")).toEqual(["claude-opus"]);
+  });
+
   it("reports the failure a client can act on, not the one whose seat comes first", async () => {
     const p = panel({ overrides: {
       "codex-astra": fail("rate_limited", "model", 1200), "codex-sol": fail("rate_limited", "model", 1200),

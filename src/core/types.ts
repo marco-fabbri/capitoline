@@ -65,7 +65,10 @@ export type ProviderEvent =
 export type AdapterEvent =
   | ProviderEvent
   | { type: "meta"; conversationId: string }
-  | { type: "tool"; phase: "call" | "done" | "error"; name: string; raw: string };
+  | { type: "tool"; phase: "call" | "done" | "error"; name: string; raw: string }
+  // Something the adapter saw that is worth a log line and changes nothing:
+  // the provider logs it and never forwards it.
+  | { type: "diagnostic"; message: string; data: Record<string, unknown> };
 
 export type FailureKind = ErrorKind | "unknown_model" | "model_unavailable" | "queue_full" | "bad_request" | "unauthorized";
 

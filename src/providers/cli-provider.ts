@@ -211,6 +211,7 @@ export class CliProvider implements Provider {
       for await (const ev of this.adapter.parse(run.handle.lines)) {
         // Adapter-internal events stay here: a text run has no use for them and
         // the Provider contract (AsyncIterable<ProviderEvent>) forbids forwarding them.
+        if (ev.type === "diagnostic") { this.log.warn({ model: model.name, ...ev.data }, ev.message); continue; }
         if (ev.type === "meta" || ev.type === "tool") continue;
         if (ev.type === "text" && ev.delta.trim() !== "") sawText = true;
         if (ev.type === "done" && !sawText) {
@@ -257,7 +258,9 @@ export class CliProvider implements Provider {
     let terminal = false;
     try {
       for await (const ev of this.adapter.parse(run.handle.lines)) {
-        if (ev.type === "meta") {
+        if (ev.type === "diagnostic") {
+          this.log.warn({ model: model.name, ...ev.data }, ev.message);
+        } else if (ev.type === "meta") {
           conversationId = ev.conversationId;
         } else if (ev.type === "tool") {
           if (ev.phase === "call" && !allowed.has(ev.name)) {

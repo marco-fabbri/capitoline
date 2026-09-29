@@ -120,6 +120,25 @@ describe("CliProvider", () => {
     const ev = await run(provider("replay", {}, runner, chatty));
     expect(ev).toEqual([{ type: "text", delta: "hi" }, { type: "done" }]);
   });
+  it("logs an adapter's diagnostic and never hands it to the consumer", async () => {
+    const noting: Adapter = {
+      buildCommand: (cfg) => ({ args: cfg.args, stdin: "" }),
+      async *parse(lines) {
+        for await (const _ of jsonLines(lines)) { /* drain */ }
+        yield { type: "text", delta: "hi" };
+        yield { type: "diagnostic", message: "something worth a line", data: { steps: { "1": 2, "2": 2 } } };
+        yield { type: "done" };
+      },
+    };
+    const logged: string[] = [];
+    const fixture = join(process.cwd(), "test/fixtures/claude/stream-json-locked.jsonl");
+    const p = new CliProvider("claude", { ...base, binary: FAKE, args: ["--mode", "replay", "--file", fixture], timeout_s: 1 }, noting, runner,
+      createLogger("t", { write: (line: string) => { logged.push(line); } }));
+    const ev = await run(p);
+    expect(ev).toEqual([{ type: "text", delta: "hi" }, { type: "done" }]);
+    const line = logged.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.msg === "something worth a line");
+    expect(line).toMatchObject({ level: 40, model: "claude-haiku", steps: { "1": 2, "2": 2 } });
+  });
   it("writes attachments into the sandbox as attachment-<n>.<ext>", async () => {
     // Adapter that turns the fake CLI's "cwd" listing into a text event.
     const listing: Adapter = {

@@ -64,7 +64,8 @@ export interface CouncilContext {
  * this list — two methods — is the only coupling between the two modules.
  */
 export interface CouncilCore {
-  listModels(): { name: string; available: boolean; reason?: string }[];
+  /** `provider` is what the judge's crash rule compares: a step down onto the same CLI would crash the same way. */
+  listModels(): { name: string; available: boolean; reason?: string; provider?: string }[];
   execute(req: InternalRequest, ctx: { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null; deliberation?: string }): AsyncIterable<ProviderEvent>;
 }
 
@@ -76,6 +77,18 @@ export interface CouncilCore {
  * and retrying them would spend a second call to learn nothing.
  */
 const STEP_DOWN = new Set<FailureKind>(["rate_limited", "auth_expired"]);
+
+/**
+ * The failures the judge, and only the judge, also steps down from — once,
+ * before writing a word, and only onto a model of **another provider**. A
+ * crash or an empty answer would repeat itself on the same CLI, which is why a
+ * seat never retries one; but the judge's next model is usually on another
+ * CLI, and by the time the judge fails eight calls are already spent. Measured
+ * on 2026-09-29: `agy` failed once to recognise its own model id, the judge
+ * was `antigravity-claude-opus`, and the deliberation ended with no synthesis
+ * although `codex-gpt-6-sol` was next in the chain.
+ */
+const JUDGE_STEP_DOWN_ON_CRASH = new Set<FailureKind>(["cli_crashed", "bad_output"]);
 
 /**
  * `busy` is deliberately **not** in `STEP_DOWN`: the model was not refused,
@@ -363,7 +376,13 @@ export class Council {
       // once, exactly as a member does. One that failed halfway through cannot:
       // the client has already been given the first half of an answer, and a
       // second judge would write a different one after it.
-      const next = !spoken && attempt === 0 && STEP_DOWN.has(result.kind) ? nextInChain(judge.seat, model, this.core.listModels()) : null;
+      let next: string | null = null;
+      if (!spoken && attempt === 0) {
+        const state = this.core.listModels();
+        const candidate = STEP_DOWN.has(result.kind) || JUDGE_STEP_DOWN_ON_CRASH.has(result.kind) ? nextInChain(judge.seat, model, state) : null;
+        const providerOf = (name: string): string | undefined => state.find((m) => m.name === name)?.provider;
+        if (candidate !== null && (STEP_DOWN.has(result.kind) || providerOf(candidate) !== providerOf(model))) next = candidate;
+      }
       if (next === null) {
         this.log.error({ council: this.name, model, kind: result.kind, detail: result.detail }, "the judge failed and the deliberation has no synthesis");
         // The kind, never the provider's own words: this event becomes the
