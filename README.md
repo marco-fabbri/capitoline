@@ -67,6 +67,27 @@ Token counts — the `usage` block of every chat response, the `usage` of the la
 
 After updating a CLI, run `scripts/smoke.sh` (see `docs/update-clis.md`); it needs `curl` and `jq` on the machine it runs from.
 
+## Providers considered and declined
+
+**Grok (xAI).** Grok Build, xAI's official CLI, can serve as a provider:
+a subscription signs in on a headless host, and its non-interactive output
+carries the text, token usage and the real model id (`docs/spike-2026-09.md`
+§12). It was then measured as a fifth council member, on 2026-09-29, with
+Grok Build 1.0.41 and `grok-4.7`, against a rule written before the runs
+(`docs/measurements/2026-09-29-grok-seat/`). On the two open design
+questions of the six, the other members ranked its answer first, blind, and
+the syntheses built on it were more complete. Twice in five answers,
+though, it stated a precise detail that is not true — a kernel source
+comment that does not exist, a vSphere requirement described wrongly for
+the way it was used — and the council carried both into the final answer:
+the peer ranking rewards the best answer as a whole, and the judge is told
+to build on it. It was also the slowest member by minutes per stage, and
+lost one answer and three of five rankings to the stage timeout or a
+malformed reply. So there is no Grok provider. The question is reopened
+with a new run of the same measurement, not by argument, when a later model
+or CLI might change the result; the protocol and the questions are there
+to rerun.
+
 ## Principles
 
 - **The CLIs are used as processes**, never their tokens. This is an
