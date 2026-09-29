@@ -493,6 +493,14 @@ describe("GET /health", () => {
     expect(r.status).toBe(200);
     expect(r.body.providers[0].id).toBe("claude");
   });
+  it("reports each provider's CLI version when the gateway checks it, and null when it does not", async () => {
+    const { core } = make();
+    const state = { installed: "0.156.0", latest: "0.159.0", checkedAt: 1, updateAvailable: true };
+    const withVersions = createApp(core, { log: createLogger("t"), versions: () => ({ claude: state }) });
+    expect((await request(withVersions).get("/health")).body.providers[0].version).toEqual(state);
+    const { app } = make();
+    expect((await request(app).get("/health")).body.providers[0].version).toBeNull();
+  });
   it("reports the image quota of a provider, and null for one without image models", async () => {
     const { app } = makeImages();
     const before = await request(app).get("/health");

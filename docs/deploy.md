@@ -620,8 +620,10 @@ also sent as one plain-text `POST`, with a `Title` header, to the configured
 URL — for example "codex models changed. new: codex-gpt-7-nova; no longer
 served: codex-gpt-6-luna (used by health_model, council capitoline).". A
 model the configuration still uses is named with where it is used, because
-that is the change worth reading. Nothing else is ever sent, and a failed
-POST is logged and forgotten.
+that is the change worth reading. The same channel carries one message per
+new CLI version the daily check finds (`docs/update-clis.md`), with the
+command that installs it. Nothing else is ever sent, and a failed POST is
+logged and forgotten.
 
 Any endpoint that takes a text POST works. [ntfy](https://ntfy.sh) is the
 simplest: an open-source service that turns an HTTP POST to a topic into a

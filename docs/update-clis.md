@@ -11,6 +11,14 @@ to, and moved from 1.2.7 to 1.2.9 in three days. It is enforced since
 by hand is not updating less: it is knowing when a CLI changed, so that the
 checks below run at that moment and a failure after it has a known cause.
 
+What is automatic is knowing that a new version exists. Once a day, with the
+model catalog, the gateway reads each CLI's `--version` and the latest one
+published — the npm registry for Claude Code and Codex, the official
+installer's manifest for Antigravity (`providers.<id>.version`) — and shows
+both in `/health` (`providers[].version`); with `server.notify` set it sends
+one message per new version (`docs/deploy.md` §7.2). Installing it is the
+procedure below, which a person runs.
+
 ## Versions in use
 
 | CLI | version | date | notes |
@@ -23,6 +31,10 @@ checks below run at that moment and a failure after it has a known cause.
 | Claude Code (`claude`) | 2.1.280 | 2026-09-23 | Opus 5.5. The alias list is unchanged, so nothing was configured: `opus` simply resolves to the new model, and `GET /v1/usage` `.models` is what records that it did (`docs/deploy.md` §9). Fixture `slash-model.json` re-captured |
 | Antigravity CLI (`agy`) | 1.2.9 | 2026-09-23 | **installed by its own updater** at 05:14 UTC, as 1.2.8 had been before it; `agy models` unchanged; self-update disabled the same morning |
 | Codex CLI (`codex`) | 0.156.0 | 2026-09-23 | same flags; the model cache is unchanged slug for slug, only its version line moved. Fixture `models.txt` re-captured after one `codex exec`, which is what refreshes the cache |
+
+| Claude Code (`claude`) | 2.1.284 | 2026-09-29 | with `scripts/update-cli.sh`, smoke test passed; the rollback path was exercised on purpose the same day (2.1.283 installed, a failing check, 2.1.284 put back) |
+| Codex CLI (`codex`) | 0.159.0 | 2026-09-29 | the script stopped the first attempt: two features newly on by default, `daemon_auto_start` and `write_stdin_approval`, neither a tool of `codex exec`, both now switched off in `providers.codex.args`; second attempt passed, image and tool probe included |
+| Antigravity CLI (`agy`) | 1.2.13 | 2026-09-29 | with `scripts/update-cli.sh`; the installer refuses to overwrite an installed binary, so the script removes it first; `agy models` unchanged; `AGY_CLI_DISABLE_AUTO_UPDATE` still honoured ("Auto-update disabled via environment variable" in its log) |
 
 Add a row for every update, newest last.
 
@@ -56,38 +68,45 @@ as `runner`:
 cd /tmp && codex features list | awk '$NF == "true" {print $1}'
 ```
 
-Compare that list with the `features.*=false` entries under
-`providers.codex.args` in `config/capitoline.yaml`. A feature that is on and
-not named there is either harmless — a terminal or app-UI feature, which
-`codex exec` never uses — or a tool that has just been handed to every client.
-To tell which, see what the model is actually offered, which costs one call
-on the subscription and executes nothing:
+`scripts/update-cli.sh` does this comparison itself: it stops, and puts the
+previous version back, when the new version enables a feature the previous
+one did not and `providers.codex.args` does not already switch off. Such a
+feature is either harmless — a terminal or app-UI feature, which `codex exec`
+never uses — or a tool that has just been handed to every client. Read its
+definition in Codex's source (`codex-rs/features/src/lib.rs`, each feature is
+documented there), switch it off in `providers.codex.args` either way — a
+default nobody has read is not left on — and add it to the list
+`test/config.test.ts` pins, then run the script again.
 
-```sh
-echo "Do not call any tool. List the exact names of every tool or function you are able to call in this session, one per line, and nothing else. If there are none, reply NONE." \
-  | codex <the args of providers.codex.args> -m gpt-6-luna - | grep agent_message
-```
-
-With the configuration of 2026-09-23 the answer is `apply_patch`,
-`request_user_input` and `multi_tool_use.parallel`, and nothing else:
-`apply_patch` because no setting removes it (the read-only sandbox rejects
-it), `request_user_input` because a non-interactive run has nobody to ask.
-Anything more is a tool to switch off, and `test/config.test.ts` pins the
-list so it cannot shrink by accident.
+Then the script asks the question that matters directly: it runs Codex
+exactly as the gateway does and asks it to execute a shell command
+(`scripts/codex-tool-probe.mjs`). Any step in the stream other than the
+model's words — a `command_execution`, a file change, an MCP call — fails
+the update. Asking the model to *list* its tools, as this section once
+advised, is not evidence: on 2026-09-29 GPT-6 Luna listed `functions.exec`
+and six `collaboration.*` tools, then, asked to use exec, answered CANNOT
+and the stream held no command. With the shell switched back on for a test
+the probe does report `command_execution` and fails, which is what it is for.
 
 ## Procedure
 
-On the host, as root:
+On the host, as root, from the clone:
 
-1. Update one CLI as `runner`, then leave the shell:
+1. Update one CLI with the script, and read what it prints:
 
    ```sh
-   sudo -iu runner
-   npm install -g @anthropic-ai/claude-code      # or @openai/codex
-   # Antigravity: curl -fsSL https://antigravity.google/cli/install.sh | bash
-   claude --version                              # or codex --version, agy --version
-   exit
+   cd /var/lib/capitoline/app && scripts/update-cli.sh codex      # or claude, antigravity (agy); a version may follow for npm CLIs
    ```
+
+   It records the installed version (and, for Antigravity, whose installer
+   only installs the latest, a copy of the binary), installs as `runner`,
+   checks Codex's new features and tool behaviour (the section above), runs
+   the smoke test below with one image from the CLI's own image model through
+   a temporary gateway key it revokes afterwards, and **puts the previous
+   version back if any of that fails**, then smoke-tests the restored one.
+   On success it prints the row for the table above. No restart is needed:
+   the gateway starts a CLI per request. What follows is what the script
+   automates, and what to do by hand when it stops.
 
 2. Run the smoke test against the running service (`curl` and `jq` must be
    installed where it runs). With Cloudflare Access enabled (`docs/deploy.md`

@@ -74,6 +74,17 @@ const ProviderSchema = z.object({
   // heading for on 2026-10-14.
   health_fallback: z.array(z.string().min(1)).default([]),
   discover: DiscoverSchema.optional(),
+  // Where to read the installed version and the latest published one, for the
+  // daily "a new version exists" notice (src/versions.ts). Optional: without it
+  // the provider is never checked. Installing stays a person's decision
+  // (scripts/update-cli.sh).
+  version: z.object({
+    args: z.array(z.string().min(1)).min(1),
+    latest: z.union([
+      z.object({ npm: z.string().min(1) }).strict(),
+      z.object({ manifest: z.string().url() }).strict(),
+    ]),
+  }).strict().optional(),
   models: z.record(z.string().min(1), ModelSchema),
   // min(1) on the value: an empty string parses, and the flag then reaches
   // the CLI as `--effort ""` or as a model id ending in "-".

@@ -7,6 +7,7 @@ import { Council } from "./council/council.js";
 import { createLogger, type Logger } from "./log.js";
 import { createMcpHandler } from "./mcp/server.js";
 import { createNotifier, describeCatalogChange } from "./notify.js";
+import { VersionWatch } from "./versions.js";
 import { buildProviders } from "./providers/index.js";
 import type { Provider } from "./providers/adapter.js";
 import { createRunner } from "./runner/runner.js";
@@ -133,8 +134,13 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // two healthy ones. Until the first round of checks lands every model still
   // reports available, so the app answers 503 + Retry-After to everything but
   // /health (see createApp).
+  // Whether a CLI has a newer version: announced in /health and, with
+  // server.notify, once per version; never installed (docs/update-clis.md).
+  const versions = new VersionWatch(Object.entries(cfg.providers).map(([id, p]) => ({ id, cfg: p })), runner, usage, log.child({ mod: "versions" }), notify);
+
   let ready = false;
-  const app = createApp(core, { log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins } });
+  const app = createApp(core, {
+    versions: () => versions.states(), log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins } });
   const port = overrides.port ?? cfg.server.port;
 
   // One owner for the sqlite handle: whatever fails between here and the end of
@@ -183,6 +189,9 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // discovery_interval_h (docs/deploy.md §7.2).
   core.checkCatalog().catch((err: unknown) => log.error({ err }, "model catalog check failed"));
   const stopCatalog = core.startCatalogLoop(cfg.server.discovery_interval_h * 3600_000);
+  // The versions on the same rhythm: a new CLI version is news once a day.
+  void versions.check();
+  const stopVersions = versions.startLoop(cfg.server.discovery_interval_h * 3600_000);
 
   const graceMs = overrides.shutdownGraceMs ?? SHUTDOWN_GRACE_MS;
   // Memoized, so a second signal (or a second caller) awaits the same shutdown
@@ -191,6 +200,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const close = () => (closing ??= (async () => {
     stopHealth();
     stopCatalog();
+    stopVersions();
     // Idle keep-alive sockets go at once; the ones carrying a response get the
     // grace, after which they are destroyed too — an SSE stream with
     // timeout_s: 600 must not hold the shutdown open until SIGKILL.
@@ -203,7 +213,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     // node:sqlite throws on a closed database. Bounded by the same grace: a
     // probe can hang for as long as the CLI deadline and a shutdown has to stay
     // predictable for systemd (the losing case is one lost health row).
-    await Promise.race([core.idle(), delay(graceMs, undefined, { ref: false })]);
+    await Promise.race([Promise.all([core.idle(), versions.idle()]), delay(graceMs, undefined, { ref: false })]);
     usage.close();
   })());
   return { close, port: actualPort };

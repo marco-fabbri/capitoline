@@ -34,6 +34,9 @@ providers:
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }   # 0 = not declared; real windows come from rate_limit_event
     health_model: claude-haiku
+    # The daily "a new version exists" notice (docs/update-clis.md); installing
+    # is scripts/update-cli.sh, run by a person.
+    version: { args: [--version], latest: { npm: "@anthropic-ai/claude-code" } }
     models:
       claude-opus:   { cli_model: opus }
       claude-sonnet: { cli_model: sonnet }
@@ -86,6 +89,7 @@ providers:
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: codex-gpt-6-luna
+    version: { args: [--version], latest: { npm: "@openai/codex" } }
     # Probed instead when the catalog says health_model is no longer listed.
     health_fallback: [codex-gpt-5.6-luna]
     # The daily catalog (docs/deploy.md §7.2): `codex debug models` is the
@@ -230,6 +234,9 @@ providers:
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: antigravity-gemini-flash
+    # The manifest the official installer reads, for this host's platform
+    # (linux_amd64; linux_arm64 on an ARM host, set in the overlay).
+    version: { args: [--version], latest: { manifest: "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json" } }
     health_fallback: [antigravity-gemini-3.7-flash]
     # `agy models` lists every id the CLI serves, the level inside the id: one
     # no entry below reaches is served as antigravity-<id> (docs/deploy.md §7.2).

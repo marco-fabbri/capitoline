@@ -66,6 +66,7 @@ export class UsageStore {
     insertKey: StatementSync; keyByHash: StatementSync; touchKey: StatementSync; revokeKey: StatementSync; keys: StatementSync; liveKeys: StatementSync;
     nameCaller: StatementSync; callerNames: StatementSync;
     saveCatalog: StatementSync; catalogs: StatementSync;
+    announced: StatementSync; setAnnounced: StatementSync;
   };
   private closed = false;
   constructor(path: string) {
@@ -121,6 +122,9 @@ export class UsageStore {
       -- at startup, so a restart neither drops the discovered models until the
       -- next listing nor reports every one of them as new.
       CREATE TABLE IF NOT EXISTS catalog (provider TEXT PRIMARY KEY, listing TEXT NOT NULL, checked_at INTEGER NOT NULL);
+      -- The last CLI version announced as available, per provider, so the
+      -- daily check announces each new version once and a restart not at all.
+      CREATE TABLE IF NOT EXISTS versions (provider TEXT PRIMARY KEY, announced TEXT NOT NULL, updated_at INTEGER NOT NULL);
     `);
     // A database written before image models existed has no `kind` column, and
     // CREATE TABLE IF NOT EXISTS leaves it alone: add it here, with the same
@@ -190,6 +194,8 @@ export class UsageStore {
       callerNames: this.db.prepare(`SELECT id, name FROM callers ORDER BY id`),
       saveCatalog: this.db.prepare(`INSERT INTO catalog (provider, listing, checked_at) VALUES (?, ?, ?) ON CONFLICT(provider) DO UPDATE SET listing = excluded.listing, checked_at = excluded.checked_at`),
       catalogs: this.db.prepare(`SELECT provider, listing, checked_at FROM catalog ORDER BY provider`),
+      announced: this.db.prepare(`SELECT announced FROM versions WHERE provider = ?`),
+      setAnnounced: this.db.prepare(`INSERT INTO versions (provider, announced, updated_at) VALUES (?, ?, ?) ON CONFLICT(provider) DO UPDATE SET announced = excluded.announced, updated_at = excluded.updated_at`),
     };
   }
   record(c: CallRecord): void {
@@ -340,6 +346,15 @@ export class UsageStore {
         return Array.isArray(listing) ? [{ provider: r.provider, listing: listing as ListedModel[], checkedAt: Number(r.checked_at) }] : [];
       } catch { return []; }
     });
+  }
+
+  announcedVersion(provider: string): string | null {
+    const row = this.stmts.announced.get(provider) as { announced: string } | undefined;
+    return row?.announced ?? null;
+  }
+
+  setAnnouncedVersion(provider: string, version: string, now = Date.now()): void {
+    this.stmts.setAnnounced.run(provider, version, now);
   }
 
   close(): void {

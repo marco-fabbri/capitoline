@@ -1,4 +1,5 @@
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
+import type { VersionState } from "../versions.js";
 import type { Core } from "../core/core.js";
 import { CapitolineError, type ProviderEvent, type Usage } from "../core/types.js";
 import type { Logger } from "../log.js";
@@ -42,7 +43,9 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   /** What to call each service token in /v1/usage, by its client id (server.access.callers). */
   callerNames?: Record<string, string>;
   /** The gateway's own keys and caller names, and who may manage them: mounts /v1/admin and names /v1/usage's rows. */
-  identity?: { store: AdminStore; admins: string[] } }): express.Express {
+  identity?: { store: AdminStore; admins: string[] };
+  /** Each CLI's installed and latest version, for /health (src/versions.ts). */
+  versions?: () => Record<string, VersionState> }): express.Express {
   const app = express();
   app.disable("x-powered-by");
   // Access runs first, app-wide, so an unauthenticated caller gets a 401 before
@@ -169,7 +172,8 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // from the usage database on purpose. The per-caller breakdown is below,
   // behind Access.
   app.get("/health", (_req, res) => {
-    res.json({ ok: true, providers: core.providerStates(), models: core.listModels() });
+    const versions = opts.versions?.() ?? {};
+    res.json({ ok: true, providers: core.providerStates().map((p) => ({ ...p, version: versions[p.id] ?? null })), models: core.listModels() });
   });
 
   // The last 24 hours broken down by who asked: with more than one application

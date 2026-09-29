@@ -756,11 +756,14 @@ describe("the end-to-end configuration tracks the repository one", () => {
     "providers.antigravity.binary",              // the fake CLIs replay fixtures
     "providers.antigravity.image.collect",       //   and so does the collect helper
     "providers.antigravity.timeout_s",           // seconds, not minutes, so a hung fake fails fast
+    "providers.antigravity.version",             // no version check: the suite never reaches the network
     "providers.claude.binary",
     "providers.claude.timeout_s",
+    "providers.claude.version",
     "providers.codex.binary",
     "providers.codex.image.collect",             //   the same helper, in its Codex mode
     "providers.codex.timeout_s",
+    "providers.codex.version",
     "runner.sandbox_root",                       // under the repository, git-ignored
     "runner.user",                               // null: no sudo on a developer machine
     "server.port",                               // 0: the OS picks a free one
