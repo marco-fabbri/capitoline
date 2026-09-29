@@ -969,7 +969,9 @@ describe("/v1/admin", () => {
 
   it("issues, lists and revokes keys as an admin, showing the key exactly once", async () => {
     const { usage, app } = makeAdmin(["boss"]);
-    const { key: boss } = usage.createKey("boss", null);
+    // A second earlier, so the listing's order (creation, then name) does not
+    // depend on both keys being made in different milliseconds.
+    const { key: boss } = usage.createKey("boss", null, Date.now() - 1000);
     const auth = (r: request.Test) => r.set("Authorization", `Bearer ${boss}`);
     const created = await auth(request(app).post("/v1/admin/keys")).send({ name: "app-one" });
     expect(created.status).toBe(201);
