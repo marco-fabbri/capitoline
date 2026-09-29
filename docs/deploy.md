@@ -100,7 +100,9 @@ claude --version; codex --version; agy --version
 exit
 ```
 
-The two npm packages are pinned because a new version can switch on a tool
+npm 11 warns that it did not run Claude Code's install script; the package
+already carries the native binary, and `claude --version` answering is the
+check. The two npm packages are pinned because a new version can switch on a tool
 the configuration has not switched off yet, which is what the update script
 checks for and a plain install does not. The Antigravity installer takes no
 version and installs the latest; once the service runs (§8), `/health` says

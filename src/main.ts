@@ -133,7 +133,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const loopback = host === "127.0.0.1" || host === "::1" || host === "localhost";
   if (!loopback && !accessOn && !usage.hasKeys()) {
     usage.close();
-    throw new Error(`refusing to listen on ${host}: with no Cloudflare Access and no API key the gateway would be open to the network; create a key first (npm run keys -- create <name>) or keep server.host at 127.0.0.1`);
+    throw new Error(`refusing to listen on ${host}: with no Cloudflare Access and no API key the gateway would be open to the network; create a key first (npm run keys, with the overlay: docs/deploy.md §8.1) or keep server.host at 127.0.0.1`);
   }
 
   // The port is bound first and the requests are gated, never the other way
