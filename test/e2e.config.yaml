@@ -111,8 +111,10 @@ providers:
       # calls Codex's built-in image generation, which runs on the ChatGPT
       # subscription with no API key and whose own model the image declares in
       # its signed C2PA manifest ("ChatGPT", "gpt-image"). The agent only has
-      # to decide to call one tool, so it runs at the lowest effort.
-      codex-image:         { cli_model: gpt-6-luna, kind: image, efforts: [low], timeout_s: 300 }
+      # to decide to call one tool, so it runs at the lowest effort. Not the
+      # cheapest model: gpt-6-luna, tried on 2026-09-29 when gpt-5.5 had to
+      # go, answered "I'm applying the imagegen skill…" and produced nothing.
+      codex-image:         { cli_model: gpt-6-sol,  kind: image, efforts: [low], timeout_s: 300 }
     effort: { low: low, medium: medium, high: high, xhigh: xhigh, max: max, ultra: ultra }   # -c model_reasoning_effort="<v>"
     model_flag: -m
     effort_flag: -c

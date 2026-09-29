@@ -20,8 +20,8 @@ describe("codex adapter", () => {
     const on = c.args.indexOf("features.image_generation=true");
     expect(off).toBeGreaterThan(0);
     expect(on).toBeGreaterThan(off);
-    // The agent is gpt-6-luna at its lowest effort; the prompt is the fixed one.
-    expect(c.args[c.args.indexOf("-m") + 1]).toBe("gpt-6-luna");
+    // The agent is gpt-6-sol at its lowest effort; the prompt is the fixed one.
+    expect(c.args[c.args.indexOf("-m") + 1]).toBe("gpt-6-sol");
     expect(c.args).toContain('model_reasoning_effort="low"');
     expect(c.args.at(-1)).toBe("-");
     expect(c.stdin).toBe(CODEX_IMAGE_PROMPT("a fox in the snow"));
