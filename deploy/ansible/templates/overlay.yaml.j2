@@ -1,0 +1,38 @@
+# The host overlay (docs/deploy.md §7), written once by deploy/ansible and then
+# the host's own: the playbook never overwrites it. It is merged over the
+# clone's config/capitoline.yaml and holds only what this host says differently.
+
+runner:
+  user: runner
+  sandbox_root: /var/lib/capitoline/sandboxes
+
+usage:
+  db_path: /var/lib/capitoline/usage.sqlite    # absolute: the service's working directory is the clone
+{% if capitoline_providers | sort != ['antigravity', 'claude', 'codex'] or capitoline_councils is not none %}
+
+serve:
+  providers: [{{ capitoline_providers | join(', ') }}]
+{% if capitoline_councils is not none %}
+  councils: [{{ capitoline_councils | join(', ') }}]
+{% endif %}
+{% endif %}
+
+server:
+{% if capitoline_listen not in ['127.0.0.1', '::1', 'localhost'] %}
+  host: {{ capitoline_listen }}          # §8.2: refused until a key exists
+{% endif %}
+  access:
+    callers: {}
+    admins: [{{ capitoline_admin }}]
+    # Filled in §9, from the Zero Trust dashboard; both empty without Cloudflare.
+    team_domain: ""
+    audience: ""
+
+providers:
+{% for p in capitoline_providers %}
+  {{ p }}:
+    binary: {{ capitoline_binaries[p] }}
+{% if p == 'claude' %}
+    args_extra: []            # the interactive login of §6.1 needs no argument
+{% endif %}
+{% endfor %}

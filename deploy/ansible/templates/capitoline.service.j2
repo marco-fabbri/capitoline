@@ -1,0 +1,22 @@
+# {{ ansible_managed }} (docs/deploy.md §8)
+[Unit]
+Description=Capitoline AI gateway
+# time-sync as well as the network: the persisted pauses are absolute
+# instants, and a service that starts while the clock is still the RTC's
+# guess would read a five-day pause as expired and collect it.
+Wants=network-online.target
+After=network-online.target time-sync.target
+[Service]
+User=capitoline
+Group=capitoline
+WorkingDirectory=/var/lib/capitoline/app
+Environment=CAPITOLINE_CONFIG=/var/lib/capitoline/app/config/capitoline.yaml
+Environment=CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/capitoline/notify.env
+ExecStart=/usr/bin/node dist/main.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=false
+[Install]
+WantedBy=multi-user.target

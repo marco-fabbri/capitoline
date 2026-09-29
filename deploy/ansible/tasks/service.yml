@@ -1,0 +1,15 @@
+# §8: the service. It starts before the CLIs are logged in and reports them
+# down until they are; verify.yml restarts it after the logins.
+- name: The unit (§8)
+  ansible.builtin.template:
+    src: capitoline.service.j2
+    dest: /etc/systemd/system/capitoline.service
+    mode: "0644"
+  notify: Restart capitoline
+
+- name: The service is enabled and running (§8)
+  ansible.builtin.systemd_service:
+    name: capitoline
+    enabled: true
+    state: started
+    daemon_reload: true

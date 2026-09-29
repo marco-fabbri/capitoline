@@ -1,0 +1,58 @@
+# §7: the clone as capitoline, at capitoline_version, built; the overlay; the
+# check the service would otherwise make at startup, in a restart loop.
+- name: The clone, at {{ capitoline_version }} (§7)
+  ansible.builtin.git:
+    repo: "{{ capitoline_repo }}"
+    dest: /var/lib/capitoline/app
+    version: "{{ capitoline_version }}"
+  become: true
+  become_user: capitoline
+  register: clone
+  notify: Restart capitoline
+
+- name: Is it built?
+  ansible.builtin.stat:
+    path: /var/lib/capitoline/app/dist/main.js
+  register: built
+
+- name: Dependencies and build (§7)
+  ansible.builtin.shell: npm ci --no-fund --no-audit && npm run build
+  args:
+    chdir: /var/lib/capitoline/app
+  when: clone.changed or not built.stat.exists
+  become: true
+  become_user: capitoline
+  notify: Restart capitoline
+
+- name: The overlay, from this playbook's values, once (§7)
+  ansible.builtin.template:
+    src: overlay.yaml.j2
+    dest: /etc/capitoline/overlay.yaml
+    owner: root
+    group: capitoline
+    mode: "0640"
+    force: false
+  when: capitoline_overlay_src == ""
+  notify: Restart capitoline
+
+- name: The overlay, from {{ capitoline_overlay_src }} (§7)
+  ansible.builtin.copy:
+    src: "{{ capitoline_overlay_src }}"
+    dest: /etc/capitoline/overlay.yaml
+    owner: root
+    group: capitoline
+    mode: "0640"
+  when: capitoline_overlay_src != ""
+  notify: Restart capitoline
+
+- name: The configuration loads (§7)
+  ansible.builtin.command: npm run -s check-config
+  args:
+    chdir: /var/lib/capitoline/app
+  environment:
+    CAPITOLINE_CONFIG: config/capitoline.yaml
+    CAPITOLINE_OVERLAY: /etc/capitoline/overlay.yaml
+  become: true
+  become_user: capitoline
+  changed_when: false
+  when: not ansible_check_mode

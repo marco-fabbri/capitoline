@@ -1,0 +1,10 @@
+# Copy to inventory.yml (ignored by git) and name your host. Variables set
+# here win over group_vars/all.yml.
+all:
+  hosts:
+    capitoline:
+      ansible_host: 192.0.2.10
+      ansible_user: root
+      # Only some of the CLIs: one application on the Claude subscription alone.
+      # capitoline_providers: [claude]
+      # capitoline_councils: []

@@ -1,0 +1,75 @@
+# §4: the CLIs this host serves, as runner, at the versions this repository
+# was verified with (providers.<id>.version.verified). A CLI already at that
+# version is left alone, so a second run changes nothing.
+- name: npm installs global packages under the runner's home (§4)
+  ansible.builtin.copy:
+    dest: /home/runner/.npmrc
+    content: "prefix=/home/runner/.npm-global\n"
+    owner: runner
+    group: runner
+    mode: "0644"
+
+- name: The runner's PATH (§4)
+  ansible.builtin.lineinfile:
+    path: /home/runner/.profile
+    line: 'export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"'
+    create: true
+    owner: runner
+    group: runner
+    mode: "0644"
+
+- name: Installed versions
+  ansible.builtin.shell: "{{ capitoline_binaries[item] }} --version 2>/dev/null | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
+  loop: "{{ capitoline_providers }}"
+  become: true
+  become_user: runner
+  register: installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Claude Code and Codex at their verified versions (§4)
+  ansible.builtin.command: "npm install -g {{ capitoline_npm_packages[item.item] }}@{{ capitoline_config.providers[item.item].version.verified }}"
+  loop: "{{ installed.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - item.item in capitoline_npm_packages
+    - item.stdout != capitoline_config.providers[item.item].version.verified
+  become: true
+  become_user: runner
+  environment:
+    HOME: /home/runner
+
+# The installer takes no version and refuses to overwrite an installed
+# binary, so it runs only when there is none. A newer version than the one
+# verified is reported below and brought in line with scripts/update-cli.sh.
+- name: Antigravity, from its official installer (§4)
+  ansible.builtin.shell: curl -fsSL https://antigravity.google/cli/install.sh | bash
+  args:
+    creates: /home/runner/.local/bin/agy
+  when: "'antigravity' in capitoline_providers"
+  become: true
+  become_user: runner
+  environment:
+    HOME: /home/runner
+
+- name: Antigravity's version against the verified one
+  ansible.builtin.shell: "/home/runner/.local/bin/agy --version | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
+  when: "'antigravity' in capitoline_providers"
+  become: true
+  become_user: runner
+  register: agy_version
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Say when Antigravity is not the verified version
+  ansible.builtin.debug:
+    msg: >-
+      agy {{ agy_version.stdout }} is installed, the repository was verified with
+      {{ capitoline_config.providers.antigravity.version.verified }}; its installer only installs the
+      latest. Check it with scripts/update-cli.sh antigravity (docs/update-clis.md).
+  when:
+    - "'antigravity' in capitoline_providers"
+    - agy_version.stdout | default('') not in ['', capitoline_config.providers.antigravity.version.verified]

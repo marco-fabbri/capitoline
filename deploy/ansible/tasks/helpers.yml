@@ -1,0 +1,35 @@
+# §7.1 and §11: the two scripts sudo and the timer run are copies owned by
+# root, never the clone's, since the gateway user could edit those.
+- name: The image collection helper and the backup script (§7.1, §11)
+  ansible.builtin.copy:
+    src: "/var/lib/capitoline/app/scripts/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [capitoline-collect-image, capitoline-backup]
+  # A dry run on a host with no clone yet has nothing to copy from.
+  when: not (ansible_check_mode and not built.stat.exists)
+
+- name: The backup directory (§11)
+  ansible.builtin.file:
+    path: /var/backups/capitoline
+    state: directory
+    owner: capitoline
+    group: capitoline
+    mode: "0700"
+
+- name: The backup unit and its timer (§11)
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop: [capitoline-backup.service, capitoline-backup.timer]
+
+- name: The timer runs daily (§11)
+  ansible.builtin.systemd_service:
+    name: capitoline-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: true

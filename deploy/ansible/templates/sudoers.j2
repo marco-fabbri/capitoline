@@ -1,0 +1,3 @@
+# {{ ansible_managed }} (docs/deploy.md §5): what the gateway may run as runner,
+# the binaries of the CLIs this host serves and the image collection helper.
+capitoline ALL=(runner) NOPASSWD: {% for p in capitoline_providers %}{{ capitoline_binaries[p] }}, {% endfor %}/usr/local/bin/capitoline-collect-image

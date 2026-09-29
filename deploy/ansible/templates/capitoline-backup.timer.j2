@@ -1,0 +1,9 @@
+# {{ ansible_managed }} (docs/deploy.md §11)
+[Unit]
+Description=Daily Capitoline backup
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=15m
+Persistent=true
+[Install]
+WantedBy=timers.target

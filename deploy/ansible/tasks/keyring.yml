@@ -1,0 +1,70 @@
+# §6.3 a-b and §6.4, only on a host that serves Antigravity: a user bus for
+# runner at boot, the Secret Service keyring on it, and the permission model
+# that makes any tool call wait or be refused instead of running.
+- name: A user bus for runner at boot (§6.3a)
+  ansible.builtin.command: loginctl enable-linger runner
+  args:
+    creates: /var/lib/systemd/linger/runner
+
+- name: The bus exists (§6.3a)
+  ansible.builtin.wait_for:
+    path: "/run/user/{{ runner_uid }}/bus"
+    timeout: 30
+  when: not ansible_check_mode
+
+- name: The runner's directories (§6.3b)
+  ansible.builtin.file:
+    path: "/home/runner/{{ item }}"
+    state: directory
+    owner: runner
+    group: runner
+    mode: "0700"
+  loop: [.config, .config/systemd, .config/systemd/user, .local, .local/share, .local/share/keyrings, .gemini, .gemini/antigravity-cli]
+
+# Written once: the keyring the login creates is encrypted with it, so a new
+# one would lock the login out.
+- name: The keyring password (§6.3b)
+  ansible.builtin.shell: umask 077 && head -c 32 /dev/urandom | base64 > /home/runner/.keyring-password
+  args:
+    creates: /home/runner/.keyring-password
+  become: true
+  become_user: runner
+
+- name: The keyring daemon as a user unit (§6.3b)
+  ansible.builtin.template:
+    src: gnome-keyring.service.j2
+    dest: /home/runner/.config/systemd/user/gnome-keyring.service
+    owner: runner
+    group: runner
+    mode: "0644"
+
+- name: The same bus for interactive logins (§6.3b)
+  ansible.builtin.blockinfile:
+    path: /home/runner/.profile
+    marker: "# {mark} capitoline: runner user bus (docs/deploy.md §6.3b)"
+    block: |
+      export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+      export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+
+- name: The keyring daemon runs (§6.3b)
+  ansible.builtin.systemd_service:
+    name: gnome-keyring.service
+    scope: user
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  become_user: runner
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ runner_uid }}"
+  when: not ansible_check_mode
+
+# Enforced on every run, unlike the keyring password: this file is what keeps
+# the agent from running a command, so a hand edit that loosens it is drift.
+- name: Antigravity's tools wait or are refused (§6.4)
+  ansible.builtin.copy:
+    dest: /home/runner/.gemini/antigravity-cli/settings.json
+    content: '{"toolPermission":"strict","enableTerminalSandbox":true,"allowNonWorkspaceAccess":false}'
+    owner: runner
+    group: runner
+    mode: "0644"

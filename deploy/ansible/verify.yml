@@ -1,0 +1,111 @@
+# After the logins: the checks of docs/deploy.md §6, §6.4 and §12, run the
+# way the gateway runs the CLIs (sudo as runner, which reads runner.env).
+#
+#   ansible-playbook verify.yml
+#   ansible-playbook verify.yml -e capitoline_verify_images=true    one real image per image model
+- name: Is this Capitoline host healthy?
+  hosts: all
+  become: true
+  tasks:
+    # A login done while the service ran is noticed only at the next hourly
+    # health check (§8), so the service starts again first.
+    - name: Restart, so the logins are seen now (§8)
+      ansible.builtin.systemd_service:
+        name: capitoline
+        state: restarted
+
+    - name: Every CLI this host serves passes its health check (§8)
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/health
+        return_content: true
+      register: health
+      until: >-
+        health.json is defined and
+        (health.json.providers | selectattr('health.ok', 'equalto', true) | map(attribute='id') | list | length)
+        == (health.json.providers | length)
+      retries: 18
+      delay: 10
+
+    - name: Claude answers as runner (§6.1)
+      ansible.builtin.command: >-
+        {{ capitoline_binaries.claude }} -p "Reply with the single word: ok"
+        --setting-sources "" --tools "" --strict-mcp-config
+      become_user: runner
+      register: claude
+      changed_when: false
+      failed_when: "'ok' not in claude.stdout | lower"
+      when: "'claude' in capitoline_providers"
+
+    - name: Codex is logged in (§6.2)
+      ansible.builtin.command: "{{ capitoline_binaries.codex }} login status"
+      become_user: runner
+      register: codex
+      changed_when: false
+      failed_when: "'Logged in' not in (codex.stdout ~ codex.stderr)"
+      when: "'codex' in capitoline_providers"
+
+    - name: Antigravity answers as runner, through the keyring (§6.3e)
+      ansible.builtin.command: >-
+        {{ capitoline_binaries.antigravity }} -p "Reply with the single word: ok"
+        --model gemini-3.8-flash-low --output-format json
+      become_user: runner
+      register: agy
+      changed_when: false
+      failed_when: "(agy.stdout | from_json).status | default('') != 'SUCCESS'"
+      when: "'antigravity' in capitoline_providers"
+
+    # Refused and ended (1.2.8 and later) or hung until timeout (before): both
+    # are safe. The output of `id` is the one thing that must never appear.
+    - name: Antigravity does not run a command it is asked to run (§6.4)
+      ansible.builtin.command: >-
+        timeout 60 {{ capitoline_binaries.antigravity }} -p "run the command: id"
+        --model gemini-3.8-flash-low --output-format json --print-timeout 30s
+      become_user: runner
+      register: stall
+      changed_when: false
+      failed_when: "'uid=' in stall.stdout"
+      when: "'antigravity' in capitoline_providers"
+
+    - name: The image models this host serves
+      ansible.builtin.set_fact:
+        image_models: "{{ health.json.models | selectattr('kind', 'equalto', 'image') | map(attribute='name') | list }}"
+
+    - name: The smoke test, with a key made for it and revoked after (§12)
+      block:
+        - name: A temporary key (§8.1)
+          ansible.builtin.command: npm run -s keys -- create verify-{{ ansible_date_time.epoch }}
+          args:
+            chdir: /var/lib/capitoline/app
+          environment:
+            CAPITOLINE_OVERLAY: /etc/capitoline/overlay.yaml
+          become_user: capitoline
+          register: key
+          changed_when: true
+          no_log: true
+
+        - name: One call per CLI, and an image per image model when asked (§12)
+          ansible.builtin.command: scripts/smoke.sh http://127.0.0.1:8080
+          args:
+            chdir: /var/lib/capitoline/app
+          environment:
+            CAPITOLINE_API_KEY: "{{ key.stdout | trim }}"
+            SMOKE_IMAGE: "{{ '1' if capitoline_verify_images | bool else '0' }}"
+            SMOKE_IMAGE_MODEL: "{{ item }}"
+          loop: "{{ image_models if (capitoline_verify_images | bool and image_models) else [''] }}"
+          register: smoke
+          changed_when: false
+          no_log: false
+
+        - name: What the smoke test printed
+          ansible.builtin.debug:
+            msg: "{{ smoke.results | map(attribute='stdout_lines') | list }}"
+      always:
+        - name: The temporary key is revoked
+          ansible.builtin.command: npm run -s keys -- revoke verify-{{ ansible_date_time.epoch }}
+          args:
+            chdir: /var/lib/capitoline/app
+          environment:
+            CAPITOLINE_OVERLAY: /etc/capitoline/overlay.yaml
+          become_user: capitoline
+          changed_when: true
+          when: key is defined and key.rc | default(1) == 0

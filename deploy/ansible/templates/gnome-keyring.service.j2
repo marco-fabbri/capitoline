@@ -1,0 +1,12 @@
+[Unit]
+Description=Secret Service keyring for the Capitoline runner
+After=dbus.socket
+Requires=dbus.socket
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'exec /usr/bin/gnome-keyring-daemon --foreground --components=secrets --unlock < %h/.keyring-password'
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,22 @@
+# §5 and §6.3c: sudoers, not code, limits what the gateway can run as runner;
+# the env_file hands every command run as runner the user bus and the two
+# switches that stop the CLIs updating themselves.
+- name: What the gateway may run as runner (§5)
+  ansible.builtin.template:
+    src: sudoers.j2
+    dest: /etc/sudoers.d/capitoline
+    mode: "0440"
+    validate: visudo -cf %s
+
+- name: The runner's environment under sudo (§6.3c)
+  ansible.builtin.template:
+    src: runner.env.j2
+    dest: /etc/capitoline/runner.env
+    mode: "0644"
+
+- name: Every command run as runner reads it (§6.3c)
+  ansible.builtin.template:
+    src: sudoers-env.j2
+    dest: /etc/sudoers.d/capitoline-env
+    mode: "0440"
+    validate: visudo -cf %s

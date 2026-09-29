@@ -21,3 +21,12 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npx vitest run
+
+  ansible:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx install ansible-core
+      - name: The playbooks parse
+        working-directory: deploy/ansible
+        run: ansible-playbook -i inventory.example.yml --syntax-check site.yml verify.yml

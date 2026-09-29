@@ -1,0 +1,55 @@
+# A Capitoline host, built from docs/deploy.md: §1-§8, §7.1 and §11. The CLI
+# logins (§6.1-§6.3d) stay the owner's; Cloudflare (§9) stays by hand.
+#
+#   ansible-playbook site.yml --check --diff    what would change, nothing changes
+#   ansible-playbook site.yml                   build, or bring back in line
+#   (the logins, as printed at the end)
+#   ansible-playbook verify.yml                 after the logins: is it healthy?
+#
+# The order is the runbook's, and it matters in three places: the users exist
+# before anything is installed as them; the sudoers rule names binaries §4 has
+# put in place; the helpers are copied from the clone §7 has just made.
+- name: A Capitoline host
+  hosts: all
+  become: true
+  pre_tasks:
+    - name: A host the runbook covers (§1)
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution in ['Debian', 'Ubuntu']
+          - capitoline_providers | length > 0
+          - capitoline_providers | difference(['claude', 'codex', 'antigravity']) | length == 0
+        fail_msg: >-
+          Debian 13 or Ubuntu 24.04, and capitoline_providers among claude, codex,
+          antigravity; got {{ ansible_distribution }} {{ ansible_distribution_version }}
+          and {{ capitoline_providers }}.
+    - name: The Antigravity version check on arm64 (§1)
+      ansible.builtin.debug:
+        msg: >-
+          arm64: set providers.antigravity.version.latest.manifest to the linux_arm64
+          manifest in the overlay (docs/deploy.md §1), or the daily check reads the amd64 one.
+      when: ansible_architecture == 'aarch64' and 'antigravity' in capitoline_providers
+  tasks:
+    - ansible.builtin.import_tasks: tasks/base.yml
+    - ansible.builtin.import_tasks: tasks/users.yml
+    - ansible.builtin.import_tasks: tasks/clis.yml
+    - ansible.builtin.import_tasks: tasks/sudoers.yml
+    - ansible.builtin.include_tasks: tasks/keyring.yml
+      when: "'antigravity' in capitoline_providers"
+    - ansible.builtin.import_tasks: tasks/app.yml
+    - ansible.builtin.import_tasks: tasks/helpers.yml
+    - ansible.builtin.import_tasks: tasks/service.yml
+  post_tasks:
+    - name: What is left to do by hand
+      ansible.builtin.debug:
+        msg: "{{ ['Log in to each CLI, as runner, from an SSH session of your own (docs/deploy.md §6):']
+          + (['  sudo -iu runner claude                       # /login, then /exit'] if 'claude' in capitoline_providers else [])
+          + (['  sudo -iu runner codex login --device-auth'] if 'codex' in capitoline_providers else [])
+          + (['  sudo -iu runner agy                          # log in, then /quit'] if 'antigravity' in capitoline_providers else [])
+          + ['Then: ansible-playbook verify.yml, and the first key (docs/deploy.md §8.1).'] }}"
+  handlers:
+    - name: Restart capitoline
+      ansible.builtin.systemd_service:
+        name: capitoline
+        state: restarted
+        daemon_reload: true

@@ -1,0 +1,40 @@
+# §3: capitoline owns the code, the configuration, the database and the
+# service; runner owns the CLIs and their credentials. They share only the
+# sandbox directory, whose setgid bit gives every sandbox the capitoline group.
+- name: The capitoline user (§3)
+  ansible.builtin.user:
+    name: capitoline
+    system: true
+    home: /var/lib/capitoline
+    create_home: true
+
+- name: The runner user, in the capitoline group (§3)
+  ansible.builtin.user:
+    name: runner
+    groups: [capitoline]
+    append: true
+    shell: /bin/bash
+
+- name: The sandbox directory (§3)
+  ansible.builtin.file:
+    path: /var/lib/capitoline/sandboxes
+    state: directory
+    owner: capitoline
+    group: capitoline
+    mode: "2770"
+
+- name: The configuration directory (§3)
+  ansible.builtin.file:
+    path: /etc/capitoline
+    state: directory
+    mode: "0755"
+
+- name: The runner's uid, for its user bus
+  ansible.builtin.command: id -u runner
+  register: runner_id
+  changed_when: false
+  check_mode: false
+
+- name: Remember it
+  ansible.builtin.set_fact:
+    runner_uid: "{{ runner_id.stdout }}"

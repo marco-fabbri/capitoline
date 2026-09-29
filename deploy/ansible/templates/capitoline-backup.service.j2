@@ -1,0 +1,11 @@
+# {{ ansible_managed }} (docs/deploy.md §11)
+[Unit]
+Description=Capitoline backup
+[Service]
+Type=oneshot
+User=capitoline
+Group=capitoline
+# The host-specific file, the overlay of §7: the base configuration is in git
+# and needs no backup. The archive entry is named `capitoline.yaml`.
+Environment=CAPITOLINE_CONFIG=/etc/capitoline/overlay.yaml
+ExecStart=/usr/local/bin/capitoline-backup /var/backups/capitoline

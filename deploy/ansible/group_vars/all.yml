@@ -1,0 +1,36 @@
+# Defaults for every host. Override them per host in the inventory.
+
+# The repository the host clones, and the commit: by default the one this
+# playbook is checked out at, so the playbook and the code it installs are
+# always the same version. Check out a tag to install that tag.
+capitoline_repo: https://github.com/marco-fabbri/capitoline.git
+capitoline_version: "{{ lookup('ansible.builtin.pipe', 'git -C ' ~ playbook_dir ~ ' rev-parse HEAD') }}"
+
+# The CLIs this host serves. A subset is written to the overlay as `serve`
+# (docs/deploy.md §7) and the others are never installed.
+capitoline_providers: [claude, codex, antigravity]
+# The councils this host serves; null serves every council the repository
+# declares. Claude alone cannot seat one, so it needs [] here.
+capitoline_councils: null
+
+# The overlay. With capitoline_overlay_src empty the playbook writes one from
+# the values below, once, and never overwrites it; with a path on this
+# machine it installs that file, every run.
+capitoline_overlay_src: ""
+capitoline_admin: owner                 # the name of the key made after install (§8.1)
+capitoline_listen: 127.0.0.1            # server.host (§8.2); anything else needs a key first
+
+# The repository's own configuration, read here for the verified CLI versions
+# (providers.<id>.version.verified) and the binaries' npm packages.
+capitoline_config: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../config/capitoline.yaml') | from_yaml }}"
+capitoline_npm_packages:
+  claude: "@anthropic-ai/claude-code"
+  codex: "@openai/codex"
+capitoline_binaries:
+  claude: /home/runner/.npm-global/bin/claude
+  codex: /home/runner/.npm-global/bin/codex
+  antigravity: /home/runner/.local/bin/agy
+
+# verify.yml: one real image per image model served. Off by default, since
+# each spends a unit of that model's quota.
+capitoline_verify_images: false
