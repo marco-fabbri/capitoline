@@ -263,3 +263,31 @@ describe("the four conditions", () => {
     expect(checked).toEqual(conditions);
   });
 });
+
+// The version a new host installs is written in three places: the
+// configuration, which the Ansible playbook reads; the update guide's table,
+// which says when each was verified; and the runbook's install line, for a
+// host built by hand. A CLI update that changes one and not the others would
+// install on the next host a version nobody verified.
+describe("the verified CLI versions", () => {
+  const NAMES: Record<string, string> = { claude: "Claude Code (`claude`)", codex: "Codex CLI (`codex`)", antigravity: "Antigravity CLI (`agy`)" };
+  const PACKAGES: Record<string, string> = { claude: "@anthropic-ai/claude-code", codex: "@openai/codex" };
+
+  it("are the newest row of each CLI in docs/update-clis.md", () => {
+    const rows = section(readFileSync("docs/update-clis.md", "utf8"), "## Versions in use").split("\n")
+      .filter((l) => l.startsWith("| ") && !l.startsWith("| CLI"))
+      .map((l) => l.split("|").map((c) => c.trim()));
+    for (const [id, name] of Object.entries(NAMES)) {
+      const newest = rows.filter((r) => r[1] === name).at(-1);
+      expect(newest, `no row for ${name}`).toBeDefined();
+      expect(CONFIG.providers[id].version?.verified, `providers.${id}.version.verified`).toBe(newest![2]);
+    }
+  });
+
+  it("are what docs/deploy.md §4 installs", () => {
+    const line = /npm install -g (.+)/.exec(section(readFileSync("docs/deploy.md", "utf8"), "## 4. "))?.[1] ?? "";
+    for (const [id, pkg] of Object.entries(PACKAGES)) {
+      expect(line, `docs/deploy.md §4 installs ${pkg}`).toContain(`${pkg}@${CONFIG.providers[id].version?.verified}`);
+    }
+  });
+});

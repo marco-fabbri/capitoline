@@ -78,8 +78,13 @@ const ProviderSchema = z.object({
   // daily "a new version exists" notice (src/versions.ts). Optional: without it
   // the provider is never checked. Installing stays a person's decision
   // (scripts/update-cli.sh).
+  //
+  // `verified` is the version this repository was last checked against: what
+  // a new host installs (deploy/ansible, docs/deploy.md §4), and the last row
+  // of docs/update-clis.md for that CLI, which a test keeps in step.
   version: z.object({
     args: z.array(z.string().min(1)).min(1),
+    verified: z.string().regex(/^\d+\.\d+\.\d+$/).optional(),
     latest: z.union([
       z.object({ npm: z.string().min(1) }).strict(),
       z.object({ manifest: z.string().url() }).strict(),

@@ -162,4 +162,6 @@ case "$cli" in
   antigravity) name='Antigravity CLI (`agy`)' ;;
 esac
 echo "| $name | $after | $(date -u +%F) | updated from $before with scripts/update-cli.sh; smoke test passed |"
-echo "and refresh the model lists the tests read (docs/update-clis.md, \"The model lists\")."
+echo "set providers.$cli.version.verified to $after in config/capitoline.yaml (and, for claude or codex, the"
+echo "npm install line of docs/deploy.md §4: a test keeps the three in step), and refresh the model lists"
+echo "the tests read (docs/update-clis.md, \"The model lists\")."
