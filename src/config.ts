@@ -205,7 +205,17 @@ const CouncilSchema = z.object({
   stageTimeoutS: c.stage_timeout_s,
 }));
 
-export const ConfigSchema = z
+// What this host serves, when it is less than the repository declares. A list
+// names what is in, so a provider or a council added to the repository later
+// stays out of a host that wrote one until the host names it too; with no list
+// everything is served. The lists replace the repository's whole in the merge
+// (mergeConfig), which is what makes them closed.
+const ServeSchema = z.object({
+  providers: z.array(z.string().min(1)).min(1).optional(),
+  councils: z.array(z.string().min(1)).optional(),
+}).strict();
+
+const ConfigObject = z
   .object({
     server: z
       .object({
@@ -276,9 +286,65 @@ export const ConfigSchema = z
     // Virtual models, keyed by the name a client asks for in `model`. Empty by
     // default: a gateway with no council is the phase-1 gateway, unchanged.
     council: z.record(z.string().min(1), CouncilSchema).default({}),
+    serve: ServeSchema.optional(),
   })
-  .strict()
-  .superRefine((cfg, ctx) => {
+  .strict();
+type RawConfig = z.infer<typeof ConfigObject>;
+
+interface Issue { path: (string | number)[]; message: string }
+
+/**
+ * The configuration this host serves: `serve` applied. The providers left out
+ * are gone, and so are the councils left out. A council that stays loses the
+ * models of the providers left out from its chains, and a seat whose whole
+ * chain was on them loses the seat. What remains is checked like any
+ * configuration, so the rest of the code never sees what this host does not
+ * serve: no health call, no listing, no version check, no model in /v1/models.
+ *
+ * A council that trimming leaves with fewer than two seats, or with no judge,
+ * is refused rather than dropped: dropping it would turn a client's request
+ * for it into a 404 that nobody decided. The message says which list to edit.
+ */
+function served(raw: RawConfig): { config: RawConfig; issues: Issue[] } {
+  const serve = raw.serve;
+  const issues: Issue[] = [];
+  if (!serve) return { config: raw, issues };
+  serve.providers?.forEach((id, i) => {
+    if (!Object.hasOwn(raw.providers, id)) issues.push({ path: ["serve", "providers", i], message: `serve.providers names "${id}", which is not a provider of the configuration` });
+  });
+  serve.councils?.forEach((name, i) => {
+    if (!Object.hasOwn(raw.council, name)) issues.push({ path: ["serve", "councils", i], message: `serve.councils names "${name}", which is not a council of the configuration` });
+  });
+  const providers = serve.providers
+    ? Object.fromEntries(Object.entries(raw.providers).filter(([id]) => serve.providers!.includes(id)))
+    : raw.providers;
+  // Every model of every provider declared, served or not, so a model of a
+  // provider left out is told apart from a typo, which the checks still report.
+  const owner = new Map<string, string>();
+  for (const [id, p] of Object.entries(raw.providers)) for (const m of Object.keys(p.models)) owner.set(m, id);
+  const kept = (m: string): boolean => {
+    const id = owner.get(m);
+    return id === undefined || Object.hasOwn(providers, id);
+  };
+  const council: RawConfig["council"] = {};
+  for (const [name, c] of Object.entries(raw.council)) {
+    if (serve.councils && !serve.councils.includes(name)) continue;
+    const seats = c.seats.map((s) => ({ ...s, models: s.models.filter(kept) })).filter((s) => s.models.length > 0);
+    const judge = { ...c.judge, models: c.judge.models.filter(kept) };
+    const trimmed = seats.length !== c.seats.length || judge.models.length !== c.judge.models.length;
+    if (trimmed && (seats.length < 2 || judge.models.length === 0)) {
+      issues.push({ path: ["serve", "councils"], message: `council "${name}" keeps ${seats.length} seat(s) and ${judge.models.length > 0 ? "a" : "no"} judge with the providers this host serves (${Object.keys(providers).join(", ")}): name the councils to serve in serve.councils, without it` });
+      continue;
+    }
+    council[name] = { ...c, seats, judge };
+  }
+  return { config: { ...raw, providers, council }, issues };
+}
+
+export const ConfigSchema = ConfigObject
+  .superRefine((raw, ctx) => {
+    const { config: cfg, issues } = served(raw);
+    for (const i of issues) ctx.addIssue({ code: "custom", ...i });
     // Access is on or off as a pair: with only team_domain the gateway would
     // verify against an empty audience and reject every token with a 401
     // that says nothing about the configuration.
@@ -462,7 +528,8 @@ export const ConfigSchema = z
       if (slots >= seats) continue;
       ctx.addIssue({ code: "custom", path: ["providers", pid, "concurrency"], message: `provider ${pid} serves ${seats} seats of council "${council}" with concurrency ${slots}: a member would wait on its own subscription's queue and lose its seat in every parallel stage the council runs (design §12.1)` });
     }
-  });
+  })
+  .transform((raw) => served(raw).config);
 
 export type Config = z.infer<typeof ConfigSchema>;
 export type ProviderConfig = Config["providers"][string];

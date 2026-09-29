@@ -46,6 +46,7 @@ read -r BIN RUNNER SWITCHED_OFF < <(sudo -u capitoline env CAPITOLINE_OVERLAY="$
   import('./dist/config.js').then((m) => {
     const c = m.loadConfig('config/capitoline.yaml', process.env.CAPITOLINE_OVERLAY || undefined);
     const p = c.providers['$cli'];
+    if (!p) { console.error('update-cli: $cli is not served on this host (serve.providers in the overlay)'); process.exit(1); }
     // The Codex features the configuration switches off (-c features.<name>=false):
     // a default the CLI turns on and these name is already handled.
     const off = [...p.args, ...p.args_extra].map((a) => /^features\\.([a-z0-9_]+)=false$/.exec(a)?.[1]).filter(Boolean);

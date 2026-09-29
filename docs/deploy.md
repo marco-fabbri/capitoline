@@ -17,9 +17,9 @@ ways, and Cloudflare is only one of them:
 
 Three steps need the owner of each subscription, with a browser on their own
 computer: the Claude login (§6.1), the Codex device code (§6.2) and the
-Antigravity login (§6.3). A host that skips one of the three CLIs still
-starts: that provider shows as down in `/health`, and the councils seat what
-is left.
+Antigravity login (§6.3). A host that serves only some of them — one
+application on one subscription, say — names them in the overlay's `serve`
+(§7) and skips the steps of the others.
 
 ## 1. Host
 
@@ -382,12 +382,31 @@ Edit `/etc/capitoline/overlay.yaml`. It starts as a copy of the example, whose
 | `providers.codex.binary` | `/home/runner/.npm-global/bin/codex` |
 | `providers.antigravity.binary` | `/home/runner/.local/bin/agy` |
 | `server.host` | not in the example: the default `127.0.0.1` is right behind the tunnel of §9. `0.0.0.0` (or one address of the host) for clients on your own network, §8.2 |
+| `serve` | not in the example: everything is served. A host that serves less names it, below |
 | `server.access.callers` | the names of the Cloudflare service tokens, §9; `{}` without Cloudflare |
 | `server.access.admins` | who may use `/v1/admin`, §8.1 |
 | `server.access.team_domain`, `server.access.audience` | filled in §9; both empty until then, and for good without Cloudflare |
 
-There is no key to leave a provider out: a CLI that is not installed or not
-logged in is reported down, and the rest keeps working.
+**Serving less than the repository declares.** With no `serve` key the host
+serves every provider and every council of the repository file, and whatever a
+later pull adds. A host that serves less names what it serves, and the lists
+are closed: what the repository adds later stays out until the host names it.
+One application on the Claude subscription alone:
+
+```yaml
+serve:
+  providers: [claude]
+  councils: []
+```
+
+A provider left out is not built at all: no health call, no model listing, no
+version check, nothing in `/v1/models`. Its steps in §4–§6 and its path in the
+sudoers rule of §5 can be skipped. A council that stays loses the models of
+the providers left out from its chains, and a seat whose whole chain was on
+them; a council left with fewer than two seats, or with no judge, is refused
+by `check-config`, which names it. Leaving Codex out keeps both shipped
+councils, with three seats each; serving Claude alone leaves none, hence
+`councils: []` above.
 
 Everything else stays in the repository file, verified with the CLI versions
 of `docs/update-clis.md`. Three of its keys are worth knowing even

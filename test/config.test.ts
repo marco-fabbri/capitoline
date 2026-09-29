@@ -933,6 +933,55 @@ describe("loadConfig with a host overlay", () => {
   });
 });
 
+// A host that serves less than the repository declares: a single provider for
+// one application, or the councils left out. The lists are closed, so what
+// the repository adds later stays out until the host names it.
+describe("serve", () => {
+  const REPO = "config/capitoline.yaml";
+  const repo = loadConfig(REPO);
+  const withOverlay = (text: string) => {
+    const path = join(mkdtempSync(join(tmpdir(), "capitoline-serve-")), "overlay.yaml");
+    writeFileSync(path, text);
+    return loadConfig(REPO, path);
+  };
+  const modelsOf = (id: string) => new Set(Object.keys(repo.providers[id].models));
+
+  it("serves one provider and no council, and the rest of that provider as the repository has it", () => {
+    const cfg = withOverlay("serve:\n  providers: [claude]\n  councils: []\n");
+    expect(Object.keys(cfg.providers)).toEqual(["claude"]);
+    expect(cfg.providers.claude).toEqual(repo.providers.claude);
+    expect(cfg.council).toEqual({});
+  });
+
+  it("serves everything with no list, and every council with no council list", () => {
+    expect(withOverlay("serve: {}\n").providers).toEqual(repo.providers);
+    const cfg = withOverlay("serve:\n  providers: [claude, codex, antigravity]\n");
+    expect(cfg.council).toEqual(repo.council);
+  });
+
+  it("trims the councils to the providers served, dropping a seat whose whole chain is left out", () => {
+    const cfg = withOverlay("serve:\n  providers: [claude, antigravity]\n");
+    const codex = modelsOf("codex");
+    expect(Object.keys(cfg.council).sort()).toEqual(Object.keys(repo.council).sort());
+    for (const [name, c] of Object.entries(cfg.council)) {
+      const all = [...c.seats.flatMap((s) => s.models), ...c.judge.models];
+      expect(all.filter((m) => codex.has(m)), name).toEqual([]);
+      const expected = repo.council[name].seats.filter((s) => s.models.some((m) => !codex.has(m))).length;
+      expect(c.seats, name).toHaveLength(expected);
+    }
+  });
+
+  it("refuses a council the providers served cannot hold, and says which list to edit", () => {
+    expect(() => withOverlay("serve:\n  providers: [claude]\n")).toThrow(/council "capitoline" keeps 1 seat\(s\) and a judge .*\(claude\).*serve\.councils/);
+  });
+
+  it("refuses a name the configuration does not declare, and an empty provider list", () => {
+    expect(() => withOverlay("serve:\n  providers: [claude, grok]\n  councils: []\n")).toThrow(/serve\.providers names "grok"/);
+    expect(() => withOverlay("serve:\n  councils: [capitoline-slow]\n")).toThrow(/serve\.councils names "capitoline-slow"/);
+    expect(() => withOverlay("serve:\n  providers: []\n")).toThrow(/serve\.providers/);
+  });
+});
+
 // The overlay the host writes, kept honest the same way test/e2e.config.yaml
 // is: it is the template docs/deploy.md §7 points at, so a key added to it by
 // mistake, or a host difference dropped from it, fails here.

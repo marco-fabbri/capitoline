@@ -15,10 +15,17 @@ fi
 if [[ -n "${CAPITOLINE_API_KEY:-}" ]]; then
   HDR+=(-H "Authorization: Bearer $CAPITOLINE_API_KEY")
 fi
+# What this gateway serves, from /health, which needs no key: a host whose
+# overlay narrows `serve` (docs/deploy.md §7) has fewer providers than the
+# repository file declares. When /health cannot be read, every model is tried.
+HEALTH=$(curl -sS ${HDR[@]+"${HDR[@]}"} "$BASE/health" 2>/dev/null || true)
+SERVED=$(jq -r '.models[].name' <<<"$HEALTH" 2>/dev/null || true)
+served() { [[ -z "$SERVED" ]] || grep -qxF "$1" <<<"$SERVED"; }
 MODELS=$(yq -r '.providers[].health_model' "$CFG" 2>/dev/null || grep -E '^\s+health_model:' "$CFG" | awk '{print $2}' || true)
 [[ -n "${MODELS// /}" ]] || { echo "smoke: no health_model found in $CFG" >&2; exit 1; }
 fail=0
 for m in $MODELS; do
+  if ! served "$m"; then printf '%-22s %s\n' "$m" "skipped (not served by this gateway)"; continue; fi
   : > "$TMP"
   resp=$(curl -sS ${HDR[@]+"${HDR[@]}"} -o "$TMP" -w '%{http_code}' -H 'content-type: application/json' \
     -d "{\"model\":\"$m\",\"reasoning_effort\":\"low\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: ok\"}]}" \
@@ -41,8 +48,11 @@ done
 # SMOKE_IMAGE_MODEL names the image model to try (scripts/update-cli.sh sets
 # it to the updated CLI's own); otherwise the first one the configuration declares.
 IMG="${SMOKE_IMAGE_MODEL:-}"
+[[ -n "${IMG// /}" ]] || IMG=$(jq -r '[.models[] | select(.kind == "image") | .name][0] // empty' <<<"$HEALTH" 2>/dev/null || true)
 [[ -n "${IMG// /}" ]] || IMG=$(yq -r '.providers[].models | to_entries[] | select(.value.kind == "image") | .key' "$CFG" 2>/dev/null | head -1 || true)
 [[ -n "${IMG// /}" ]] || IMG=$(grep -E 'kind:[[:space:]]*image' "$CFG" | grep -vE '^[[:space:]]*#' | head -1 | awk -F: '{print $1}' | tr -d ' ' || true)
+# A host that serves no image model has no image line at all.
+[[ -n "${IMG// /}" ]] && ! served "$IMG" && IMG=""
 MIN=$(yq -r '[.providers[].image.min_bytes] | map(select(. != null)) | .[0] // ""' "$CFG" 2>/dev/null || true)
 [[ -n "${MIN// /}" ]] || MIN=$(grep -E '^[[:space:]]+min_bytes:' "$CFG" | head -1 | awk '{print $2}' || true)
 [[ "$MIN" =~ ^[0-9]+$ ]] || MIN=0

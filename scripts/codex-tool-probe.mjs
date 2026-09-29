@@ -18,6 +18,7 @@ import { modelSpecs } from "../dist/providers/adapter.js";
 
 const cfg = loadConfig("config/capitoline.yaml", process.env.CAPITOLINE_OVERLAY || "/etc/capitoline/overlay.yaml");
 const codex = cfg.providers.codex;
+if (!codex) { console.error("codex-tool-probe: codex is not served on this host (serve.providers in the overlay)"); process.exit(2); }
 const name = process.argv[2] ?? codex.health_model;
 const model = modelSpecs("codex", codex).find((m) => m.name === name);
 if (!model) { console.error(`codex-tool-probe: no Codex model "${name}"`); process.exit(2); }

@@ -295,9 +295,14 @@ providers:
     system_prompt_flag: <flag> | null      # null = prepended to the prompt with a role marker
     system_prompt_flag_prefix: <flag> | null  # required; set = <prefix> <flag>="<text>" (Codex), null = <flag> <text>
     prompt_via: stdin
+serve:                                     # optional; absent = everything declared
+  providers: [<id>]                        # closed: a provider added later stays out
+  councils: [<name>]
 ```
 
 The real file with verified values for the three CLIs is `config/capitoline.yaml`. Antigravity encodes effort in the model id (`gemini-3.8-flash-low`), hence `effort_suffix`. The four flag keys have no default: a deployed file that predates them fails validation naming the missing key, rather than inheriting a default and building a command line nobody verified.
+
+`serve`, which only a host's overlay sets, narrows what that host serves. It is applied when the configuration is loaded, before anything else reads it, so a provider left out is never built, probed or listed, and a council that stays is checked on the chains that remain (docs/deploy.md §7). The lists name what is in rather than what is out, so that a provider or a council the repository adds later does not appear on a host that chose a subset; a council that trimming leaves with fewer than two seats or no judge is refused, not dropped, because dropping it would answer a client's request for it with a 404 nobody decided.
 
 ## 9. Deployment on the host
 
