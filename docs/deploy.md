@@ -15,6 +15,12 @@ ways, and Cloudflare is only one of them:
 - **On a network of your own, without Cloudflare** (§8.2): the gateway
   listens on the host's address and its own API keys (§8.1) are the door.
 
+**The short way.** `deploy/ansible` does §1 to §8, §7.1 and §11 of this
+document from your own computer over SSH (`site.yml`), then, after the logins,
+restarts the service and runs the checks of §6 and §12 (`verify.yml`). Every
+task names the section it comes from; this document is where each step is
+explained, and the way to do it by hand.
+
 Three steps need the owner of each subscription, with a browser on their own
 computer: the Claude login (§6.1), the Codex device code (§6.2) and the
 Antigravity login (§6.3). A host that serves only some of them — one

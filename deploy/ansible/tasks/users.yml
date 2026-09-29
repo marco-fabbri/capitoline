@@ -29,6 +29,23 @@
     state: directory
     mode: "0755"
 
+# A dry run on a host not built yet stops here: every later step installs as,
+# or hands a file to, a user that a dry run does not create.
+- name: Does runner exist?
+  ansible.builtin.getent:
+    database: passwd
+    key: runner
+    fail_key: false
+
+- name: A dry run on a fresh host can show no more than this
+  ansible.builtin.debug:
+    msg: The users do not exist yet, so the rest cannot be simulated; run without --check to build.
+  when: ansible_check_mode and not getent_passwd.runner
+
+- name: Stop the dry run here
+  ansible.builtin.meta: end_host
+  when: ansible_check_mode and not getent_passwd.runner
+
 - name: The runner's uid, for its user bus
   ansible.builtin.command: id -u runner
   register: runner_id

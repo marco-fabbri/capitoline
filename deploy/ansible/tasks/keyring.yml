@@ -61,6 +61,14 @@
 
 # Enforced on every run, unlike the keyring password: this file is what keeps
 # the agent from running a command, so a hand edit that loosens it is drift.
+# Compared by meaning, not by text: agy rewrites the file in its own format
+# and leaves out `allowNonWorkspaceAccess` while it is false, its default.
+- name: Antigravity's permission file as it is
+  ansible.builtin.slurp:
+    src: /home/runner/.gemini/antigravity-cli/settings.json
+  register: agy_settings
+  failed_when: false
+
 - name: Antigravity's tools wait or are refused (§6.4)
   ansible.builtin.copy:
     dest: /home/runner/.gemini/antigravity-cli/settings.json
@@ -68,3 +76,9 @@
     owner: runner
     group: runner
     mode: "0644"
+  vars:
+    current: "{{ (agy_settings.content | b64decode | from_json) if agy_settings.content is defined else {} }}"
+  when: >-
+    current.toolPermission | default('') != 'strict' or
+    current.enableTerminalSandbox | default(false) != true or
+    current.allowNonWorkspaceAccess | default(false) != false
