@@ -524,9 +524,12 @@ the conversation directory.
 
 `codex` does the same with its built-in image generation, which runs on the
 ChatGPT subscription and needs no API key: the file lands in
-`/home/runner/.codex/generated_images/<thread-id>/call_<id>.png`, named after
+`/home/runner/.codex/generated_images/<thread-id>/`, a directory named after
 the thread id Codex announces at the start of the run, and nothing in the
-stream says it was made. The same helper serves both, as
+stream says it was made. The file's own name is the CLI's business and has
+changed once — `call_<id>.png` until September 2026, `exec-<uuid>.png`
+since, which left every Codex image collected as "no image" until the
+helper was changed to take any PNG in the thread's directory (2026-09-29). The same helper serves both, as
 `capitoline-collect-image codex <thread-id>`. The sudoers rule of §5 allows
 any arguments to this path, so the script's own check is what bounds them —
 an optional literal `codex` and one UUID, nothing else — and adding Codex

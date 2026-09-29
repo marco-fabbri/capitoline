@@ -9,12 +9,15 @@
 # Both CLIs write a generated image into their own home, never into the sandbox,
 # under a directory named after the id they announce at the start of the run:
 #   Antigravity  ~/.gemini/antigravity-cli/brain/<conversation_id>/image_*
-#   Codex        ~/.codex/generated_images/<thread_id>/call_*.png
+#   Codex        ~/.codex/generated_images/<thread_id>/*.png
+# Codex named the file call_<id>.png until September 2026 and exec-<uuid>.png
+# since; the directory is the thread's own and holds only generated images, so
+# any PNG in it is the one, whatever the CLI calls it next.
 set -euo pipefail
 uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 if [[ "${1:-}" == "codex" ]]; then
   cid="${2:-}"; [[ $# -eq 2 ]] || { echo "usage: $0 codex <thread-uuid>" >&2; exit 2; }
-  dir="$HOME/.codex/generated_images/$cid"; pattern="call_*"
+  dir="$HOME/.codex/generated_images/$cid"; pattern="*.png"
 else
   cid="${1:-}"; [[ $# -eq 1 ]] || { echo "usage: $0 [codex] <uuid>" >&2; exit 2; }
   dir="$HOME/.gemini/antigravity-cli/brain/$cid"; pattern="image_*"
