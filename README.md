@@ -19,6 +19,20 @@ Triad: every member answers, every member judges the others without knowing
 who wrote what, and a judge synthesizes. As in the Temple, the value is not
 in the agreement but in hearing the dissent before deciding.
 
+The council is Andrej Karpathy's idea, and the credit is his:
+[llm-council](https://github.com/karpathy/llm-council) is a local web app
+that sends a question to several models through OpenRouter, has them review
+and rank each other's answers anonymously, and lets a chairman model write
+the final response. Capitoline keeps those three stages and changes what is
+around them. The models are reached through their official CLIs, on your own
+subscriptions, with no pay-per-use API, and the council is a model name any
+OpenAI client or MCP client can ask for. Each seat is a model family with a
+fallback chain, not a single model. The judge is seated apart and blind by
+default: llm-council's chairman is a member, and here that is an option
+(`judge_allow_member`). The synthesis builds on the top-ranked answer and
+asserts nothing the answers do not support. And every change to the strategy
+was measured before it shipped (`docs/measurements/`).
+
 ## Run it
 
 Requirements: Linux for a deployment (Debian or Ubuntu; macOS works for development), Node 24.x (pinned in `.nvmrc`; `engines` is `>=24 <25`), and the CLIs `claude`, `codex`, `agy` installed and logged in, on subscriptions of your own, for the user that runs them. The shipped configuration seats all three in its councils and sizes its concurrency for a host of about 8 GB (the startup log says whether yours fits, design §4.1). A CLI that is missing or signed out is reported unhealthy and its models unavailable; the councils then seat the members that are left.
