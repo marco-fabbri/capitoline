@@ -1,0 +1,29 @@
+# The two councils of this measurement, added to the host overlay for as long
+# as it runs and removed after. They are capitoline-fast with one judge each,
+# a single model and no chain, so a judge that cannot be seated is a lost
+# synthesis rather than another model's.
+council:
+  capitoline-judge-sol61:
+    seats:
+      - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
+      - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
+      - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
+      - { family: open-weights, models: [antigravity-gpt-oss] }
+    judge: { family: best-available, models: [codex-gpt-6.1-sol] }
+    judge_allow_member: false
+    judge_blind: true
+    min_members: 2
+    ranking: false
+    stage_timeout_s: 300
+  capitoline-judge-sol6:
+    seats:
+      - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
+      - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
+      - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
+      - { family: open-weights, models: [antigravity-gpt-oss] }
+    judge: { family: best-available, models: [codex-gpt-6-sol] }
+    judge_allow_member: false
+    judge_blind: true
+    min_members: 2
+    ranking: false
+    stage_timeout_s: 300
