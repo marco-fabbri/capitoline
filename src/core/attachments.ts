@@ -9,12 +9,13 @@ import { CapitolineError, type Attachment } from "./types.js";
  * The four types are the ones every CLI that takes images accepts. The count
  * and the size are the gateway's own bounds: an image travels as base64 inside
  * a JSON body limited to 20 MB (src/server/app.ts), which stays the real cap on
- * volume, and a CLI run is one question, not an album. Eight rather than four
- * since 2026-10-01: a client's image judge compares six candidate photographs
- * in one question, and splitting the comparison would change what it judges.
+ * volume, and a CLI run is one question, not an album. Sixteen rather than four
+ * since 2026-10-01: a client's image judge compares a slot's whole shortlist in
+ * one question — two searches of up to six candidates each, twelve as a rule —
+ * and splitting the comparison would change what it judges.
  */
 const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
-export const MAX_ATTACHMENTS = 8;
+export const MAX_ATTACHMENTS = 16;
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 /** The media type without parameters, lower case: "image/JPEG; q=1" is image/jpeg. */
