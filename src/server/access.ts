@@ -53,8 +53,11 @@ export function callerOf(identity: Partial<Identity> | undefined | null): string
   return null;
 }
 
-// One body for every refusal, in the spec 8.3 shape, so the two 401 paths cannot drift.
-const DENIED = { error: { message: "missing or invalid credentials: an API key (Authorization: Bearer) or a Cloudflare Access token", type: "invalid_request_error", code: "unauthorized" } };
+// One body for every refusal, in the spec 8.3 shape, so the 401 paths cannot drift.
+// It names Cloudflare Access only on a gateway that checks it: elsewhere the
+// hint would send a caller looking for a credential that cannot help.
+const denial = (withAccess: boolean) => ({ error: { message: `missing or invalid credentials: an API key (Authorization: Bearer)${withAccess ? " or a Cloudflare Access token" : ""}`, type: "invalid_request_error", code: "unauthorized" } });
+const DENIED = denial(true);
 
 // Cloudflare Access signs with RS256 and publishes ES256 keys too; both are
 // asymmetric. Pinning them here rules out "none" and HMAC confusion by
@@ -113,11 +116,12 @@ export interface OAuthResource {
 export function createAuthMiddleware(opts: { access?: AccessOptions; keys: KeyAuthenticator; oauth?: OAuthResource }, log: Logger): RequestHandler {
   const access = opts.access ? createAccessMiddleware(opts.access, log) : undefined;
   const oauth = opts.oauth;
+  const refused = denial(access !== undefined);
   // A 401 on /mcp tells an OAuth client where to sign in (RFC 9728): without
   // the pointer, Claude on the web has no way to find the authorization server.
   const refuseMcp = (res: Parameters<RequestHandler>[1], error?: string): void => {
     res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${oauth!.resourceMetadataUrl}"${error ? `, error="${error}"` : ""}`);
-    res.status(401).json(DENIED);
+    res.status(401).json(refused);
   };
   return (req, res, next) => {
     const bearer = BEARER.exec(req.header("authorization") ?? "")?.[1];
@@ -125,7 +129,7 @@ export function createAuthMiddleware(opts: { access?: AccessOptions; keys: KeyAu
     // An OAuth token stands in for the key its owner signed in with, on the
     // resource it was issued for and nowhere else: the HTTP API takes keys.
     if (bearer !== undefined && bearer.startsWith("capo_at_") && oauth) {
-      if (!mcp) { res.status(401).json(DENIED); return; }
+      if (!mcp) { res.status(401).json(refused); return; }
       oauth.verifyAccessToken(bearer).then((info) => {
         const name = typeof info.extra?.keyName === "string" ? info.extra.keyName : undefined;
         if (!name) { refuseMcp(res, "invalid_token"); return; }
@@ -136,7 +140,7 @@ export function createAuthMiddleware(opts: { access?: AccessOptions; keys: KeyAu
     }
     if (bearer !== undefined && bearer.startsWith("cap_")) {
       const key = opts.keys.authenticateKey(bearer);
-      if (!key) { log.warn("api key rejected"); res.status(401).json(DENIED); return; }
+      if (!key) { log.warn("api key rejected"); res.status(401).json(refused); return; }
       res.locals.identity = { type: "key", name: key.name, sub: `key:${key.name}` } satisfies Identity;
       next();
       return;
@@ -148,7 +152,7 @@ export function createAuthMiddleware(opts: { access?: AccessOptions; keys: KeyAu
     const accessCredential = req.header("cf-access-jwt-assertion") !== undefined || /(?:^|;\s*)CF_Authorization=/.test(req.header("cookie") ?? "");
     if (mcp && !accessCredential && (access || opts.keys.hasKeys())) { refuseMcp(res); return; }
     if (access) { access(req, res, next); return; }
-    if (opts.keys.hasKeys()) { res.status(401).json(DENIED); return; }
+    if (opts.keys.hasKeys()) { res.status(401).json(refused); return; }
     next();
   };
 }

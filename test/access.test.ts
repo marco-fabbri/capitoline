@@ -131,6 +131,16 @@ describe("auth middleware: keys and Access together", () => {
     expect(other.body.who.email).toBe("a@b.c");
   });
 
+  it("names Cloudflare Access in the refusal only on a gateway that checks it", async () => {
+    const without = withKeys();
+    without.store.createKey("app-one", "test");
+    const r = await request(without.app).get("/x");
+    expect(r.status).toBe(401);
+    expect(r.body.error.message).toBe("missing or invalid credentials: an API key (Authorization: Bearer)");
+    const withAccess = await request(withKeys({ access: true }).app).get("/x").set("Authorization", "Bearer cap_nothing");
+    expect(withAccess.body.error.message).toContain("or a Cloudflare Access token");
+  });
+
   it("keeps the Access path unchanged when no key is presented", async () => {
     const { app: a } = withKeys({ access: true });
     expect((await request(a).get("/x")).status).toBe(401);
