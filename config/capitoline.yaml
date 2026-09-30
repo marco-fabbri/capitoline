@@ -239,7 +239,7 @@ providers:
     health_model: antigravity-gemini-flash
     # The manifest the official installer reads, for this host's platform
     # (linux_amd64; linux_arm64 on an ARM host, set in the overlay).
-    version: { args: [--version], verified: 1.2.13, latest: { manifest: "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json" } }
+    version: { args: [--version], verified: 1.2.14, latest: { manifest: "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json" } }
     health_fallback: [antigravity-gemini-3.7-flash]
     # `agy models` lists every id the CLI serves, the level inside the id: one
     # no entry below reaches is served as antigravity-<id> (docs/deploy.md §7.2).

@@ -36,6 +36,7 @@ procedure below, which a person runs.
 | Claude Code (`claude`) | 2.1.285 | 2026-09-29 | with `scripts/update-cli.sh`, smoke test passed |
 | Codex CLI (`codex`) | 0.159.1 | 2026-09-29 | with `scripts/update-cli.sh`: no new feature, image and tool probe passed; `codex debug models` lists a new model, GPT-6.1-Sol, which discovery adds as `codex-gpt-6.1-sol`; fixture `debug-models.json` re-captured |
 | Codex CLI (`codex`) | 0.159.2 | 2026-09-30 | with `scripts/update-cli.sh`: no new feature, image and tool probe passed, model list unchanged |
+| Antigravity CLI (`agy`) | 1.2.14 | 2026-09-30 | with `scripts/update-cli.sh`, image smoke test passed; a command request is still refused (`denied_actions`), `agy models` unchanged |
 
 Add a row for every update, newest last.
 
