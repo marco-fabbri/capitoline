@@ -97,6 +97,13 @@ describe("the availability messages", () => {
     expect(describeAvailability(cfg, { kind: "paused", provider: "codex", scope: "text:gpt-6.1-sol", until: at }))
       .toBe("codex-gpt-6.1-sol paused until 2026-10-03 18:49 UTC: its quota is used up.");
   });
+  it("names only the models of the paused kind, when text and images share a CLI model", () => {
+    // 2026-10-01: Antigravity's image quota ran out and the notice named two text models too.
+    expect(describeAvailability(cfg, { kind: "paused", provider: "antigravity", scope: "image:gemini-3.8-flash-low", until: at }))
+      .toBe("antigravity-image paused until 2026-10-03 18:49 UTC: its quota is used up.");
+    expect(describeAvailability(cfg, { kind: "paused", provider: "antigravity", scope: "text:gemini-3.8-flash-low", until: at }))
+      .not.toContain("antigravity-image");
+  });
   it("says what came back and after how long, and names an id no model declares as itself", () => {
     expect(describeAvailability(cfg, { kind: "resumed", provider: "codex", scope: "text:gpt-6.1-sol", pausedMs: 5 * 3600_000 + 12 * 60_000 }))
       .toBe("codex-gpt-6.1-sol available again, after 5h 12m.");

@@ -84,13 +84,19 @@ export function describeCatalogChange(cfg: Config, provider: string, change: Cat
   return `${provider} models changed. ${parts.join("; ")}.`;
 }
 
-// What a scope is called here: the gateway names whose CLI id it is (an
-// effort suffix included, as Antigravity's ids carry one), else the id itself.
+// What a scope is called here: the gateway names of that kind whose CLI id it
+// is (an effort suffix included, as Antigravity's ids carry one), else the id
+// itself. The kind matters: Antigravity draws with the same CLI model its text
+// names answer with, and an image quota pauses only the image model, so a
+// notice naming the text models too would report a pause that is not there.
 function scopeName(cfg: Config, provider: string, scope: string | null): string {
   if (scope === null) return provider;
+  const kind = scope.slice(0, scope.indexOf(":"));
   const cliId = scope.slice(scope.indexOf(":") + 1);
   const models = cfg.providers[provider]?.models ?? {};
-  const names = Object.entries(models).filter(([, m]) => cliId === m.cli_model || cliId.startsWith(`${m.cli_model}-`)).map(([n]) => n);
+  const names = Object.entries(models)
+    .filter(([, m]) => (m.kind ?? "text") === kind && (cliId === m.cli_model || cliId.startsWith(`${m.cli_model}-`)))
+    .map(([n]) => n);
   return names.length > 0 ? names.join(", ") : cliId;
 }
 
