@@ -43,7 +43,7 @@
     - name: What is left to do by hand
       ansible.builtin.debug:
         msg: "{{ ['Log in to each CLI, as runner, from an SSH session of your own (docs/deploy.md §6):']
-          + (['  sudo -iu runner claude                       # /login, then /exit'] if 'claude' in capitoline_providers else [])
+          + (['  sudo -iu runner claude                       # answer Yes to trust the folder, /login, then /exit'] if 'claude' in capitoline_providers else [])
           + (['  sudo -iu runner codex login --device-auth'] if 'codex' in capitoline_providers else [])
           + (['  sudo -iu runner agy                          # log in, then /quit'] if 'antigravity' in capitoline_providers else [])
           + ['Then: ansible-playbook verify.yml, and the first key (docs/deploy.md §8.1).'] }}"

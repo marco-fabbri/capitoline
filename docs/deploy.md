@@ -153,8 +153,12 @@ The interactive login, from an SSH session of your own: the CLI prints a URL,
 you open it on your own computer, sign in and paste the code back.
 
 ```sh
-sudo -iu runner claude      # /login, follow the URL, paste the code, then /exit
+sudo -iu runner claude      # answer Yes to trust the folder, /login, follow the URL, paste the code, then /exit
 ```
+
+The first start asks for a colour theme and whether to trust the folder it
+was started in, the runner's home: answer Yes, or the CLI exits before the
+login.
 
 The credentials land in `/home/runner/.claude/.credentials.json` (mode
 0600) and refresh themselves. Verify the way the gateway will call it:
