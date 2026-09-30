@@ -634,7 +634,21 @@ served: codex-gpt-6-luna (used by health_model, council capitoline).". A
 model the configuration still uses is named with where it is used, because
 that is the change worth reading. The same channel carries one message per
 new CLI version the daily check finds (`docs/update-clis.md`), with the
-command that installs it. Nothing else is ever sent, and a failed POST is
+command that installs it, and these:
+
+- **a quota used up**, when a provider or one of its models is refused with
+  the instant its quota frees up: "antigravity-image paused until 2026-10-03
+  18:49 UTC: its quota is used up." A refusal that names no reset only starts
+  the gateway's own backoff, a minute that doubles, and is not sent;
+- **available again**, when such a pause ends after standing an hour or more,
+  so a five-hour window reopening every few hours stays quiet. The end of a
+  pause is nothing happening, so the gateway looks once a minute; one that ran
+  out while the service was stopped is told when it starts again;
+- **signed out**, when a request or a health check finds a CLI's login gone,
+  with what to do, and **signed in again** when a check finds it back.
+
+Each is sent once: a restart does not repeat a pause already announced.
+Nothing else is ever sent, and a failed POST is
 logged and forgotten.
 
 Any endpoint that takes a text POST works. [ntfy](https://ntfy.sh) is the

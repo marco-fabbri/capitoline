@@ -3,7 +3,7 @@ import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import { loadConfig } from "../src/config.js";
 import { createLogger } from "../src/log.js";
-import { createNotifier, describeCatalogChange } from "../src/notify.js";
+import { createNotifier, describeAvailability, describeCatalogChange } from "../src/notify.js";
 
 const cfg = loadConfig("config/capitoline.yaml");
 const log = createLogger("t");
@@ -66,5 +66,25 @@ describe("notifications", () => {
       .toBe("codex models changed. new: codex-gpt-7-nova; no longer served: codex-gpt-6-luna (used by health_model, council capitoline, council capitoline-fast), codex-gpt-5.6-terra (used by council capitoline, council capitoline-fast), codex-image (used by image model).");
     expect(describeCatalogChange(cfg, "antigravity", { added: [], removed: ["antigravity-gemini-3.6-flash-low"] }))
       .toBe("antigravity models changed. no longer served: antigravity-gemini-3.6-flash-low.");
+  });
+});
+
+describe("the availability messages", () => {
+  const at = Date.UTC(2026, 9, 3, 18, 49);
+  it("says what paused, until when, and whose quota", () => {
+    expect(describeAvailability(cfg, { kind: "paused", provider: "claude", scope: null, until: at }))
+      .toBe("claude paused until 2026-10-03 18:49 UTC: the subscription's quota is used up.");
+    expect(describeAvailability(cfg, { kind: "paused", provider: "codex", scope: "text:gpt-6.1-sol", until: at }))
+      .toBe("codex-gpt-6.1-sol paused until 2026-10-03 18:49 UTC: its quota is used up.");
+  });
+  it("says what came back and after how long, and names an id no model declares as itself", () => {
+    expect(describeAvailability(cfg, { kind: "resumed", provider: "codex", scope: "text:gpt-6.1-sol", pausedMs: 5 * 3600_000 + 12 * 60_000 }))
+      .toBe("codex-gpt-6.1-sol available again, after 5h 12m.");
+    expect(describeAvailability(cfg, { kind: "resumed", provider: "codex", scope: "text:gpt-9", pausedMs: 3 * 86_400_000 + 2 * 3600_000 }))
+      .toBe("gpt-9 available again, after 3d 2h.");
+  });
+  it("says what to do when a provider signs out", () => {
+    expect(describeAvailability(cfg, { kind: "signed_out", provider: "codex" })).toMatch(/^codex is signed out: log in again as runner/);
+    expect(describeAvailability(cfg, { kind: "signed_in", provider: "codex" })).toBe("codex is signed in again.");
   });
 });

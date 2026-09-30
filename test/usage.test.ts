@@ -278,9 +278,9 @@ describe("UsageStore", () => {
     // A provider-wide pause and one of that provider's models coexist, as they
     // do in memory: sqlite orders the null model first.
     expect(s.pauses(now)).toEqual([
-      { provider: "antigravity", model: null, until: now + 60_000, strikes: 1 },
-      { provider: "antigravity", model: "antigravity-image", until: now + 5 * 24 * 3600_000, strikes: 2 },
-      { provider: "claude", model: "claude-fable", until: now + 3600_000, strikes: 3 },
+      { provider: "antigravity", model: null, until: now + 60_000, strikes: 1, announcedAt: null },
+      { provider: "antigravity", model: "antigravity-image", until: now + 5 * 24 * 3600_000, strikes: 2, announcedAt: null },
+      { provider: "claude", model: "claude-fable", until: now + 3600_000, strikes: 3, announcedAt: null },
     ]);
     s.close();
   });
@@ -296,8 +296,8 @@ describe("UsageStore", () => {
     s.setPause("a", "a-1", now + 60_000, 1, now);
     s.setPause("a", "a-1", now + 120_000, 2, now);
     expect(s.pauses(now)).toEqual([
-      { provider: "a", model: null, until: now + 3_660_000, strikes: 2 },
-      { provider: "a", model: "a-1", until: now + 120_000, strikes: 2 },
+      { provider: "a", model: null, until: now + 3_660_000, strikes: 2, announcedAt: null },
+      { provider: "a", model: "a-1", until: now + 120_000, strikes: 2, announcedAt: null },
     ]);
     s.close();
   });
@@ -307,18 +307,18 @@ describe("UsageStore", () => {
     const now = 1_000_000_000_000;
     s.setPause("a", null, now - 1, 4, now - 60_000);
     s.setPause("a", "a-1", now + 1000, 1, now);
-    expect(s.pauses(now)).toEqual([{ provider: "a", model: "a-1", until: now + 1000, strikes: 1 }]);
+    expect(s.pauses(now)).toEqual([{ provider: "a", model: "a-1", until: now + 1000, strikes: 1, announcedAt: null }]);
     // The read destroys nothing: the clock comes from the caller, and one that
     // jumped ahead (a restored snapshot, an NTP step at boot) would otherwise
     // wipe a five-day pause on its way past it, with no trace anywhere.
     expect(s.pauses(now - 120_000)).toEqual([
-      { provider: "a", model: null, until: now - 1, strikes: 4 },
-      { provider: "a", model: "a-1", until: now + 1000, strikes: 1 },
+      { provider: "a", model: null, until: now - 1, strikes: 4, announcedAt: null },
+      { provider: "a", model: "a-1", until: now + 1000, strikes: 1, announcedAt: null },
     ]);
     // Collecting them is the separate step, and it says how many it took.
     expect(s.prunePauses(now)).toBe(1);
     expect(s.prunePauses(now)).toBe(0);
-    expect(s.pauses(now - 120_000)).toEqual([{ provider: "a", model: "a-1", until: now + 1000, strikes: 1 }]);
+    expect(s.pauses(now - 120_000)).toEqual([{ provider: "a", model: "a-1", until: now + 1000, strikes: 1, announcedAt: null }]);
     s.close();
   });
 
@@ -328,7 +328,7 @@ describe("UsageStore", () => {
     s.setPause("a", null, now + 60_000, 1, now);
     s.setPause("a", "a-1", now + 120_000, 2, now);
     s.clearPause("a", null);
-    expect(s.pauses(now)).toEqual([{ provider: "a", model: "a-1", until: now + 120_000, strikes: 2 }]);
+    expect(s.pauses(now)).toEqual([{ provider: "a", model: "a-1", until: now + 120_000, strikes: 2, announcedAt: null }]);
     s.clearPause("a", "a-1");
     expect(s.pauses(now)).toEqual([]);
     s.close();

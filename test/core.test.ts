@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Core } from "../src/core/core.js";
+import { Core, type AvailabilityEvent } from "../src/core/core.js";
 import { UsageStore } from "../src/usage/store.js";
 import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
@@ -169,7 +169,7 @@ describe("Core", () => {
     // Rewritten in the store under the id, with its strikes, so the next start
     // finds the new shape and the translation runs once.
     // The column holds a scope: the CLI id qualified by the kind of request.
-    expect(usage.pauses(t)).toEqual([{ provider: "antigravity", model: "text:gemini-3.1-pro-high", until: t + 3_600_000, strikes: 2 }]);
+    expect(usage.pauses(t)).toEqual([{ provider: "antigravity", model: "text:gemini-3.1-pro-high", until: t + 3_600_000, strikes: 2, announcedAt: null }]);
   });
   it("drops a restored pause whose row names neither a CLI id nor a model still declared", async () => {
     const t = 1_000_000;
@@ -293,7 +293,7 @@ describe("Core", () => {
     expect(await fine).toEqual(OK);                       // done arrives after the model pause was installed
     expect(core.pauseRemainingS("b", "b-1")).toBe(3660);
     // The row stands with it, and carries the strikes the success zeroed.
-    expect(usage.pauses(t)).toEqual([{ provider: "b", model: "text:b-1", until: t + 3_660_000, strikes: 0 }]);
+    expect(usage.pauses(t)).toEqual([{ provider: "b", model: "text:b-1", until: t + 3_660_000, strikes: 0, announcedAt: null }]);
     await expect(drain(core.execute(req("b-1"), { source: "http" }))).rejects.toMatchObject({ kind: "rate_limited" });
     usage.close();
   });
@@ -341,7 +341,7 @@ describe("Core", () => {
     const { core, a } = make({ now: () => t, usage });
     a.script = [{ type: "error", kind: "rate_limited", detail: "reached your a-1 limit", scope: "model" }];
     await drain(core.execute(req("a-1"), { source: "http" }));
-    expect(usage.pauses(t)).toEqual([{ provider: "a", model: "text:a-1", until: t + 60_000, strikes: 1 }]);
+    expect(usage.pauses(t)).toEqual([{ provider: "a", model: "text:a-1", until: t + 60_000, strikes: 1, announcedAt: null }]);
     t += 61_000;
     a.script = OK;
     expect(await drain(core.execute(req("a-1"), { source: "http" }))).toEqual(OK);
@@ -511,7 +511,7 @@ describe("Core images", () => {
     expect(await drain(core.execute(req("c-text"), { source: "http" }))).toEqual(OK);
     expect(core.providerStates()[0]).toMatchObject({ pausedUntil: null, strikes: 0 });
     // The stored scope says which quota it was, so a restart keeps them apart.
-    expect(usage.pauses(t)).toEqual([{ provider: "c", model: "image:gemini-3.8-flash-low", until: t + 432_060_000, strikes: 1 }]);
+    expect(usage.pauses(t)).toEqual([{ provider: "c", model: "image:gemini-3.8-flash-low", until: t + 432_060_000, strikes: 1, announcedAt: null }]);
   });
   it("records the image model a refusal names, so /v1/usage can date a change of it", async () => {
     // A successful generation names only the agent; the quota refusal's body
@@ -926,5 +926,101 @@ describe("Core council availability", () => {
     });
     core.listModels();
     expect(seen[0]).toEqual(["claude-opus", "claude-sonnet", "claude-haiku", "codex-astra"]);
+  });
+});
+
+// What server.notify is told about providers and models going away and coming
+// back (docs/deploy.md §7.2). The listener stands in for the notifier.
+describe("availability notices", () => {
+  function makeTold(now: () => number, usage = new UsageStore(":memory:"), listen = true) {
+    const a = new FakeProvider("a", ["a-1", "a-2"], OK, 1);
+    const b = new FakeProvider("b", ["b-1"], OK, 2);
+    const told: AvailabilityEvent[] = [];
+    const core = new Core([a, b], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now, onAvailability: listen ? (e) => told.push(e) : undefined });
+    return { a, b, usage, core, told };
+  }
+  const quota = (retryAfterS: number, scope?: "model"): ProviderEvent[] => [{ type: "error", kind: "rate_limited", detail: "quota", retryAfterS, ...(scope ? { scope } : {}) }];
+
+  it("tells a quota pause when it starts, and nothing for the backoff after a refusal with no reset", async () => {
+    let t = 1_000_000;
+    const { a, b, core, told } = makeTold(() => t);
+    a.script = quota(7200);
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    b.script = [{ type: "error", kind: "rate_limited", detail: "429" }];
+    await drain(core.execute(req("b-1"), { source: "http" }));
+    expect(told).toEqual([{ kind: "paused", provider: "a", scope: null, until: t + 7_260_000 }]);
+  });
+
+  it("tells the end of a quota pause that stood an hour or more, and not of a shorter one", async () => {
+    let t = 1_000_000;
+    const { a, b, core, told } = makeTold(() => t);
+    a.script = quota(7200);
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    b.script = quota(600);
+    await drain(core.execute(req("b-1"), { source: "http" }));
+    core.sweepPauses();
+    expect(told.map((e) => e.kind)).toEqual(["paused", "paused"]);
+    t += 7_261_000;
+    core.sweepPauses();
+    core.sweepPauses();
+    expect(told.slice(2)).toEqual([{ kind: "resumed", provider: "a", scope: null, pausedMs: 7_260_000 }]);
+  });
+
+  it("names the model when the quota was the model's own", async () => {
+    let t = 1_000_000;
+    const { a, core, told } = makeTold(() => t);
+    a.script = quota(7200, "model");
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(told).toEqual([{ kind: "paused", provider: "a", scope: "text:a-1", until: t + 7_260_000 }]);
+  });
+
+  it("does not tell a pause twice across a restart, and tells its end, even one that came while stopped", async () => {
+    let t = 1_000_000;
+    const usage = new UsageStore(":memory:");
+    const first = makeTold(() => t, usage);
+    first.a.script = quota(7200);
+    await drain(first.core.execute(req("a-1"), { source: "http" }));
+    expect(usage.pauses(t)[0].announcedAt).toBe(t);
+    // Restarted while the pause stands: nothing new, then its end at the sweep.
+    const second = makeTold(() => t, usage);
+    second.core.restorePauses();
+    expect(second.told).toEqual([]);
+    t += 7_261_000;
+    second.core.sweepPauses();
+    expect(second.told).toEqual([{ kind: "resumed", provider: "a", scope: null, pausedMs: 7_260_000 }]);
+    // Restarted after it ran out, with nobody watching: told at the restore.
+    first.b.script = quota(7200);
+    await drain(first.core.execute(req("b-1"), { source: "http" }));
+    t += 7_261_000;
+    const third = makeTold(() => t, usage);
+    third.core.restorePauses();
+    expect(third.told).toEqual([{ kind: "resumed", provider: "b", scope: null, pausedMs: 7_260_000 }]);
+  });
+
+  it("records nothing as announced when nobody listens", async () => {
+    let t = 1_000_000;
+    const { a, core, usage } = makeTold(() => t, new UsageStore(":memory:"), false);
+    a.script = quota(7200);
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(usage.pauses(t)[0].announcedAt).toBeNull();
+  });
+
+  it("tells a provider signing out once, from a request or a probe, and signing back in", async () => {
+    let t = 1_000_000;
+    const { a, b, core, told } = makeTold(() => t);
+    a.script = [{ type: "error", kind: "auth_expired", detail: "Login expired" }];
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    a.healthResult = { ok: false, kind: "auth_expired", checkedAt: 0 };
+    await core.checkHealth("a");
+    a.healthResult = { ok: true, checkedAt: 0 };
+    await core.checkHealth("a");
+    b.healthResult = { ok: false, kind: "auth_expired", checkedAt: 0 };
+    await core.checkHealth("b");
+    await core.checkHealth("b");
+    expect(told).toEqual([
+      { kind: "signed_out", provider: "a" },
+      { kind: "signed_in", provider: "a" },
+      { kind: "signed_out", provider: "b" },
+    ]);
   });
 });

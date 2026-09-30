@@ -1,6 +1,7 @@
 import type { Config } from "./config.js";
 import type { Logger } from "./log.js";
 import type { CatalogChange } from "./providers/adapter.js";
+import type { AvailabilityEvent } from "./core/core.js";
 
 /** Sends one message. Never throws and never waits: a notification is a side effect, not part of any request. */
 export type Notify = (message: string) => void;
@@ -60,4 +61,30 @@ export function describeCatalogChange(cfg: Config, provider: string, change: Cat
     }).join(", ")}`);
   }
   return `${provider} models changed. ${parts.join("; ")}.`;
+}
+
+// What a scope is called here: the gateway names whose CLI id it is (an
+// effort suffix included, as Antigravity's ids carry one), else the id itself.
+function scopeName(cfg: Config, provider: string, scope: string | null): string {
+  if (scope === null) return provider;
+  const cliId = scope.slice(scope.indexOf(":") + 1);
+  const models = cfg.providers[provider]?.models ?? {};
+  const names = Object.entries(models).filter(([, m]) => cliId === m.cli_model || cliId.startsWith(`${m.cli_model}-`)).map(([n]) => n);
+  return names.length > 0 ? names.join(", ") : cliId;
+}
+
+const when = (ms: number): string => new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+const span = (ms: number): string => {
+  const h = Math.floor(ms / 3600_000), d = Math.floor(h / 24);
+  return d > 0 ? `${d}d ${h % 24}h` : `${h}h ${Math.floor((ms % 3600_000) / 60_000)}m`;
+};
+
+/** One line for a quota pause starting or ending, or a provider signing out or back in. */
+export function describeAvailability(cfg: Config, e: AvailabilityEvent): string {
+  switch (e.kind) {
+    case "paused": return `${scopeName(cfg, e.provider, e.scope)} paused until ${when(e.until)}: ${e.scope === null ? "the subscription's" : "its"} quota is used up.`;
+    case "resumed": return `${scopeName(cfg, e.provider, e.scope)} available again, after ${span(e.pausedMs)}.`;
+    case "signed_out": return `${e.provider} is signed out: log in again as runner (docs/deploy.md §6), then restart the service.`;
+    case "signed_in": return `${e.provider} is signed in again.`;
+  }
 }

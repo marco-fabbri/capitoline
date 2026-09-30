@@ -44,7 +44,28 @@ export interface CoreOptions {
   imageQuotas?: Record<string, number>;
   /** Told of every change a fresh listing makes to a provider's catalog; never of a restore at startup. */
   onCatalogChange?: (provider: string, change: CatalogChange) => void;
+  /** Told when a quota pause starts and, if it was long, ends, and when a provider signs out or back in. */
+  onAvailability?: (event: AvailabilityEvent) => void;
 }
+
+/**
+ * What server.notify is told about a provider or a model going away and coming
+ * back. `scope` is null for the whole provider, otherwise a `scopeOf` scope
+ * (`image:gemini-3.1-flash-image`).
+ *
+ * `paused` only for a quota the provider said when it frees up: a pause with
+ * no reset is the gateway's own backoff after a bare refusal, a minute that
+ * doubles, and not news. `resumed` only for such a pause, and only when it
+ * stood at least RESUME_NOTICE_MS: a short window reopening every few hours
+ * would drown the rest.
+ */
+export type AvailabilityEvent =
+  | { kind: "paused"; provider: string; scope: string | null; until: number }
+  | { kind: "resumed"; provider: string; scope: string | null; pausedMs: number }
+  | { kind: "signed_out"; provider: string }
+  | { kind: "signed_in"; provider: string };
+
+export const RESUME_NOTICE_MS = 3600_000;
 
 const D7 = 7 * 24 * 3600_000;
 /** The window of the per-caller breakdown /health serves. */
@@ -202,6 +223,66 @@ export class Core {
   // and Antigravity's), so the provider is part of the key. The separator is a
   // NUL, which no provider id or model id can contain.
   private pauseKey(providerId: string, scope: string): string { return `${providerId}\u0000${scope}`; }
+
+  // The quota pauses whose start was announced, by the provider and the scope
+  // ("" for the whole provider), with when it was announced and when the
+  // pause ends as it stands. Rebuilt from the store at startup.
+  private readonly announced = new Map<string, { provider: string; scope: string | null; at: number; until: number }>();
+
+  private tell(event: AvailabilityEvent): void {
+    try { this.opts.onAvailability?.(event); }
+    catch (e) { this.opts.log.warn({ provider: event.provider, err: String(e) }, "availability listener threw"); }
+  }
+
+  // Called after a pause was installed or grown. `fresh` is whether nothing
+  // stood before it: a pause that only grew was announced, or not, when it
+  // started, and its new end is all there is to keep.
+  private pauseInstalled(provider: string, scope: string | null, until: number, quota: boolean, fresh: boolean): void {
+    if (!this.opts.onAvailability) return;
+    const key = `${provider}\u0000${scope ?? ""}`;
+    if (!fresh) {
+      const own = this.announced.get(key);
+      if (own) own.until = until;
+      return;
+    }
+    // A pause announced before, which expired before the sweep came round.
+    if (this.announced.has(key)) this.retire(key);
+    if (!quota) { this.usage.markPauseAnnounced(provider, scope, null); return; }
+    this.announced.set(key, { provider, scope, at: this.now(), until });
+    this.usage.markPauseAnnounced(provider, scope, this.now());
+    this.tell({ kind: "paused", provider, scope, until });
+  }
+
+  private retire(key: string): void {
+    const own = this.announced.get(key);
+    if (!own) return;
+    this.announced.delete(key);
+    // The row can outlive the pause (it goes on the next success or the next
+    // start): unmarked, so a restart does not tell the same end again.
+    this.usage.markPauseAnnounced(own.provider, own.scope, null);
+    const pausedMs = own.until - own.at;
+    if (pausedMs >= RESUME_NOTICE_MS) this.tell({ kind: "resumed", provider: own.provider, scope: own.scope, pausedMs });
+  }
+
+  /** Announces the end of every announced pause that has run out. Cheap: no CLI, no store read. */
+  sweepPauses(): void {
+    for (const [key, own] of [...this.announced]) if (own.until <= this.now()) this.retire(key);
+  }
+
+  startPauseSweep(intervalMs: number): () => void {
+    const timer = setInterval(() => this.sweepPauses(), intervalMs);
+    timer.unref();
+    return () => clearInterval(timer);
+  }
+
+  // Signed out and back in, told on the transition only: a provider that stays
+  // signed out answers auth_expired to every probe, and that is one piece of
+  // news, not one an hour.
+  private healthChanged(provider: string, before: HealthStatus | null, after: HealthStatus): void {
+    const wasOut = before?.kind === "auth_expired";
+    if (after.kind === "auth_expired" && !wasOut) this.tell({ kind: "signed_out", provider });
+    else if (wasOut && after.ok) this.tell({ kind: "signed_in", provider });
+  }
 
   // The id this request will actually be sent under, which is what its pause
   // is keyed by. Image requests carry no effort and take the default.
@@ -604,12 +685,16 @@ export class Core {
       // what the Fable capture of 2026-09-21 showed happening.
       if (ev.scope === "model") { this.pauseModel(id, scope, retryAfterS, key); return; }
       const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** s.strikes) * 60_000;
+      const fresh = !this.isPaused(s);
       s.strikes++;
       s.pausedUntil = Math.max(s.pausedUntil ?? 0, this.now() + waitMs);
       this.usage.setPause(id, null, s.pausedUntil, s.strikes, this.now());
+      this.pauseInstalled(id, null, s.pausedUntil, retryAfterS !== undefined, fresh);
       this.opts.log.warn({ provider: id, seconds: Math.round((s.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: s.strikes }, "provider paused after rate limit");
     } else if (kind === "auth_expired") {
+      const before = s.health;
       s.health = { ok: false, kind, detail: "auth_expired reported by a request", checkedAt: this.now() };
+      this.healthChanged(id, before, s.health);
       this.opts.log.error({ provider: id }, "provider authentication expired");
     }
   }
@@ -623,10 +708,12 @@ export class Core {
     const key = precomputed ?? this.pauseKey(providerId, scope);
     const p = this.modelPauses.get(key) ?? { pausedUntil: 0, strikes: 0 };
     const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** p.strikes) * 60_000;
+    const fresh = p.pausedUntil <= this.now();
     p.strikes++;
     p.pausedUntil = Math.max(p.pausedUntil, this.now() + waitMs);
     this.modelPauses.set(key, p);
     this.usage.setPause(providerId, scope, p.pausedUntil, p.strikes, this.now());
+    this.pauseInstalled(providerId, scope, p.pausedUntil, retryAfterS !== undefined, fresh);
     this.opts.log.warn({ provider: providerId, model: scope, seconds: Math.round((p.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: p.strikes }, "model paused after a rate limit");
   }
 
@@ -679,6 +766,15 @@ export class Core {
 
   restorePauses(): void {
     const rows = this.usage.pauses(this.now());
+    // Announced pauses that ran out while no process was watching: their end
+    // is still news, so it is told now, before the rows go.
+    if (this.opts.onAvailability) {
+      for (const row of this.usage.expiredAnnouncedPauses(this.now())) {
+        const scope = row.model === null ? null : this.scopeOfRow(row.provider, row.model);
+        const pausedMs = row.until - row.announcedAt!;
+        if (pausedMs >= RESUME_NOTICE_MS) this.tell({ kind: "resumed", provider: row.provider, scope: row.model === null ? null : (scope ?? row.model), pausedMs });
+      }
+    }
     const removed = this.usage.prunePauses(this.now());
     if (removed > 0) this.opts.log.info({ removed }, "expired pauses pruned");
     for (const row of rows) {
@@ -718,6 +814,10 @@ export class Core {
           this.opts.log.info({ provider: row.provider, from: row.model, to: scope }, "pause row translated to the current shape");
         }
         this.modelPauses.set(this.pauseKey(row.provider, scope), { pausedUntil: row.until, strikes: row.strikes });
+        if (row.announcedAt !== null && this.opts.onAvailability) this.announced.set(`${row.provider}\u0000${scope}`, { provider: row.provider, scope, at: row.announcedAt, until: row.until });
+      }
+      if (row.model === null && row.announcedAt !== null && this.opts.onAvailability && this.states.has(row.provider)) {
+        this.announced.set(`${row.provider}\u0000`, { provider: row.provider, scope: null, at: row.announcedAt, until: row.until });
       }
       this.opts.log.info({ provider: row.provider, model: row.model, seconds: Math.round((row.until - this.now()) / 1000), strikes: row.strikes }, "pause restored");
     }
@@ -780,7 +880,7 @@ export class Core {
       // By the id the probe sent, which it reports: the probe picks its own
       // effort, so the id is not derivable from the model name out here.
       if (modelOnly) this.pauseModel(s.provider.id, scopeOf("text", status.cliId ?? status.model!), undefined);
-      else s.health = status;
+      else { const before = s.health; s.health = status; this.healthChanged(s.provider.id, before, status); }
       this.usage.record({ provider: s.provider.id, model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: status.ok ? "ok" : (status.kind ?? "cli_crashed"), source: "health", ts: this.now() });
       this.opts.log.info({ provider: s.provider.id, ok: status.ok, kind: status.kind, detail: status.detail, ...(modelOnly ? { model: status.model, scope: "model" } : {}) }, "health check");
     }));

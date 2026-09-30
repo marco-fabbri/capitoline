@@ -6,7 +6,7 @@ import { Core } from "./core/core.js";
 import { Council } from "./council/council.js";
 import { createLogger, type Logger } from "./log.js";
 import { createMcpHandler } from "./mcp/server.js";
-import { createNotifier, describeCatalogChange } from "./notify.js";
+import { createNotifier, describeAvailability, describeCatalogChange } from "./notify.js";
 import { VersionWatch } from "./versions.js";
 import { buildProviders } from "./providers/index.js";
 import type { Provider } from "./providers/adapter.js";
@@ -100,6 +100,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const core = new Core(providers, usage, {
     maxWaitMs: cfg.server.queue.max_wait_s * 1000, budgets, imageQuotas, log: log.child({ mod: "core" }),
     onCatalogChange: notify ? (provider, change) => notify(describeCatalogChange(cfg, provider, change)) : undefined,
+    onAvailability: notify ? (event) => notify(describeAvailability(cfg, event)) : undefined,
   });
 
   // One Council per configured council, registered as a virtual model: a client
@@ -202,6 +203,9 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // The versions on the same rhythm: a new CLI version is news once a day.
   void versions.check();
   const stopVersions = versions.startLoop(cfg.server.discovery_interval_h * 3600_000);
+  // The end of a quota pause is nothing happening, so something has to look:
+  // once a minute, in memory, and only at pauses that were announced.
+  const stopPauseSweep = core.startPauseSweep(60_000);
 
   const graceMs = overrides.shutdownGraceMs ?? SHUTDOWN_GRACE_MS;
   // Memoized, so a second signal (or a second caller) awaits the same shutdown
@@ -211,6 +215,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     stopHealth();
     stopCatalog();
     stopVersions();
+    stopPauseSweep();
     // Idle keep-alive sockets go at once; the ones carrying a response get the
     // grace, after which they are destroyed too — an SSE stream with
     // timeout_s: 600 must not hold the shutdown open until SIGKILL.

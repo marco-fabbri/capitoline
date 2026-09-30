@@ -43,7 +43,7 @@ export type WindowName = "five_hour" | "seven_day";
 /** Image generations counted in a rolling window: `windowStartedAt` is null while the window is empty. */
 export interface ImageWindow { used: number; windowStartedAt: number | null }
 /** A pause held across restarts. `model` is null for a pause that covers the whole provider. */
-export interface PauseRow { provider: string; model: string | null; until: number; strikes: number }
+export interface PauseRow { provider: string; model: string | null; until: number; strikes: number; announcedAt: number | null }
 /** A key as the admin API lists it: never the hash, never the key. */
 export interface ApiKeyInfo { name: string; createdAt: number; createdBy: string | null; revokedAt: number | null; lastUsedAt: number | null }
 /** Lower case, digits and dashes, 2-64 characters: a name that is also safe in a header, a log line and a URL. */
@@ -61,7 +61,7 @@ export class UsageStore {
   // a column the table does not have yet fails to compile.
   private readonly stmts: {
     record: StatementSync; imageWindow: StatementSync; totals: StatementSync; setWindow: StatementSync; windows: StatementSync;
-    callers: StatementSync; setPause: StatementSync; clearPause: StatementSync; prunePauses: StatementSync; pauses: StatementSync;
+    callers: StatementSync; setPause: StatementSync; clearPause: StatementSync; prunePauses: StatementSync; pauses: StatementSync; announcePause: StatementSync; expiredAnnounced: StatementSync;
     deliberation: StatementSync; identities: StatementSync;
     insertKey: StatementSync; keyByHash: StatementSync; touchKey: StatementSync; revokeKey: StatementSync; keys: StatementSync; liveKeys: StatementSync;
     nameCaller: StatementSync; callerNames: StatementSync;
@@ -148,6 +148,11 @@ export class UsageStore {
     // "the CLI said nothing" is a real state, and it is what every Codex row,
     // every Antigravity row and every row older than this column will hold.
     if (!columns.has("cli_model_id")) this.db.exec(`ALTER TABLE calls ADD COLUMN cli_model_id TEXT`);
+    // When a pause's start was announced (server.notify), added 2026-09-30:
+    // what lets a restart announce the end of a pause it did not see start,
+    // and not announce the start twice. NULL for a pause nobody was told of.
+    const pauseColumns = new Set((this.db.prepare(`PRAGMA table_info(pauses)`).all() as { name: string }[]).map((c) => c.name));
+    if (!pauseColumns.has("announced_at")) this.db.exec(`ALTER TABLE pauses ADD COLUMN announced_at INTEGER`);
 
     this.stmts = {
       record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind, caller, deliberation, cli_model_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -174,7 +179,9 @@ export class UsageStore {
         ON CONFLICT(provider, ifnull(model, '')) DO UPDATE SET until = excluded.until, strikes = excluded.strikes, updated_at = excluded.updated_at`),
       clearPause: this.db.prepare(`DELETE FROM pauses WHERE provider = ? AND model IS ?`),
       prunePauses: this.db.prepare(`DELETE FROM pauses WHERE until <= ?`),
-      pauses: this.db.prepare(`SELECT provider, model, until, strikes FROM pauses WHERE until > ? ORDER BY provider, model`),
+      pauses: this.db.prepare(`SELECT provider, model, until, strikes, announced_at FROM pauses WHERE until > ? ORDER BY provider, model`),
+      announcePause: this.db.prepare(`UPDATE pauses SET announced_at = ? WHERE provider = ? AND model IS ?`),
+      expiredAnnounced: this.db.prepare(`SELECT provider, model, until, strikes, announced_at FROM pauses WHERE until <= ? AND announced_at IS NOT NULL ORDER BY provider, model`),
       // No index and no time bound: an identifier is asked about right after
       // the deliberation that minted it, one question at a time, and an index
       // on a column that is NULL for almost every row would cost every insert
@@ -266,8 +273,19 @@ export class UsageStore {
   }
   /** The pauses still standing at `now`. A read, and only a read. */
   pauses(now = Date.now()): PauseRow[] {
-    const rows = this.stmts.pauses.all(now) as { provider: string; model: string | null; until: number; strikes: number }[];
-    return rows.map((r) => ({ provider: r.provider, model: r.model, until: Number(r.until), strikes: Number(r.strikes) }));
+    return this.pauseRows(this.stmts.pauses.all(now));
+  }
+  /** The pauses that ended before `now` after their start was announced: read before prunePauses() drops them. */
+  expiredAnnouncedPauses(now = Date.now()): PauseRow[] {
+    return this.pauseRows(this.stmts.expiredAnnounced.all(now));
+  }
+  /** Records that a pause's start was announced, or, with null, that the pause standing now was not. */
+  markPauseAnnounced(provider: string, model: string | null, at: number | null): void {
+    this.stmts.announcePause.run(at, provider, model);
+  }
+  private pauseRows(all: unknown[]): PauseRow[] {
+    const rows = all as { provider: string; model: string | null; until: number; strikes: number; announced_at: number | null }[];
+    return rows.map((r) => ({ provider: r.provider, model: r.model, until: Number(r.until), strikes: Number(r.strikes), announcedAt: r.announced_at === null ? null : Number(r.announced_at) }));
   }
   /**
    * Drops the rows that expired before `now` and says how many went, so the
