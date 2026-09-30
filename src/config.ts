@@ -280,6 +280,10 @@ const ConfigObject = z
         notify: z.object({
           url: z.string().url(),
           token_env: z.string().min(1).optional(),
+          // Which installation is speaking, written at the start of every
+          // message, so two installations on one topic are told apart. In the
+          // text and not the title: the body is UTF-8, a header ASCII only.
+          name: z.string().min(1).max(80).optional(),
         }).strict().optional(),
       })
       .strict()

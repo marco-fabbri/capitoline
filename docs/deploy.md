@@ -647,7 +647,13 @@ server:
   notify:
     url: https://ntfy.sh/capitoline-<long random string>
     token_env: CAPITOLINE_NOTIFY_TOKEN   # optional
+    name: home                           # optional: starts every message, "home: codex … is available"
 ```
+
+`name` tells installations apart when more than one sends to the same topic;
+it is written in the text rather than the title, since the text takes any
+character and a header only ASCII. Without it the message says only what
+changed.
 
 Subscribe to the same topic in the ntfy app. On the public server anyone who
 knows a topic's name can read it, so the name is the secret: make it long and

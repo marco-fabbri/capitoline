@@ -238,6 +238,8 @@ describe("config", () => {
     // No "startup only": a provider a request marked down would stay so until a restart.
     expect(() => parseConfig(`server: { health_interval_s: 0 }\n${config()}`)).toThrow(/health_interval_s/);
     expect(parseConfig(config()).server.notify).toBeUndefined();
+    expect(parseConfig(`server: { notify: { url: "https://ntfy.sh/t" } }\n${config()}`).server.notify?.name).toBeUndefined();
+    expect(() => parseConfig(`server: { notify: { url: "https://ntfy.sh/t", name: "" } }\n${config()}`)).toThrow(/name/);
   });
   it("rejects a health_model that is only an Object.prototype key", () => {
     expect(() => parseConfig(config({ health_model: "toString" })))

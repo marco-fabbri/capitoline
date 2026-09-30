@@ -9,7 +9,8 @@ const TIMEOUT_MS = 10_000;
 
 /**
  * The optional notification of `server.notify`: one plain-text POST per
- * message, with a `Title` header and, when `token_env` names a variable that is
+ * message, prefixed with the installation's `name` when it has one, with a
+ * `Title` header and, when `token_env` names a variable that is
  * set, `Authorization: Bearer <token>`. That is exactly what an ntfy topic
  * takes (docs/deploy.md §7.2), and any other endpoint that accepts a text POST
  * works the same way. Undefined when nothing is configured, so the caller has
@@ -25,7 +26,7 @@ export function createNotifier(cfg: Config["server"]["notify"], log: Logger, env
   return (message) => {
     const headers: Record<string, string> = { "content-type": "text/plain; charset=utf-8", title: "Capitoline" };
     if (token) headers.authorization = `Bearer ${token}`;
-    fetch(cfg.url, { method: "POST", headers, body: message, signal: AbortSignal.timeout(TIMEOUT_MS) })
+    fetch(cfg.url, { method: "POST", headers, body: cfg.name ? `${cfg.name}: ${message}` : message, signal: AbortSignal.timeout(TIMEOUT_MS) })
       .then((r) => { if (!r.ok) log.warn({ status: r.status }, "notify: the endpoint refused the message"); })
       .catch((e: unknown) => log.warn({ err: e instanceof Error ? e.message : String(e) }, "notify: sending failed"));
   };

@@ -37,6 +37,15 @@ describe("notifications", () => {
       expect(got.headers.authorization).toBe("Bearer tk_secret");
     } finally { e.close(); }
   });
+  it("starts the message with the installation's name, when it has one", async () => {
+    const e = await endpoint();
+    try {
+      createNotifier({ url: e.url, name: "Casa è qui" }, log, {})!("codex 0.159.2 is available");
+      const got = await e.received;
+      expect(got.body).toBe("Casa è qui: codex 0.159.2 is available");
+      expect(got.headers.title).toBe("Capitoline");
+    } finally { e.close(); }
+  });
   it("sends without a token when none is configured or the variable is unset", async () => {
     const e = await endpoint();
     try {
