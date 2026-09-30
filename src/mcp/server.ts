@@ -3,7 +3,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import type { Core } from "../core/core.js";
-import { CapitolineError, type Message, type ProviderEvent, type Usage } from "../core/types.js";
+import { CapitolineError, type Attachment, type Message, type ProviderEvent, type Usage } from "../core/types.js";
+import { decodeBase64 } from "../core/attachments.js";
 import type { Deliberation } from "../council/council.js";
 import type { Logger } from "../log.js";
 import { callerOf } from "../server/access.js";
@@ -78,12 +79,18 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
   });
 
   server.registerTool("ask_model", {
-    description: "Ask one model a single question through its CLI. Use list_models for names. From Claude Code, prefer codex-* and antigravity-* models: asking claude-* spends the same subscription twice.",
+    description: "Ask one model a single question through its CLI. Use list_models for names. From Claude Code, prefer codex-* and antigravity-* models: asking claude-* spends the same subscription twice. Images can go with the question to claude-* and codex-* models (antigravity-* take text only); each travels as base64 in this call, so it counts against your own context and is sent again on every retry.",
     inputSchema: {
       model: z.string().describe("Model name from list_models"),
       prompt: z.string().min(1).describe("The question"),
       effort: z.enum(["low", "medium", "high"]).optional(),
       system: z.string().optional().describe("Optional system prompt"),
+      // The shape of an MCP image content block, so a client can pass on one it
+      // holds. A path is not an option: the gateway cannot read the caller's disk.
+      images: z.array(z.object({
+        data: z.string().min(1).describe("The image, base64"),
+        mime_type: z.string().min(1).describe("image/png, image/jpeg, image/webp or image/gif"),
+      })).optional().describe("Up to 4 images, 10 MB each, for models that take them"),
     },
     // The answer is in the schema because a client that sees an outputSchema
     // reads structuredContent and ignores the content blocks — which is what
@@ -95,7 +102,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     // slug and an Antigravity id are the model itself. Absent means "the CLI
     // said nothing", and a client falls back to `model` (issue #2).
     outputSchema: { text: z.string(), model: z.string(), provider: z.string(), cliModelId: z.string().optional(), usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }) },
-  }, async ({ model, prompt, effort, system }, extra) => {
+  }, async ({ model, prompt, effort, system, images }, extra) => {
     // A council is not one model and this tool cannot run one: a deliberation
     // is nine calls over several minutes, and the only progress this tool can
     // send counts the characters of the text it is receiving — nothing at all
@@ -103,6 +110,14 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     // avoid in Claude Code. It is refused here, before the calls are spent,
     // and the caller is sent to the tool that reports the stages.
     if (core.isVirtual(model)) return toolError(new CapitolineError("bad_request", `model "${model}" is a council: use ask_council`), "ask_model", model);
+    // Decoded here, judged in Core with the images an HTTP request carries:
+    // the type, the count and the size, and whether the model's CLI takes any.
+    const attachments: Attachment[] = [];
+    for (const [i, img] of (images ?? []).entries()) {
+      const bytes = decodeBase64(img.data);
+      if (!bytes) return toolError(new CapitolineError("bad_request", `image ${i + 1} is not base64`), "ask_model", model);
+      attachments.push({ mime: img.mime_type, bytes });
+    }
     const messages: Message[] = [];
     if (system) messages.push({ role: "system", text: system });
     messages.push({ role: "user", text: prompt });
@@ -121,7 +136,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     let sent = 0;
     const progress = (done: boolean) => token !== undefined && extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: ++sent, message: done ? "done" : `${text.length} chars` } });
     try {
-      for await (const ev of core.execute({ model, messages, effort, stream: true }, { signal: extra.signal, source: "mcp", caller })) {
+      for await (const ev of core.execute({ model, messages, effort, stream: true, ...(attachments.length ? { attachments } : {}) }, { signal: extra.signal, source: "mcp", caller })) {
         if (ev.type === "text") { text += ev.delta; if (++n % TEXT_PROGRESS_EVERY === 0) await progress(false); }
         else if (ev.type === "done") { usage = ev.usage; cliModelId = ev.cliModelId; }
         else if (ev.type === "error") throw providerError(ev, providerOf(model), model);

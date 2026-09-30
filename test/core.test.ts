@@ -1024,3 +1024,23 @@ describe("availability notices", () => {
     ]);
   });
 });
+
+// Images a request carries: refused for a CLI that takes text only, never
+// written into its sandbox and silently ignored as they were before.
+describe("images in Core", () => {
+  const img = { mime: "image/png", bytes: Buffer.from("png") };
+  it("refuses them for a model whose CLI takes text only, before any call", async () => {
+    const { core, a } = make();
+    a.acceptsAttachments = false;
+    await expect(drain(core.execute({ ...req("a-1"), attachments: [img] }, { source: "http" }))).rejects.toMatchObject({ kind: "bad_request", message: expect.stringMatching(/cannot take images/) });
+    expect(a.calls).toHaveLength(0);
+  });
+  it("hands them to a model that takes them, within the limits", async () => {
+    const { core, b } = make();
+    await drain(core.execute({ ...req("b-1"), attachments: [img] }, { source: "http" }));
+    expect(b.calls[0].attachments).toEqual([img]);
+    await expect(drain(core.execute({ ...req("b-1"), attachments: [img, img, img, img, img] }, { source: "http" }))).rejects.toMatchObject({ kind: "bad_request", message: expect.stringMatching(/at most 4/) });
+    await expect(drain(core.execute({ ...req("b-1"), attachments: [{ mime: "text/plain", bytes: Buffer.from("x") }] }, { source: "http" }))).rejects.toMatchObject({ kind: "bad_request" });
+    expect(b.calls).toHaveLength(1);
+  });
+});

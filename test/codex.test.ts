@@ -182,3 +182,16 @@ describe("codex adapter", () => {
     expect(await events(then())).toHaveLength(1);
   });
 });
+
+describe("codex adapter, images", () => {
+  it("names each image with --image, after the stdin marker that --image would otherwise swallow", () => {
+    const c = codexAdapter.buildCommand(cfg, astra, { model: "codex-gpt-6-astra", stream: false, messages: [{ role: "user", text: "q" }],
+      attachments: [{ mime: "image/png", bytes: Buffer.from("a") }, { mime: "image/jpeg", bytes: Buffer.from("b") }] });
+    expect(c.args.slice(c.args.lastIndexOf("-"))).toEqual(["-", "--image", "attachment-1.png", "--image", "attachment-2.jpg"]);
+  });
+  it("adds nothing to a request with no image", () => {
+    const c = codexAdapter.buildCommand(cfg, astra, { model: "codex-gpt-6-astra", stream: false, messages: [{ role: "user", text: "q" }] });
+    expect(c.args.at(-1)).toBe("-");
+    expect(c.args).not.toContain("--image");
+  });
+});

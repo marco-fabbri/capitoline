@@ -1,4 +1,5 @@
 import type { ProviderConfig } from "../config.js";
+import { attachmentFiles } from "../core/attachments.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.js";
 import { withPreamble, effortArgs, effortValue, effortsFromLevels, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ListedModel, type ModelSpec } from "./adapter.js";
@@ -74,6 +75,11 @@ export const codexAdapter: Adapter = {
       else prompt = `System instructions:\n${system}\n\n${prompt}`;
     }
     args.push("-");
+    // After the "-": --image takes several files in a row and would read the
+    // stdin marker as one. The files are already in the sandbox, by these names.
+    if (cfg.attachments && "flag" in cfg.attachments) {
+      for (const f of attachmentFiles(req.attachments)) args.push(cfg.attachments.flag, f.name);
+    }
     return { args, stdin: prompt };
   },
 

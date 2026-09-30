@@ -169,6 +169,16 @@ const ProviderSchema = z.object({
   // with the conversation id as its last argument, that removes what the run
   // left. Absent for a CLI told by flag not to keep anything.
   forget: z.array(z.string().min(1)).min(1).optional(),
+  // How the CLI is handed the images a request carries. `flag`: one flag per
+  // image, naming the file the runner wrote into the sandbox (Codex's
+  // --image). `stdin_args`: the arguments that switch the prompt to a
+  // structured message the adapter writes the images into (Claude Code's
+  // --input-format stream-json). Absent: the CLI takes text only, and a request
+  // with images is refused rather than answered without them.
+  attachments: z.union([
+    z.object({ flag: z.string().min(1) }).strict(),
+    z.object({ stdin_args: z.array(z.string().min(1)).min(1) }).strict(),
+  ]).optional(),
 }).strict();
 
 // A seat of a council: a family and the chain of models to try for it, best

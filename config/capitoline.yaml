@@ -79,6 +79,10 @@ providers:
     system_prompt_flag: --system-prompt
     system_prompt_flag_prefix: null                  # none: the flag carries the text, not a key="value" override
     prompt_via: stdin
+    # Images as content blocks of one stream-json user message, the only way
+    # the CLI takes them with its tools switched off (checked on the host,
+    # 2026-09-30: a magenta square named magenta, claude-haiku).
+    attachments: { stdin_args: [--input-format, stream-json] }
     # A host authenticated with a setup token adds, through its overlay's args_extra (docs/deploy.md §6.1),
     # --settings /home/runner/.claude/capitoline.json: that file (owned by runner, mode 0600) holds
     # {"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}, and --settings applies even with --setting-sources "",
@@ -208,6 +212,9 @@ providers:
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"
     system_prompt_flag_prefix: -c                    # the flag that carries key="value" configuration overrides
     prompt_via: stdin                                # codex exec -
+    # Images as `--image <file>`, the file the runner wrote into the sandbox;
+    # needs no tool, view_image stays off (checked on the host, 2026-09-30).
+    attachments: { flag: --image }
     image:
       # The one feature the text-run lockdown above switches off, back on for
       # image runs only. Later overrides of one key win, so this undoes
@@ -323,6 +330,10 @@ providers:
     system_prompt_flag: null                         # none: prepended to the prompt with a role marker
     system_prompt_flag_prefix: null
     prompt_via: stdin                                # {"event":"user","message":{"role":"user","content":...}}
+    # No `attachments`: agy's stream-json input takes text blocks only ("content
+    # block type image is not supported"), and an @file reference makes it
+    # reach for a tool the strict permissions refuse (checked 2026-09-30, agy
+    # 1.2.14). A request with images is refused for its models.
     # agy keeps every conversation in the runner's home (the full conversation,
     # its transcripts, a summary with a preview of the prompt) and has no option
     # not to, as Claude Code (--no-session-persistence) and Codex (--ephemeral)

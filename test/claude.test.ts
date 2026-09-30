@@ -204,3 +204,23 @@ describe("claude adapter", () => {
     expect(c.stdin).not.toContain("Be terse.");      // the system prompt travels by flag, once
   });
 });
+
+// Images reach Claude Code as content blocks of one stream-json message: with
+// its tools switched off it cannot read a file from the sandbox.
+describe("claude adapter, images", () => {
+  const png = Buffer.from("PNGDATA");
+  it("go in as content blocks of one stream-json user message, the prompt after them", () => {
+    const c = claudeAdapter.buildCommand(cfg, opus, { model: "claude-opus", stream: false, messages: [{ role: "user", text: "what colour?" }], attachments: [{ mime: "image/PNG; x=1", bytes: png }] });
+    expect(c.args.slice(-2)).toEqual(["--input-format", "stream-json"]);
+    expect(JSON.parse(c.stdin)).toEqual({ type: "user", message: { role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: "image/png", data: png.toString("base64") } },
+      { type: "text", text: expect.stringContaining("what colour?") },
+    ] } });
+  });
+  it("leave a request with no image as the plain prompt it always was", () => {
+    const c = claudeAdapter.buildCommand(cfg, opus, { model: "claude-opus", stream: false, messages: [{ role: "user", text: "what colour?" }] });
+    expect(c.args).not.toContain("--input-format");
+    expect(c.stdin).toContain("what colour?");
+    expect(() => JSON.parse(c.stdin)).toThrow();
+  });
+});

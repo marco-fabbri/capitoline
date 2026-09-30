@@ -1,4 +1,5 @@
 import { EffortSchema, type Effort } from "../config.js";
+import { checkAttachments } from "./attachments.js";
 import type { CouncilEvent } from "../council/council.js";
 import type { Logger } from "../log.js";
 import type { CatalogChange, HealthStatus, ModelKind, ModelSpec, Provider } from "../providers/adapter.js";
@@ -494,6 +495,13 @@ export class Core {
     if (this.virtuals.has(req.model)) { yield* this.flattenVirtual(req, ctx); return; }
     const entry = this.lookup(req.model);
     if (entry.model.kind !== "text") throw new CapitolineError("bad_request", `model "${req.model}" generates images: use the images endpoint`);
+    // Refused, never dropped: before this the images of a request were written
+    // into the sandbox and no CLI was told of them, so every model answered as
+    // if none had been sent (checked on the host, 2026-09-30).
+    if (req.attachments?.length) {
+      if (!entry.provider.acceptsAttachments) throw new CapitolineError("bad_request", `model "${req.model}" cannot take images: its CLI accepts text only`);
+      checkAttachments(req.attachments, req.model);
+    }
     yield* this.guarded(entry, req.model, this.cliIdOf(entry, req.effort), ctx, () => entry.provider.execute(req, entry.model, ctx.signal));
   }
 

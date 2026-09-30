@@ -124,6 +124,12 @@ describe("POST /v1/chat/completions", () => {
     await request(app).post("/v1/chat/completions").send(body({ messages: [{ role: "developer", content: "S" }, { role: "user", content: "a" }, { role: "assistant", content: "b" }, { role: "user", content: "c" }] }));
     expect(p.calls[0].messages).toEqual([{ role: "system", text: "S" }, { role: "user", text: "a" }, { role: "assistant", text: "b" }, { role: "user", text: "c" }]);
   });
+  it("refuses an image that is not valid base64, rather than a shorter broken one", async () => {
+    const { app, p } = make();
+    const r = await request(app).post("/v1/chat/completions").send(body({ messages: [{ role: "user", content: [{ type: "text", text: "what" }, { type: "image_url", image_url: { url: "data:image/png;base64,not*base64" } }] }] }));
+    expect(r.status).toBe(400);
+    expect(p.calls).toHaveLength(0);
+  });
   it("decodes data-URL images into attachments", async () => {
     const { app, p } = make();
     const png = Buffer.from("fakepng").toString("base64");

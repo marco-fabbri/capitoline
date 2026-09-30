@@ -88,6 +88,22 @@ describe("MCP", () => {
     expect(image.quota!.resetAt).toBeGreaterThanOrEqual(sent + 442_209 * 1000);
     await c.close();
   });
+  it("ask_model passes images to a model that takes them, and refuses them otherwise", async () => {
+    const c = await client();
+    const png = Buffer.from("PNGDATA");
+    const ok = await c.callTool({ name: "ask_model", arguments: { model: "claude-opus", prompt: "what colour?", images: [{ data: png.toString("base64"), mime_type: "image/png" }] } });
+    expect(ok.isError).toBeFalsy();
+    expect(provider.calls.at(-1)!.attachments).toEqual([{ mime: "image/png", bytes: png }]);
+    const broken = await c.callTool({ name: "ask_model", arguments: { model: "claude-opus", prompt: "q", images: [{ data: "not*base64", mime_type: "image/png" }] } });
+    expect(broken.isError).toBe(true);
+    expect((broken.content as { text: string }[])[0].text).toMatch(/not base64/);
+    provider.acceptsAttachments = false;
+    const refused = await c.callTool({ name: "ask_model", arguments: { model: "claude-opus", prompt: "q", images: [{ data: png.toString("base64"), mime_type: "image/png" }] } });
+    expect(refused.isError).toBe(true);
+    expect((refused.content as { text: string }[])[0].text).toMatch(/cannot take images/);
+    expect(provider.calls).toHaveLength(1);
+    await c.close();
+  });
   it("ask_model returns the answer, usage and passes effort and system", async () => {
     const c = await client();
     const r = await c.callTool({ name: "ask_model", arguments: { model: "claude-opus", prompt: "q", effort: "low", system: "S" } });

@@ -1,5 +1,6 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
+import { attachmentFiles } from "../core/attachments.js";
 import type { ErrorKind, InternalRequest, ProviderEvent, RateLimitWindow } from "../core/types.js";
 import { withPreamble, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ModelSpec } from "./adapter.js";
 import { classifyError, isModelScoped } from "./errors.js";
@@ -41,6 +42,18 @@ export const claudeAdapter: Adapter = {
       const sys = systemPromptArgs(cfg, system);
       if (sys.length) args.push(...sys);
       else prompt = `System instructions:\n${system}\n\n${prompt}`;
+    }
+    // Images go in as content blocks of one structured user message, the only
+    // way the CLI takes them with its tools switched off: a file in the sandbox
+    // would need the Read tool. A request with no image keeps the plain prompt.
+    const files = attachmentFiles(req.attachments);
+    if (files.length > 0 && cfg.attachments && "stdin_args" in cfg.attachments) {
+      args.push(...cfg.attachments.stdin_args);
+      const content = [
+        ...files.map((f) => ({ type: "image", source: { type: "base64", media_type: f.mime, data: f.bytes.toString("base64") } })),
+        { type: "text", text: prompt },
+      ];
+      return { args, stdin: JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n" };
     }
     return { args, stdin: prompt };
   },

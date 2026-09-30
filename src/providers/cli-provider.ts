@@ -2,18 +2,10 @@ import type { Effort, ProviderConfig } from "../config.js";
 import type { Logger } from "../log.js";
 import type { ImageRequest, InternalRequest, ProviderEvent, Usage } from "../core/types.js";
 import type { Runner, RunHandle } from "../runner/runner.js";
+import { attachmentFiles } from "../core/attachments.js";
 import { cliId as resolveCliId, modelSpecs, reachableIds, type Adapter, type CatalogChange, type HealthStatus, type ListedModel, type ModelSpec, type Provider } from "./adapter.js";
 import { classifyError, detectQuotaExhausted, type QuotaHit } from "./errors.js";
 import { inspectImage } from "./image-check.js";
-
-const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
-
-// The mime comes from the client's data URL: parameters are dropped and only
-// own keys of EXT count, so "__proto__" or "constructor" cannot name a file.
-function extensionFor(mime: string): string {
-  const key = (mime.split(";")[0] ?? "").trim().toLowerCase();
-  return Object.hasOwn(EXT, key) ? EXT[key] : "bin";
-}
 
 export interface CliProviderOptions {
   /** How long a CLI may linger after its final event before it is stopped. */
@@ -90,6 +82,8 @@ export class CliProvider implements Provider {
    * `health_fallback` still served. A retired probe would otherwise fail every
    * round and mark every model of the provider unhealthy.
    */
+  get acceptsAttachments(): boolean { return this.cfg.attachments !== undefined; }
+
   get healthModel(): string {
     if (!this.retired.has(this.cfg.health_model)) return this.cfg.health_model;
     return this.cfg.health_fallback.find((name) => !this.retired.has(name)) ?? this.cfg.health_model;
@@ -200,7 +194,7 @@ export class CliProvider implements Provider {
 
   async *execute(req: InternalRequest, model: ModelSpec, signal?: AbortSignal): AsyncIterable<ProviderEvent> {
     const { args, stdin } = this.adapter.buildCommand(this.cfg, model, req);
-    const files = (req.attachments ?? []).map((a, i) => ({ name: `attachment-${i + 1}.${extensionFor(a.mime)}`, bytes: a.bytes }));
+    const files = attachmentFiles(req.attachments).map(({ name, bytes }) => ({ name, bytes }));
     const run = await this.start(args, stdin, this.cfg.timeout_s * 1000, signal, files);
     let terminal = false;
     // Whether the run has produced anything a client could read. A run that

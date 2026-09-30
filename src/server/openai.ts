@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { decodeBase64 } from "../core/attachments.js";
 import { CapitolineError, type Attachment, type ErrorKind, type FailureKind, type InternalRequest, type Message, type Usage } from "../core/types.js";
 import { EffortSchema } from "../config.js";
 
@@ -62,9 +63,10 @@ export function convertChatRequest(body: unknown): Converted {
     for (const part of m.content) {
       if (part.type === "text") texts.push(part.text);
       else {
-        const mt = /^data:([^;,]+);base64,(.+)$/s.exec(part.image_url.url);
-        if (!mt) throw new CapitolineError("bad_request", "image_url must be a base64 data URL");
-        attachments.push({ mime: mt[1], bytes: Buffer.from(mt[2], "base64") });
+        const mt = /^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/s.exec(part.image_url.url);
+        const bytes = mt ? decodeBase64(mt[2]) : null;
+        if (!mt || !bytes) throw new CapitolineError("bad_request", "image_url must be a base64 data URL");
+        attachments.push({ mime: mt[1], bytes });
       }
     }
     messages.push({ role, text: texts.join("\n") });

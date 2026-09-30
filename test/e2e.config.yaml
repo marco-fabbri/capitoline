@@ -75,6 +75,7 @@ providers:
     system_prompt_flag: --system-prompt
     system_prompt_flag_prefix: null                  # none: the flag carries the text, not a key="value" override
     prompt_via: stdin
+    attachments: { stdin_args: [--input-format, stream-json] }
     # Production adds:  --settings /home/runner/.claude/capitoline.json
     # That file (owned by runner, mode 0600) holds {"env":{"CLAUDE_CODE_OAUTH_TOKEN":"..."}}.
     # --settings applies even with --setting-sources "", so the gateway process never sees the token.
@@ -202,6 +203,7 @@ providers:
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"
     system_prompt_flag_prefix: -c                    # the flag that carries key="value" configuration overrides
     prompt_via: stdin                                # codex exec -
+    attachments: { flag: --image }
     image:
       # The one feature the text-run lockdown above switches off, back on for
       # image runs only. Later overrides of one key win, so this undoes

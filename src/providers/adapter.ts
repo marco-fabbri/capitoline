@@ -72,6 +72,8 @@ export interface Provider {
   /** The id `healthModel` resolves to at the effort the probe runs, so Core can key its pause the same way. */
   readonly healthCliId?: string;
   models(): ModelSpec[];
+  /** Whether its CLI can be handed images (config `attachments`); Core refuses them otherwise. */
+  readonly acceptsAttachments?: boolean;
   /**
    * The id this provider will send to its CLI for `model` at `effort`, which
    * is the thing a quota refusal is actually about. Two gateway names can

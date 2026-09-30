@@ -9,6 +9,8 @@ export class FakeProvider implements Provider {
   imageCalls: ImageRequest[] = [];
   imageScript: ProviderEvent[] = [];
   healthResult: HealthStatus = { ok: true, checkedAt: 0 };
+  /** A fake takes images unless a test says otherwise, as Claude Code and Codex do. */
+  acceptsAttachments = true;
   /** How many times the probe actually ran: 0 is how a skipped check is observed. */
   healthCalls = 0;
   /** The model the probe runs, as a CLI provider reads it from health_model. */
