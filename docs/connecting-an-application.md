@@ -23,26 +23,35 @@ apart and a subscription that is suddenly exhausted has a culprit. And an
 application whose behaviour changes can be cut off without touching anything
 else.
 
-## Two kinds of credential
+## The credential: a key from the gateway
 
-The gateway knows two identities, and an application needs one of them
-(design §4):
+Identity belongs to the gateway, whatever sits in front of it. An application
+gets a **key** issued by the gateway itself, sent as `Authorization: Bearer
+cap_…` — the header every OpenAI client already sends — and known by its own
+name, the name every usage row records (§2a). It works wherever the gateway is
+reachable: on a network of your own, behind a reverse proxy, through a tunnel.
 
-- **A key from the gateway.** Issued by the gateway itself, sent as
-  `Authorization: Bearer cap_…` — the header every OpenAI client already
-  sends — and known by its own name. It works wherever the gateway is
-  reachable: through a Cloudflare tunnel or on a network of your own with no
-  Cloudflare at all.
-- **A Cloudflare service token.** Issued by Cloudflare Access, sent as two
-  headers, checked at the edge before the request reaches the gateway. It only
-  exists behind a tunnel with Access, and the gateway learns it by a client id
-  that has to be bound to a name.
+An MCP client that cannot hold a key, such as Claude on the web, signs in with
+OAuth instead: the gateway is its own authorization server, and signing in is
+pasting one of its keys once on its page (`docs/deploy.md` §10.1). The tokens
+it gets stand in for that key, under that key's name, on `/mcp` only.
 
-Behind Access both work, and both together are allowed: a request that
-carries one of the gateway's keys is judged on the key, and Access admits it
-at the edge as it does every other. **Use a key** unless you need the edge to
-refuse the application before it reaches the gateway — the one thing a
-service token buys — and even then bind it to a name (§2b).
+**Behind Cloudflare Access**, which a host may keep as an extra layer
+(`docs/deploy.md` §9.1), Access is the door and the key is still the name: an
+application sends its key and a Cloudflare service token (§2b), the edge lets
+it through on the token, and the gateway names it by the key. How each caller
+is named then:
+
+| Caller | Sends | Access | Name in the usage rows |
+|---|---|---|---|
+| An application | a service token and a key | lets it through | the key's name |
+| The owner, in a browser | an Access login with their email | lets them through | the email, which can be in `server.access.admins` |
+| Claude on the web | an OAuth token, on paths Access bypasses | not involved | the name of the key used to sign in |
+| An application with no key yet | a service token only | lets it through | its client id, named by `server.access.callers` |
+
+The last row is what the client-id map exists for; an application that sends
+a key does not need it. Without Access, only the first and third rows remain,
+without the service token.
 
 ## 1. Store nothing yet, decide the name
 
@@ -82,8 +91,10 @@ state it is in.
 `GET /v1/admin/keys` lists the keys (names, dates, last use; never the
 secret). Nothing needs restarting.
 
-## 2b. A Cloudflare service token
+## 2b. Behind Cloudflare Access: a service token as well
 
+Only on a host that keeps Access in front (`docs/deploy.md` §9.1): the token
+gets the application past the edge, and the key of §2a still names it.
 Scripted, from your own machine (never from the gateway host):
 
 ```sh
@@ -108,7 +119,8 @@ which applications exist; then the binding, either through the admin API as
 above or as a line under `server.access.callers` in the host overlay
 (`docs/deploy.md` §7), because Cloudflare's JWT carries the **client id** and
 not the name, and without the binding `/v1/usage` calls the application
-`<32 hex>.access`.
+`<32 hex>.access`. The binding matters only for an application that sends no
+key; one that sends its key is named by it.
 
 Nothing in the gateway needs restarting for the token or the policy: Access
 decides at the edge. The binding through the API needs no restart either.

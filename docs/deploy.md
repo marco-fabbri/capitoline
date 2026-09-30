@@ -7,13 +7,17 @@ prompt says otherwise. "Design §n" is `docs/superpowers/specs/2026-09-19-capito
 
 The result is one systemd service (`capitoline`, user `capitoline`) that
 runs the CLIs through `sudo` as a second user (`runner`), which is the only
-user holding the subscription credentials. Clients reach it in one of two
-ways, and Cloudflare is only one of them:
+user holding the subscription credentials. Three things are kept apart:
 
-- **Through a Cloudflare Tunnel with Access in front** (§9): no inbound port
-  is opened, and Cloudflare checks every caller before the gateway sees it.
-- **On a network of your own, without Cloudflare** (§8.2): the gateway
-  listens on the host's address and its own API keys (§8.1) are the door.
+- **Who calls is always the gateway's to decide:** its own keys (§8.1), and
+  OAuth for the MCP clients that cannot hold one (§10.1). No provider in front
+  is needed for it.
+- **How it is reached is the installer's choice:** a network of your own
+  (§8.2), a reverse proxy with TLS, or a tunnel. §9 describes Cloudflare's,
+  which opens no inbound port and does the TLS.
+- **Cloudflare Access is an optional extra layer** (§9.1): it stops a caller
+  with no credential before the request reaches the host, at the price of a
+  second credential per application and a Bypass for OAuth.
 
 **The short way.** `deploy/ansible` does §1 to §8, §7.1 and §11 of this
 document from your own computer over SSH (`site.yml`), then, after the logins,
@@ -382,7 +386,7 @@ Merge rules, from `mergeConfig` in `src/config.ts`:
 
 Edit `/etc/capitoline/overlay.yaml`. It starts as a copy of the example, whose
 `callers` and `admins` are placeholders: replace them, or empty them
-(`callers: {}`, `admins: []`) until §8.1 and §9 give them real values.
+(`callers: {}`, `admins: []`) until §8.1 and §9.1 give them real values.
 
 | Key | Production value |
 |---|---|
@@ -395,9 +399,9 @@ Edit `/etc/capitoline/overlay.yaml`. It starts as a copy of the example, whose
 | `providers.antigravity.binary` | `/home/runner/.local/bin/agy` |
 | `server.host` | not in the example: the default `127.0.0.1` is right behind the tunnel of §9. `0.0.0.0` (or one address of the host) for clients on your own network, §8.2 |
 | `serve` | not in the example: everything is served. A host that serves less names it, below |
-| `server.access.callers` | the names of the Cloudflare service tokens, §9; `{}` without Cloudflare |
+| `server.access.callers` | the names of the Cloudflare service tokens, §9.1; `{}` without Access |
 | `server.access.admins` | who may use `/v1/admin`, §8.1 |
-| `server.access.team_domain`, `server.access.audience` | filled in §9; both empty until then, and for good without Cloudflare |
+| `server.access.team_domain`, `server.access.audience` | filled in §9.1; both empty until then, and for good without Access |
 
 **Serving less than the repository declares.** With no `serve` key the host
 serves every provider and every council of the repository file, and whatever a
@@ -787,11 +791,11 @@ touching the service.
 
 ### 8.1 The gateway's own keys
 
-Beside the Cloudflare Access JWT of §9 the gateway accepts keys it issued
-itself, sent as `Authorization: Bearer cap_…` (design §4). They are the
-identity that works with no Cloudflare in front, and the one
-`docs/connecting-an-application.md` recommends for applications behind the
-tunnel too. Keys are stored hashed in the usage database and issued and
+The gateway's identity is keys it issues itself, sent as `Authorization:
+Bearer cap_…` (design §4): they work whatever sits in front of the gateway,
+and they are the credential `docs/connecting-an-application.md` gives every
+application. Behind Cloudflare Access (§9.1) the gateway accepts the Access
+JWT as well. Keys are stored hashed in the usage database and issued and
 revoked through `/v1/admin/keys` by the callers `server.access.admins` names:
 an email from Access, a bound service token's name, or a key's own name. The
 first one is made on the host, as the user that owns the database:
@@ -865,7 +869,12 @@ A pull that needs more than this — a new sudoers rule, a new overlay key —
 says so in its commit message. The CLIs are updated separately, one at a
 time, with `scripts/update-cli.sh` (`docs/update-clis.md`).
 
-## 9. Cloudflare Tunnel and Access
+## 9. A Cloudflare tunnel
+
+A tunnel is how the gateway is reached, not who may call it: `cloudflared`
+connects out to Cloudflare, so no inbound port is opened, and Cloudflare does
+the TLS. The gateway keeps listening on `127.0.0.1` (§8), and its keys and
+OAuth remain the door. Any other tunnel or reverse proxy does the same job.
 
 **Tunnel.** Zero Trust → Networks → Tunnels → Create a tunnel → name
 `capitoline`. The dashboard shows a token; install `cloudflared` on the host
@@ -883,65 +892,30 @@ systemctl status cloudflared
 In the tunnel's Public Hostname tab: hostname `api.example.com`,
 service `http://localhost:8080`. The DNS record is created by the tunnel.
 
-**Access.** Zero Trust → Access → Applications → Add an application →
-Self-hosted, domain `api.example.com`. Two policies:
-
-1. `owner`: action Allow, include Emails = the owner's address (browser login).
-2. `apps`: action Service Auth, include Service Token = `capitoline-apps`
-   (create it under Access → Service Auth → Service Tokens; copy the client
-   id and secret now, the secret is shown once).
-
-From the application's overview copy the **Application Audience (AUD) tag**
-and the team domain (`<team>.cloudflareaccess.com`, without `https://`)
-into the config, then restart:
-
-```yaml
-server:
-  access:
-    team_domain: <team>.cloudflareaccess.com
-    audience: <aud tag>
-```
+Verify from your own computer, with a key of §8.1:
 
 ```sh
-systemctl restart capitoline
-```
-
-Verify from your own computer:
-
-```sh
-curl -i https://api.example.com/v1/models          # 302 (browser login) or 401
+curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/v1/models   # 401
 curl -s https://api.example.com/v1/models \
-  -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" | jq   # 200
+  -H "Authorization: Bearer $CAPITOLINE_API_KEY" | jq '.data[].id'
+curl -s https://api.example.com/health                                       # {"ok":true}
 ```
 
-From the host, `curl -s http://127.0.0.1:8080/v1/models` now answers 401
-unless it carries a key of §8.1 (no request to the loopback carries an Access
-JWT), while `curl -s http://127.0.0.1:8080/health` still answers in full: that
-is the intended exemption for local monitoring. Through the tunnel it answers
-`{"ok":true}` only, since `cloudflared` marks the request as forwarded.
+`/health` answers in full only on the host itself or with a key; through the
+tunnel it says only that the gateway is up, since `cloudflared` marks the
+request as forwarded.
 
-A verified token also says who is calling, and every usage row records it: the
-email of a user token, and for a service token the `common_name` claim —
-which holds the **client id**, `<32 hex>.access`, not the name typed into the
-dashboard. `server.access.callers` maps an id to a name where `/v1/usage`
-reports it, not where the row is written: a row stores the id Cloudflare
-sent, so a token mapped an hour late reads back all the way, and renaming an
-application renames its past with it. An id the overlay has not named is
-reported as itself, which is unreadable and still correct. The same binding
-can be made at run time, without a restart, by the admin API
-(`PUT /v1/admin/callers/<client id>`, `docs/connecting-an-application.md` §2b), and a binding
-made there wins over the overlay's. A key of §8.1 is reported by its name.
-
-`GET /v1/usage` reports the last 24 hours grouped by it, which is how two
-applications sharing one gateway are told apart. It is deliberately not on
-`/health`: that route is the exemption above, readable by anyone who can open
-127.0.0.1:8080 on this host — including `runner` — and this breakdown names
-people. So it is read through the tunnel, with the service token, like any
-other `/v1` route:
+**Usage per caller.** Every usage row records who called: a key's name, or
+behind Access the caller of §9.1. `GET /v1/usage` reports the last 24 hours
+grouped by it, which is how two applications sharing one gateway are told
+apart. It is deliberately not on `/health`: that route answers in full to
+anyone who can open 127.0.0.1:8080 on this host — including `runner` — and
+this breakdown names people. So it is read like any other `/v1` route, with
+a key (behind Access, with the service token's two headers as well):
 
 ```sh
 curl -s https://api.example.com/v1/usage \
-  -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" | jq .callers
+  -H "Authorization: Bearer $CAPITOLINE_API_KEY" | jq .callers
 # [ { "caller": "claude-code", "calls": 12, "inputTokens": 4210, "outputTokens": 980 } ]
 ```
 
@@ -987,7 +961,7 @@ because what it is read for is a change.
 
 ```sh
 curl -s https://api.example.com/v1/usage \
-  -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" | jq .models
+  -H "Authorization: Bearer $CAPITOLINE_API_KEY" | jq .models
 # [ { "model": "claude-opus", "cliModelId": "claude-opus-5",   "calls": 40, "firstAt": …, "lastAt": … },
 #   { "model": "claude-opus", "cliModelId": "claude-opus-5-5", "calls": 12, "firstAt": …, "lastAt": … } ]
 ```
@@ -1033,7 +1007,7 @@ field, where an OpenAI client ignores it):
 
 ```sh
 curl -N -s https://api.example.com/v1/chat/completions \
-  -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" \
+  -H "Authorization: Bearer $CAPITOLINE_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"capitoline","stream":true,"messages":[{"role":"user","content":"why?"}]}'
 ```
@@ -1057,21 +1031,99 @@ reach) and for the MCP tool, which has a timeout of its own (§10). The same
 applies to any single model slow enough to stay silent for 100 s, but a
 council is the only thing here that does it by design.
 
+### 9.1 Cloudflare Access, optional
+
+Access adds a check at Cloudflare's edge: a request with no Access
+credential is stopped there and never reaches the host, so scans and
+guesses touch neither the gateway's code nor its libraries. What it costs: a
+second credential for every application (a service token beside its key),
+client configurations tied to Cloudflare's headers, and a Bypass for the paths
+an OAuth client uses (§10.1). Access is the door; the key is still the name:
+
+| Caller | Sends | Access | Name in the usage rows |
+|---|---|---|---|
+| An application | a service token and a key | lets it through | the key's name |
+| The owner, in a browser | an Access login with their email | lets them through | the email, which can be in `server.access.admins` |
+| Claude on the web | an OAuth token, on paths Access bypasses | not involved | the name of the key used to sign in |
+| An application with no key yet | a service token only | lets it through | its client id, named by `server.access.callers` |
+
+When Access is on, the gateway also verifies the Access token on a request
+that brings no key, so a request that did not come through Cloudflare (from
+the local network, say) is refused.
+
+**Removing Access later: make the keys first.** Behind a tunnel every request
+reaches the gateway from the loopback, so the check that refuses to listen
+while the gateway is open (§8.2) does not see it. With Access removed and no
+live key, the gateway would be open to the Internet. Give every application
+its key and check its calls come in under it (`/v1/usage`) before Access goes,
+then empty `team_domain` and `audience` in the overlay and restart; the log's
+`identity` line must say `keys: true`. With `server.oauth` set, the service
+refuses to start in that state.
+
+**Access.** Zero Trust → Access → Applications → Add an application →
+Self-hosted, domain `api.example.com`. Its policies:
+
+1. `owner`: action Allow, include Emails = the owner's address (browser login).
+2. One per application: action Service Auth, include that application's own
+   Service Token (Access → Service Auth → Service Tokens; the secret is shown
+   once). `scripts/cf-service-token.sh` makes both,
+   `docs/connecting-an-application.md` §2b.
+3. With OAuth on (§10.1): a Bypass for its paths, or Claude on the web never
+   reaches the sign-in.
+
+From the application's overview copy the **Application Audience (AUD) tag**
+and the team domain (`<team>.cloudflareaccess.com`, without `https://`)
+into the config, then restart:
+
+```yaml
+server:
+  access:
+    team_domain: <team>.cloudflareaccess.com
+    audience: <aud tag>
+```
+
+```sh
+systemctl restart capitoline
+```
+
+Verify from your own computer:
+
+```sh
+curl -i https://api.example.com/v1/models          # 302 (browser login) or 401
+curl -s https://api.example.com/v1/models \
+  -H "CF-Access-Client-Id: <id>" -H "CF-Access-Client-Secret: <secret>" | jq   # 200
+```
+
+From the host, `curl -s http://127.0.0.1:8080/v1/models` now answers 401
+unless it carries a key of §8.1 (no request to the loopback carries an Access
+JWT), while `curl -s http://127.0.0.1:8080/health` still answers in full: that
+is the intended exemption for local monitoring. Through the tunnel it answers
+`{"ok":true}` only, since `cloudflared` marks the request as forwarded.
+
+A verified token also says who is calling, and every usage row records it: the
+email of a user token, and for a service token the `common_name` claim —
+which holds the **client id**, `<32 hex>.access`, not the name typed into the
+dashboard. `server.access.callers` maps an id to a name where `/v1/usage`
+reports it, not where the row is written: a row stores the id Cloudflare
+sent, so a token mapped an hour late reads back all the way, and renaming an
+application renames its past with it. An id the overlay has not named is
+reported as itself, which is unreadable and still correct. The same binding
+can be made at run time, without a restart, by the admin API
+(`PUT /v1/admin/callers/<client id>`, `docs/connecting-an-application.md` §2b), and a binding
+made there wins over the overlay's. A key of §8.1 is reported by its name.
+
 ## 10. Claude Code as MCP client (on your own computer)
 
-Through the tunnel, with a service token of §9:
+With a key of §8.1, through the tunnel of §9 or on your own network (§8.2,
+`http://<host>:8080/mcp`):
 
 ```sh
 claude mcp add --transport http capitoline https://api.example.com/mcp \
-  --header "CF-Access-Client-Id: <id>" --header "CF-Access-Client-Secret: <secret>"
-```
-
-Without Cloudflare (§8.2), with a key of §8.1:
-
-```sh
-claude mcp add --transport http capitoline http://<host>:8080/mcp \
   --header "Authorization: Bearer cap_…"
 ```
+
+Behind Cloudflare Access (§9.1), add the service token's two headers:
+`--header "CF-Access-Client-Id: <id>" --header "CF-Access-Client-Secret: <secret>"`.
 
 A CLI answer can take minutes, an image 11-45 s and a deliberation longer
 than either; raise the tool timeout in your shell profile:
@@ -1119,7 +1171,17 @@ it, and revoking the key ends every token it stood behind. The tokens are good
 for `/mcp` only; the HTTP API keeps taking keys.
 
 It needs the gateway at a public HTTPS address, which Capitoline does not
-provide itself: the tunnel of §9, or any reverse proxy. In the overlay:
+provide itself: the tunnel of §9, or any reverse proxy.
+
+Make a key for the purpose first, so that revoking it ends this access and
+nothing else:
+
+```sh
+cd /var/lib/capitoline/app && sudo -Hu capitoline \
+  env CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml npm run -s keys -- create claude-web
+```
+
+Then, in the overlay:
 
 ```yaml
 server:
@@ -1127,19 +1189,13 @@ server:
     public_url: https://api.example.com
 ```
 
-Restart, then check what a client reads first:
+Restart. With a public URL set, no Access and no key, the service refuses to
+start: behind a tunnel it would be open to the Internet. Then check what a
+client reads first:
 
 ```sh
 curl -s https://api.example.com/.well-known/oauth-protected-resource/mcp | jq   # resource: https://api.example.com/mcp
 curl -s -o /dev/null -D - -X POST https://api.example.com/mcp | grep -i www-authenticate   # Bearer resource_metadata="…"
-```
-
-Make a key for the purpose, so that revoking it ends this access and nothing
-else:
-
-```sh
-cd /var/lib/capitoline/app && sudo -Hu capitoline \
-  env CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml npm run -s keys -- create claude-web
 ```
 
 In Claude: Customize → Connectors → add a custom connector with the URL
@@ -1148,7 +1204,7 @@ gateway's sign-in page, which names the host it will send you back to
 (`claude.ai`); paste the `claude-web` key there. From then on Claude renews its
 token by itself, for 30 days after its last use.
 
-With Cloudflare Access in front (§9), Access has to let these through, or
+With Cloudflare Access in front (§9.1), Access has to let these through, or
 Claude never reaches the sign-in: in the Access application, a Bypass policy
 for `/mcp`, `/authorize`, `/token`, `/register`, `/revoke`, `/oauth/*` and
 `/.well-known/*`. The gateway's own OAuth then guards `/mcp`. Or leave Access
@@ -1320,7 +1376,7 @@ once the service answers: it holds a second copy of everything §11 exists to
 keep private.
 
 What a restore does not bring back: the CLI credentials (§6, log in again) and
-the Cloudflare service token (§9). The gateway comes up degraded until the
+the Cloudflare service tokens (§9.1). The gateway comes up degraded until the
 first `claude`/`codex`/`agy` login is done, and `/health` names the provider
 that is still unauthenticated; restart the service after the logins (§8).
 

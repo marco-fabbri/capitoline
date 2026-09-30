@@ -303,6 +303,17 @@ describe("start() with a host overlay", () => {
     } finally { await app.close(); }
   });
 
+  it("refuses to start with OAuth on a public URL while the gateway would be open, even on loopback", async () => {
+    const { path, db } = overlay((f) => `server:\n  oauth:\n    public_url: "https://gw.example.com"\nusage:\n  db_path: "${f}"\n`);
+    const p = new FakeProvider("claude", ["claude-opus"], OK);
+    await expect(start(CONFIG, { port: 0, providers: [p], overlayPath: path })).rejects.toThrow(/refusing to start: server\.oauth\.public_url.*npm run keys/);
+    const store = new UsageStore(db);
+    store.createKey("claude-web", "test");
+    store.close();
+    const app = await start(CONFIG, { port: 0, providers: [p], overlayPath: path });
+    await app.close();
+  });
+
   it("probes every provider at the interval the configuration names, not the hour", async () => {
     // Only the intervals are faked: the server still listens on a real port.
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });

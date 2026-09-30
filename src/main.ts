@@ -143,6 +143,14 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     usage.close();
     throw new Error(`refusing to listen on ${host}: with no Cloudflare Access and no API key the gateway would be open to the network; create a key first (npm run keys, with the overlay: docs/deploy.md §8.1) or keep server.host at 127.0.0.1`);
   }
+  // Behind a tunnel the gateway listens on loopback and every request arrives
+  // from there, so the check above cannot see the Internet. A public URL for
+  // OAuth says it plainly: this gateway is reached from outside, and with no
+  // Access and no key it would be open to it (and no key could sign in).
+  if (oauth && !accessOn && !usage.hasKeys()) {
+    usage.close();
+    throw new Error(`refusing to start: server.oauth.public_url says the gateway is reached from ${cfg.server.oauth!.public_url}, and with no Cloudflare Access and no API key it would be open to it; create a key first (npm run keys, with the overlay: docs/deploy.md §8.1)`);
+  }
 
   // The port is bound first and the requests are gated, never the other way
   // round: a real health check spawns the CLI with a deadline of a minute, and
