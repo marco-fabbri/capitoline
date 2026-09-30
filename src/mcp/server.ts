@@ -90,7 +90,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       images: z.array(z.object({
         data: z.string().min(1).describe("The image, base64"),
         mime_type: z.string().min(1).describe("image/png, image/jpeg, image/webp or image/gif"),
-      })).optional().describe("Up to 4 images, 10 MB each, for models that take them"),
+      })).optional().describe("Up to 8 images, 10 MB each, for models that take them"),
     },
     // The answer is in the schema because a client that sees an outputSchema
     // reads structuredContent and ignores the content blocks — which is what

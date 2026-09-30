@@ -1039,7 +1039,7 @@ describe("images in Core", () => {
     const { core, b } = make();
     await drain(core.execute({ ...req("b-1"), attachments: [img] }, { source: "http" }));
     expect(b.calls[0].attachments).toEqual([img]);
-    await expect(drain(core.execute({ ...req("b-1"), attachments: [img, img, img, img, img] }, { source: "http" }))).rejects.toMatchObject({ kind: "bad_request", message: expect.stringMatching(/at most 4/) });
+    await expect(drain(core.execute({ ...req("b-1"), attachments: Array(9).fill(img) }, { source: "http" }))).rejects.toMatchObject({ kind: "bad_request", message: expect.stringMatching(/at most 8/) });
     await expect(drain(core.execute({ ...req("b-1"), attachments: [{ mime: "text/plain", bytes: Buffer.from("x") }] }, { source: "http" }))).rejects.toMatchObject({ kind: "bad_request" });
     expect(b.calls).toHaveLength(1);
   });
