@@ -59,7 +59,7 @@ describe("the public-repository guard", () => {
   });
   it("refuses a rationale drawn from one private application, without any name in it", () => {
     // The phrasings are assembled here for the reason given at the top of this file.
-    const forClient = "The cli" + "ent this is for, an image judge.";
+    const forClient = "The cli" + "ent this is for, a nightly batch.";
     const fromData = "sized from a comment in that cli" + "ent\u2019s code";
     expect(repo("").commit("notes.md", `${forClient}\n`).status).not.toBe(0);
     const r = repo("").commit("src.ts", "ok\n", `a change\n\n${fromData}\n`);
