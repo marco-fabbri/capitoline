@@ -39,7 +39,12 @@ if [[ "${1:-}" == "forget" ]]; then
     sqlite3 -cmd ".timeout 5000" "$agy/conversation_summaries.db" \
       "DELETE FROM conversation_summaries WHERE conversation_id = '$cid';"
   fi
-  [ -d "$agy/log" ] && find "$agy/log" -maxdepth 1 -type f -name 'cli-*.log' -mtime +7 -delete
+  # From the runner's own home: find returns to the directory it started in,
+  # and a caller's (root's, say) is one the runner cannot enter. A pruning that
+  # fails anyway must not turn a done forget into a failed one.
+  if [ -d "$agy/log" ]; then
+    (cd "$HOME" && find "$agy/log" -maxdepth 1 -type f -name 'cli-*.log' -mtime +7 -delete) || true
+  fi
   exit 0
 fi
 if [[ "${1:-}" == "codex" ]]; then
