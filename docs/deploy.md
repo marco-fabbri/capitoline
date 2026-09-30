@@ -648,8 +648,10 @@ command that installs it, and these:
   with what to do, and **signed in again** when a check finds it back.
 
 Each is sent once: a restart does not repeat a pause already announced.
-Nothing else is ever sent, and a failed POST is
-logged and forgotten.
+Nothing else is ever sent. A POST that fails on the network or on the
+endpoint's side is tried twice more, 5 and 30 seconds later; a new CLI version
+that still did not get through is announced again at the next check, while any
+other message is logged and dropped.
 
 Any endpoint that takes a text POST works. [ntfy](https://ntfy.sh) is the
 simplest: an open-source service that turns an HTTP POST to a topic into a

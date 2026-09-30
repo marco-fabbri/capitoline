@@ -3,10 +3,19 @@ import type { Logger } from "./log.js";
 import type { CatalogChange } from "./providers/adapter.js";
 import type { AvailabilityEvent } from "./core/core.js";
 
-/** Sends one message. Never throws and never waits: a notification is a side effect, not part of any request. */
-export type Notify = (message: string) => void;
+/**
+ * Sends one message and resolves to whether it was delivered. Never throws,
+ * and nothing that serves a request waits on it: a notification is a side
+ * effect. A caller that records "announced" awaits it, and records only on true.
+ */
+export type Notify = (message: string) => Promise<boolean>;
 
 const TIMEOUT_MS = 10_000;
+// Two more tries after the first, a little apart: a send that fails on the
+// network or on the endpoint's side is usually a moment's trouble (a host with
+// no IPv6 route to an endpoint that has an IPv6 address loses one now and
+// then). A refusal of the message itself (another 4xx) is not tried again.
+const RETRY_DELAYS_MS = [5_000, 30_000];
 
 /**
  * The optional notification of `server.notify`: one plain-text POST per
@@ -20,16 +29,28 @@ const TIMEOUT_MS = 10_000;
  * The URL is never logged: on a public ntfy server the topic name is the
  * secret.
  */
-export function createNotifier(cfg: Config["server"]["notify"], log: Logger, env: NodeJS.ProcessEnv = process.env): Notify | undefined {
+export function createNotifier(cfg: Config["server"]["notify"], log: Logger, env: NodeJS.ProcessEnv = process.env, retryDelaysMs: number[] = RETRY_DELAYS_MS): Notify | undefined {
   if (!cfg) return undefined;
   const token = cfg.token_env === undefined ? undefined : env[cfg.token_env];
   if (cfg.token_env !== undefined && !token) log.warn({ token_env: cfg.token_env }, "notify: the token variable is not set; sending without a token");
-  return (message) => {
+  return async (message) => {
     const headers: Record<string, string> = { "content-type": "text/plain; charset=utf-8", title: "Capitoline" };
     if (token) headers.authorization = `Bearer ${token}`;
-    fetch(cfg.url, { method: "POST", headers, body: cfg.name ? `${cfg.name}: ${message}` : message, signal: AbortSignal.timeout(TIMEOUT_MS) })
-      .then((r) => { if (!r.ok) log.warn({ status: r.status }, "notify: the endpoint refused the message"); })
-      .catch((e: unknown) => log.warn({ err: e instanceof Error ? e.message : String(e) }, "notify: sending failed"));
+    const body = cfg.name ? `${cfg.name}: ${message}` : message;
+    for (let attempt = 0; ; attempt++) {
+      let retry: boolean;
+      try {
+        const r = await fetch(cfg.url, { method: "POST", headers, body, signal: AbortSignal.timeout(TIMEOUT_MS) });
+        if (r.ok) return true;
+        retry = r.status === 429 || r.status >= 500;
+        log.warn({ status: r.status, attempt: attempt + 1 }, "notify: the endpoint refused the message");
+      } catch (e) {
+        retry = true;
+        log.warn({ err: e instanceof Error ? e.message : String(e), attempt: attempt + 1 }, "notify: sending failed");
+      }
+      if (!retry || attempt >= retryDelaysMs.length) return false;
+      await new Promise((r) => setTimeout(r, retryDelaysMs[attempt]).unref());
+    }
   };
 }
 

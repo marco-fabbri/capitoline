@@ -110,8 +110,11 @@ export class VersionWatch {
       if (!this.notify) return;
       // Once per version: a restart, or the next day's check, is not news.
       if (this.store.announcedVersion(id) === latest) return;
-      this.store.setAnnouncedVersion(id, latest!, this.now());
-      this.notify?.(`${id} ${latest} is available (installed ${installed}). Update with: scripts/update-cli.sh ${id}`);
+      // Recorded only once delivered: a send that failed, retries included,
+      // leaves the version to the next check instead of losing it.
+      if (await this.notify(`${id} ${latest} is available (installed ${installed}). Update with: scripts/update-cli.sh ${id}`)) {
+        this.store.setAnnouncedVersion(id, latest!, this.now());
+      }
     }));
   }
 

@@ -57,17 +57,17 @@ describe("the version watch", () => {
   it("says which CLI has a newer version, and announces it once, across a restart too", async () => {
     const store = new UsageStore(":memory:");
     const sent: string[] = [];
-    const watch = new VersionWatch(providers(), runnerSaying(installed), store, log, (m) => sent.push(m), fetchAnswering(latest));
+    const watch = new VersionWatch(providers(), runnerSaying(installed), store, log, async (m) => { sent.push(m); return true; }, fetchAnswering(latest));
     await watch.check();
     expect(watch.states().codex).toMatchObject({ installed: "0.156.0", latest: "0.159.0", updateAvailable: true });
     expect(watch.states().claude).toMatchObject({ installed: "2.1.284", latest: "2.1.284", updateAvailable: false });
     expect(sent).toEqual(["codex 0.159.0 is available (installed 0.156.0). Update with: scripts/update-cli.sh codex"]);
     await watch.check();
-    const restarted = new VersionWatch(providers(), runnerSaying(installed), store, log, (m) => sent.push(m), fetchAnswering(latest));
+    const restarted = new VersionWatch(providers(), runnerSaying(installed), store, log, async (m) => { sent.push(m); return true; }, fetchAnswering(latest));
     await restarted.check();
     expect(sent).toHaveLength(1);
     // A newer one still is news again.
-    const later = new VersionWatch(providers(), runnerSaying(installed), store, log, (m) => sent.push(m), fetchAnswering({ ...latest, "codex/latest": "0.160.0" }));
+    const later = new VersionWatch(providers(), runnerSaying(installed), store, log, async (m) => { sent.push(m); return true; }, fetchAnswering({ ...latest, "codex/latest": "0.160.0" }));
     await later.check();
     expect(sent.at(-1)).toMatch(/^codex 0\.160\.0 is available/);
   });
@@ -76,8 +76,18 @@ describe("the version watch", () => {
     const store = new UsageStore(":memory:");
     await new VersionWatch(providers(), runnerSaying(installed), store, log, undefined, fetchAnswering(latest)).check();
     const sent: string[] = [];
-    await new VersionWatch(providers(), runnerSaying(installed), store, log, (m) => sent.push(m), fetchAnswering(latest)).check();
+    await new VersionWatch(providers(), runnerSaying(installed), store, log, async (m) => { sent.push(m); return true; }, fetchAnswering(latest)).check();
     expect(sent).toEqual(["codex 0.159.0 is available (installed 0.156.0). Update with: scripts/update-cli.sh codex"]);
+  });
+
+  it("leaves a version it could not deliver to the next check", async () => {
+    const store = new UsageStore(":memory:");
+    await new VersionWatch(providers(), runnerSaying(installed), store, log, async () => false, fetchAnswering(latest)).check();
+    expect(store.announcedVersion("codex")).toBeNull();
+    const sent: string[] = [];
+    await new VersionWatch(providers(), runnerSaying(installed), store, log, async (m) => { sent.push(m); return true; }, fetchAnswering(latest)).check();
+    expect(sent).toHaveLength(1);
+    expect(store.announcedVersion("codex")).toBe("0.159.0");
   });
 
   it("records a source it cannot read and never throws", async () => {

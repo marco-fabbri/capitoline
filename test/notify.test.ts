@@ -53,13 +53,33 @@ describe("notifications", () => {
       expect((await e.received).headers.authorization).toBeUndefined();
     } finally { e.close(); }
   });
+  it("tries again after a failure on the endpoint's side, and says whether the message got through", async () => {
+    let calls = 0;
+    const server = createServer((req, res) => { req.resume(); req.on("end", () => { calls++; res.statusCode = calls === 1 ? 503 : 200; res.end(); }); });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/t`;
+    try {
+      expect(await createNotifier({ url }, log, {}, [0, 0])!("x")).toBe(true);
+      expect(calls).toBe(2);
+    } finally { server.close(); }
+    expect(await createNotifier({ url: "http://127.0.0.1:1/nothing-here" }, log, {}, [0, 0])!("x")).toBe(false);
+  });
+  it("does not try again when the message itself is refused", async () => {
+    let calls = 0;
+    const server = createServer((req, res) => { req.resume(); req.on("end", () => { calls++; res.statusCode = 403; res.end(); }); });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    try {
+      expect(await createNotifier({ url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/t` }, log, {}, [0, 0])!("x")).toBe(false);
+      expect(calls).toBe(1);
+    } finally { server.close(); }
+  });
   it("never throws, whether the endpoint refuses the message or cannot be reached", async () => {
     const e = await endpoint(403);
     try {
       expect(() => createNotifier({ url: e.url }, log)!("x")).not.toThrow();
       await e.received;
     } finally { e.close(); }
-    expect(() => createNotifier({ url: "http://127.0.0.1:1/nothing-here" }, log)!("x")).not.toThrow();
+    expect(() => createNotifier({ url: "http://127.0.0.1:1/nothing-here" }, log, {}, [])!("x")).not.toThrow();
   });
   it("says what changed and, for a model taken away, where the configuration still uses it", () => {
     expect(describeCatalogChange(cfg, "codex", { added: ["codex-gpt-7-nova"], removed: ["codex-gpt-6-luna", "codex-gpt-5.6-terra", "codex-image"] }))
