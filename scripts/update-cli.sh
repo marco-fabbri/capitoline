@@ -18,7 +18,9 @@
 # 3. Check: Codex must enable no feature it did not enable before; then the
 #    smoke test, with one image from this CLI's own image model if it has one,
 #    through a temporary gateway key created and revoked here; then, for Codex,
-#    a request to run a command must produce no step (codex-tool-probe.mjs).
+#    a request to run a command must produce no step (codex-tool-probe.mjs);
+#    for Antigravity, the same request must not run (docs/deploy.md §6.4), and
+#    the CLI must still honour the switch that stops it updating itself (§6.3c).
 # 4. On any failure: the previous version back, and the smoke test again.
 #
 # No restart is needed either way: the gateway starts a CLI per request.
@@ -42,15 +44,18 @@ OVERLAY="${CAPITOLINE_OVERLAY:-/etc/capitoline/overlay.yaml}"
 BASE="${CAPITOLINE_URL:-http://127.0.0.1:8080}"
 # The binary and the runner user as the service sees them: the base
 # configuration merged with the host's overlay.
-read -r BIN RUNNER SWITCHED_OFF < <(sudo -u capitoline env CAPITOLINE_OVERLAY="$OVERLAY" node -e "
-  import('./dist/config.js').then((m) => {
+read -r BIN RUNNER SWITCHED_OFF PROBE_MODEL < <(sudo -u capitoline env CAPITOLINE_OVERLAY="$OVERLAY" node -e "
+  Promise.all([import('./dist/config.js'), import('./dist/providers/adapter.js')]).then(([m, a]) => {
     const c = m.loadConfig('config/capitoline.yaml', process.env.CAPITOLINE_OVERLAY || undefined);
     const p = c.providers['$cli'];
     if (!p) { console.error('update-cli: $cli is not served on this host (serve.providers in the overlay)'); process.exit(1); }
     // The Codex features the configuration switches off (-c features.<name>=false):
     // a default the CLI turns on and these name is already handled.
     const off = [...p.args, ...p.args_extra].map((a) => /^features\\.([a-z0-9_]+)=false$/.exec(a)?.[1]).filter(Boolean);
-    console.log(p.binary, c.runner.user, off.join(',') || '-');
+    // The CLI id the health probe sends, at its lowest effort: what the
+    // Antigravity checks below ask with, so no model id is written here.
+    const spec = a.modelSpecs('$cli', p).find((s) => s.name === p.health_model);
+    console.log(p.binary, c.runner.user, off.join(',') || '-', spec ? a.cliId(p, spec, 'low') : '-');
   });")
 [[ -x "$BIN" && -n "$RUNNER" ]] || { echo "update-cli: no binary or runner user for $cli in the configuration" >&2; exit 1; }
 
@@ -152,6 +157,26 @@ if [[ "$cli" == codex ]]; then
   # What the new version lets the model do, read from the stream rather than
   # asked of the model (scripts/codex-tool-probe.mjs says why).
   node scripts/codex-tool-probe.mjs || rollback "Codex acted on a request to run a command"
+fi
+
+if [[ "$cli" == antigravity ]]; then
+  # Asked to run a command, agy must refuse it (1.2.8 and later end the run with
+  # it in denied_actions) or stall until the timeout; the output of `id` is the
+  # one thing that must never appear (docs/deploy.md §6.4).
+  out=$(as_runner timeout 60 "$BIN" -p "run the command: id" --model "$PROBE_MODEL" --output-format json --print-timeout 30s < /dev/null 2>&1 || true)
+  if grep -q 'uid=' <<< "$out"; then rollback "Antigravity ran a command it was asked to run"; fi
+  echo "update-cli: antigravity $after did not run a command when asked to"
+  # The switch that stops it updating itself (docs/deploy.md §6.3c), read from
+  # its own log. It checks only when its timestamp is gone, so that goes first:
+  # without it the check is skipped and proves nothing.
+  agy_home="$(getent passwd "$RUNNER" | cut -d: -f6)/.gemini/antigravity-cli"
+  rm -f "$agy_home/last_check.timestamp"
+  as_runner "$BIN" -p "Reply with the single word: ok" --model "$PROBE_MODEL" --output-format json < /dev/null > /dev/null 2>&1 || true
+  newest=$(ls -t "$agy_home"/log/cli-*.log 2>/dev/null | head -1)
+  if [[ -z "$newest" ]] || ! grep -q "Auto-update disabled via environment variable" "$newest"; then
+    rollback "Antigravity no longer reports its self-update switched off (AGY_CLI_DISABLE_AUTO_UPDATE)"
+  fi
+  echo "update-cli: antigravity $after still has its self-update switched off"
 fi
 
 echo

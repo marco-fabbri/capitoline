@@ -13,7 +13,9 @@
 # (brain/<id>/), its annotations and lock file, and its row in
 # conversation_summaries.db, which holds a title and a preview of the prompt.
 # What is gone already is not an error. The CLI rebuilds its summary index
-# (jetbox_summaries_proto.pb) from the conversations that remain.
+# (jetbox_summaries_proto.pb) from the conversations that remain. It also drops
+# agy's own logs older than seven days: one per run, no prompt in them, useful
+# only for looking into the days just past.
 #
 # Both CLIs write a generated image into their own home, never into the sandbox,
 # under a directory named after the id they announce at the start of the run:
@@ -37,6 +39,7 @@ if [[ "${1:-}" == "forget" ]]; then
     sqlite3 -cmd ".timeout 5000" "$agy/conversation_summaries.db" \
       "DELETE FROM conversation_summaries WHERE conversation_id = '$cid';"
   fi
+  [ -d "$agy/log" ] && find "$agy/log" -maxdepth 1 -type f -name 'cli-*.log' -mtime +7 -delete
   exit 0
 fi
 if [[ "${1:-}" == "codex" ]]; then

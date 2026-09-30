@@ -104,8 +104,10 @@ On the host, as root, from the clone:
    only installs the latest, a copy of the binary), installs as `runner`,
    checks Codex's new features and tool behaviour (the section above), runs
    the smoke test below with one image from the CLI's own image model through
-   a temporary gateway key it revokes afterwards, and **puts the previous
-   version back if any of that fails**, then smoke-tests the restored one.
+   a temporary gateway key it revokes afterwards, checks that Antigravity still
+   refuses to run a command (`docs/deploy.md` §6.4) and still has its
+   self-update switched off (§6.3c), and **puts the previous version back if
+   any of that fails**, then smoke-tests the restored one.
    On success it prints the row for the table above. No restart is needed:
    the gateway starts a CLI per request. What follows is what the script
    automates, and what to do by hand when it stops.

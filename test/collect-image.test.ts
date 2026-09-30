@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -85,6 +85,18 @@ describe("capitoline-collect-image forget", () => {
     expect(traces(agy, MINE)).toEqual([]);
     expect(traces(agy, OTHER)).toHaveLength(4);
     expect(summaries(agy)).toEqual([OTHER]);
+  });
+
+  it("keeps a week of agy's own logs and drops the older ones", () => {
+    const agy = agyHome();
+    mkdirSync(join(agy, "log"));
+    const old = join(agy, "log/cli-20260901_120000.log"), recent = join(agy, "log/cli-20260929_120000.log");
+    writeFileSync(old, "x"); writeFileSync(recent, "x");
+    const tenDaysAgo = Date.now() / 1000 - 10 * 86_400;
+    utimesSync(old, tenDaysAgo, tenDaysAgo);
+    expect(collect(join(agy, "../.."), "forget", MINE).status).toBe(0);
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(recent)).toBe(true);
   });
 
   it("succeeds on a conversation already gone, and refuses anything but a UUID", () => {
