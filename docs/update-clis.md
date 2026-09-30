@@ -35,6 +35,7 @@ procedure below, which a person runs.
 | Antigravity CLI (`agy`) | 1.2.13 | 2026-09-29 | with `scripts/update-cli.sh`; the installer refuses to overwrite an installed binary, so the script removes it first; `agy models` unchanged; `AGY_CLI_DISABLE_AUTO_UPDATE` still honoured ("Auto-update disabled via environment variable" in its log) |
 | Claude Code (`claude`) | 2.1.285 | 2026-09-29 | with `scripts/update-cli.sh`, smoke test passed |
 | Codex CLI (`codex`) | 0.159.1 | 2026-09-29 | with `scripts/update-cli.sh`: no new feature, image and tool probe passed; `codex debug models` lists a new model, GPT-6.1-Sol, which discovery adds as `codex-gpt-6.1-sol`; fixture `debug-models.json` re-captured |
+| Codex CLI (`codex`) | 0.159.2 | 2026-09-30 | with `scripts/update-cli.sh`: no new feature, image and tool probe passed, model list unchanged |
 
 Add a row for every update, newest last.
 

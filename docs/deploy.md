@@ -100,7 +100,7 @@ printf '\nexport PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"\n' >> ~/.pr
 . ~/.profile
 # The versions this repository was last verified with: providers.<id>.version.verified
 # in config/capitoline.yaml, the newest row of each CLI in docs/update-clis.md.
-npm install -g @anthropic-ai/claude-code@2.1.285 @openai/codex@0.159.1
+npm install -g @anthropic-ai/claude-code@2.1.285 @openai/codex@0.159.2
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 claude --version; codex --version; agy --version
 exit
