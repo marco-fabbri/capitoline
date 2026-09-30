@@ -1,0 +1,67 @@
+{
+  "id": "chatcmpl-bb797957-44bd-474c-b33e-5fb899b7f8fb",
+  "object": "chat.completion",
+  "created": 1790744863,
+  "model": "capitoline-judge-sol6",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "With the standard Linux defaults, the connection is declared dead **about 7,875 seconds (2 hours, 11 minutes, 15 seconds) after it becomes idle**.\n\nThe first keepalive probe is sent after `net.ipv4.tcp_keepalive_time = 7200` seconds. With no reply, Linux sends up to `net.ipv4.tcp_keepalive_probes = 9` probes at `net.ipv4.tcp_keepalive_intvl = 75` second intervals, then waits one final interval before giving up:\n\n`7200 + (9 × 75) = 7875 seconds`\n\nThat is the time from the start of the idle period, **not necessarily from the moment the peer loses power**; the socket may already have been idle."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 45761,
+    "completion_tokens": 5252,
+    "total_tokens": 51013
+  },
+  "capitoline": {
+    "provider": "capitoline",
+    "ignored": [],
+    "council": {
+      "deliberationId": "a843ee36-a372-4d90-81af-9320461aae13",
+      "strategyVersion": 2,
+      "shape": "fast",
+      "members": [
+        {
+          "family": "anthropic",
+          "model": "claude-opus",
+          "label": "Response C",
+          "answer": "**About 7875 seconds, or 2 hours 11 minutes 15 seconds, after the last packet was received from the peer.**\n\n### Where the figure comes from\n\nThese are the stock kernel defaults, applied system-wide through sysctls:\n\n| sysctl | Default | Meaning |\n|---|---|---|\n| `net.ipv4.tcp_keepalive_time` | 7200 s (2 h) | Idle time before the first keepalive probe is sent |\n| `net.ipv4.tcp_keepalive_intvl` | 75 s | Interval between unanswered probes |\n| `net.ipv4.tcp_keepalive_probes` | 9 | Number of unanswered probes before the connection is dropped |\n\n**Total:** 7200 + 9 × 75 = **7875 s**.\n\n### Why it is 9 × 75 and not 8 × 75\n\n- The first probe goes out at t = 7200.\n- Probes 2 through 9 follow every 75 s, so the 9th is sent at t = 7200 + 8×75 = 7800.\n- The keepalive timer fires once more at t = 7875. It sees that the count of unanswered probes has reached `tcp_keepalive_probes` and resets the connection.\n- The application then gets `ETIMEDOUT` on its next call, or a poll/epoll error.\n\n### Caveats\n\n- **Distribution changes.** \"Stock\" means upstream defaults. Check your system with `sysctl net.ipv4.tcp_keepalive_time net.ipv4.tcp_keepalive_intvl net.ipv4.tcp_keepalive_probes`. The per-socket options that would override these are `TCP_KEEPIDLE`, `TCP_KEEPINTVL` and `TCP_KEEPCNT`.\n- **The clock starts at the last received segment.** Any traffic from the peer, including a bare ACK, resets the idle timer.\n- **ICMP errors do not shorten this.** If a router or the local ARP layer reports host unreachable, Linux treats it as a soft error. The connection still dies at the keepalive deadline, but the error reported may be `EHOSTUNREACH` instead of `ETIMEDOUT`.\n- **Other settings can override keepalive.** If `TCP_USER_TIMEOUT` is set on the socket, it takes precedence. If there were unacknowledged outgoing data, the retransmission timeout (`tcp_retries2`, about 15 minutes by default) would apply instead. The question rules both of these out, so the answer is 7875 s.",
+          "fellBackFrom": [
+            "claude-fable (rate_limited)"
+          ]
+        },
+        {
+          "family": "openai",
+          "model": "codex-gpt-6-astra",
+          "label": "Response B",
+          "answer": "With the standard Linux defaults, the nominal timeout is **7,875 seconds—2 hours, 11 minutes, 15 seconds—measured from the start of the socket’s idle period**, not necessarily from the moment the peer loses power.\n\nThe defaults are:\n\n| Parameter | Default | Meaning |\n|---|---:|---|\n| `net.ipv4.tcp_keepalive_time` | 7,200 seconds | Idle time before the first keepalive probe |\n| `net.ipv4.tcp_keepalive_intvl` | 75 seconds | Interval between unanswered probes |\n| `net.ipv4.tcp_keepalive_probes` | 9 | Number of unanswered probes before giving up |\n\nThus, **7,200 + (9 × 75) = 7,875 seconds**. The kernel sends the first probe after two hours, sends eight more at 75-second intervals, then waits another 75 seconds before declaring failure.\n\nThere is **no single exact duration measured from power loss**: the connection may already have been idle for some time. This figure also assumes unchanged system-wide defaults, no outstanding application data subject to TCP retransmission timeouts, and no overriding `TCP_USER_TIMEOUT`; actual timer execution can vary slightly."
+        },
+        {
+          "family": "google",
+          "model": "antigravity-gemini-pro",
+          "label": "Response A",
+          "answer": "On a stock Linux system, the kernel will declare the connection dead after **7,875 seconds** (which is exactly **2 hours, 11 minutes, and 15 seconds**) of inactivity.\n\nThis figure is calculated from three standard kernel `sysctl` parameters that govern TCP keepalive behavior. Their default mainline Linux values are:\n\n1. **`net.ipv4.tcp_keepalive_time = 7200`** \n   This dictates the initial idle period. If no data is exchanged for 7,200 seconds (2 hours), the kernel will send the first TCP keepalive probe.\n2. **`net.ipv4.tcp_keepalive_intvl = 75`** \n   This dictates the interval between subsequent keepalive probes. If a probe goes unacknowledged, the kernel waits 75 seconds before sending the next one.\n3. **`net.ipv4.tcp_keepalive_probes = 9`** \n   This is the maximum number of unacknowledged probes the kernel will send before giving up and dropping the connection.\n\n**The Reasoning and Calculation:**\nOnce the connection goes completely idle, the kernel waits for `tcp_keepalive_time` (7,200 seconds) to elapse. It then sends the 1st probe. Because the peer machine has lost power, it won't acknowledge this or any future probes. The kernel will proceed to send a total of 9 probes, spaced 75 seconds apart (`tcp_keepalive_intvl`), and wait for the final interval to expire before severing the connection. \n\nTotal Time = `tcp_keepalive_time` + (`tcp_keepalive_probes` × `tcp_keepalive_intvl`)\nTotal Time = 7200 seconds + (9 × 75 seconds)\nTotal Time = 7200 + 675 = **7,875 seconds**\n\n**Caveats:**\n* **No Application Traffic:** Because you specified there is no application traffic, the connection relies entirely on the keepalive mechanism. If the local application were actively trying to send data when the peer died, standard TCP data retransmission timeouts (governed by `net.ipv4.tcp_retries2`, usually resulting in a roughly 13-15 minute timeout) would take precedence and kill the connection much faster.\n* **Distro-Specific Tuning:** 7200 / 75 / 9 are the hardcoded defaults in the mainline Linux kernel source (following RFC 1122 recommendations). While this applies to a \"stock\" kernel, be aware that some modern Linux distributions or cloud provider images occasionally override these values by default in `/etc/sysctl.d/` to be more aggressive (e.g., lowering the 2-hour wait time).\n"
+        },
+        {
+          "family": "open-weights",
+          "model": "antigravity-gpt-oss",
+          "label": "Response D",
+          "answer": "**Linux TCP‑keepalive timeout (no per‑socket overrides)**  \n\n| Keep‑alive sysctl | Default value (Linux) | Meaning |\n|-------------------|----------------------|---------|\n| `net.ipv4.tcp_keepalive_time` (or `net.ipv6.conf.all.keepalive_time`) | **7200 s** (2 hours) | How long the connection must sit idle before the **first** keep‑alive probe is sent. |\n| `net.ipv4.tcp_keepalive_intvl` (or `net.ipv6.conf.all.keepalive_intvl`) | **75 s** | Interval between successive keep‑alive probes after the first one. |\n| `net.ipv4.tcp_keepalive_probes` (or `net.ipv6.conf.all.keepalive_probes`) | **9** | Number of unanswered probes after which the kernel declares the connection dead. |\n\nWhen the peer disappears (e.g., loses power) and no application data is exchanged, the kernel will:\n\n1. **Wait `tcp_keepalive_time`** (7200 s) of silence.  \n2. Send the **first keep‑alive probe**.  \n3. If no ACK is received, send **`tcp_keepalive_probes‑1`** additional probes, each spaced `tcp_keepalive_intvl` (75 s) apart.  \n\nThe total time until the socket is marked dead is therefore:\n\n\\[\n\\text{Total timeout} = \\text{tcp\\_keepalive\\_time} + \n(\\text{tcp\\_keepalive\\_probes} \\times \\text{tcp\\_keepalive\\_intvl})\n\\]\n\n\\[\n= 7200\\ \\text{s} + (9 \\times 75\\ \\text{s}) = 7200\\ \\text{s} + 675\\ \\text{s}\n= 7875\\ \\text{s}\n\\]\n\n**7875 seconds ≈ 2 hours 11 minutes 15 seconds**.\n\n---\n\n### Summary\n\n- **Figure:** ~7875 s (≈ 2 h 11 min 15 s) after the connection becomes idle.  \n- **Parameters:** `net.ipv4.tcp_keepalive_time = 7200` s, `net.ipv4.tcp_keepalive_intvl = 75` s, `net.ipv4.tcp_keepalive_probes = 9`.  \n\n(IPv6 uses the analogous `net.ipv6.conf.*` parameters with the same defaults.)  \n\nIf any of those sysctl values have been tuned on the system, the timeout will scale accordingly.\n"
+        }
+      ],
+      "lost": [],
+      "rankings": [],
+      "aggregate": [],
+      "judge": {
+        "model": "codex-gpt-6-sol",
+        "blind": true
+      },
+      "calls": 5
+    }
+  }
+}

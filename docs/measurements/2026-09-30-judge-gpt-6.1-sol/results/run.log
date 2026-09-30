@@ -1,0 +1,12 @@
+capitoline-judge-sol61  rf2-node-failure  47s  calls=6  tokens=48801  judge=codex-gpt-6.1-sol
+capitoline-judge-sol6  rf2-node-failure  44s  calls=5  tokens=48383  judge=codex-gpt-6-sol
+capitoline-judge-sol61  subnet-27  33s  calls=6  tokens=47376  judge=codex-gpt-6.1-sol
+capitoline-judge-sol6  subnet-27  27s  calls=5  tokens=47289  judge=codex-gpt-6-sol
+capitoline-judge-sol61  tcp-keepalive  36s  calls=5  tokens=51064  judge=codex-gpt-6.1-sol
+capitoline-judge-sol6  tcp-keepalive  47s  calls=5  tokens=51013  judge=codex-gpt-6-sol
+capitoline-judge-sol61  ipv4-regex  63s  calls=6  tokens=54620  judge=codex-gpt-6.1-sol
+capitoline-judge-sol6  ipv4-regex  58s  calls=5  tokens=53839  judge=codex-gpt-6-sol
+capitoline-judge-sol61  ec-backup-6-nodes  53s  calls=5  tokens=50222  judge=codex-gpt-6.1-sol
+capitoline-judge-sol6  ec-backup-6-nodes  41s  calls=5  tokens=49910  judge=codex-gpt-6-sol
+capitoline-judge-sol61  rf3-min-nodes  45s  calls=5  tokens=50477  judge=codex-gpt-6.1-sol
+capitoline-judge-sol6  rf3-min-nodes  37s  calls=6  tokens=50263  judge=codex-gpt-6-sol

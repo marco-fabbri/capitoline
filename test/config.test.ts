@@ -316,7 +316,7 @@ describe("config", () => {
       // anthropic seat takes claude-fable this is free and it is the strongest
       // model on the table. What follows it cannot be struck out, so the bad
       // day falls to a strong judge instead of a cheap one.
-      expect(c.judge, file).toEqual({ family: "best-available", models: ["claude-opus", "antigravity-claude-opus", "codex-gpt-6-sol", "codex-gpt-5.6-terra"] });
+      expect(c.judge, file).toEqual({ family: "best-available", models: ["claude-opus", "antigravity-claude-opus", "codex-gpt-6.1-sol", "codex-gpt-5.6-terra"] });
       const seatedModels = new Set(c.seats.flatMap((s) => s.models));
       expect(c.judge.models.filter((m) => !seatedModels.has(m)).length, `${file}: the seats can strike out the whole chain`).toBeGreaterThan(0);
       expect(c.judge.models.every((m) => typeof m === "string" && m.length > 0), file).toBe(true);

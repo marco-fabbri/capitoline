@@ -1,0 +1,67 @@
+{
+  "id": "chatcmpl-0356f3da-2041-418c-bd0b-556853d6e704",
+  "object": "chat.completion",
+  "created": 1790745170,
+  "model": "capitoline-judge-sol6",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "**Five nodes** is the minimum for a Nutanix RF3 cluster to tolerate two simultaneous node failures.\n\nRF3 places three copies of data on separate nodes, so at least one copy survives the loss of any two nodes. The cluster also needs a majority of its five metadata and coordination members to keep operating. After two node failures, three of five remain, preserving that quorum. A smaller cluster cannot provide the required two failure tolerance."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 45417,
+    "completion_tokens": 4846,
+    "total_tokens": 50263
+  },
+  "capitoline": {
+    "provider": "capitoline",
+    "ignored": [],
+    "council": {
+      "deliberationId": "69bd6151-9350-4d06-a848-091c66d77d9a",
+      "strategyVersion": 2,
+      "shape": "fast",
+      "members": [
+        {
+          "family": "anthropic",
+          "model": "claude-opus",
+          "label": "Response D",
+          "answer": "**Answer: 5 nodes.** Nutanix documents five nodes as the minimum for a cluster with redundancy factor 3 (fault tolerance level FT2).\n\n## Why five\n\nIt is not the data copies that set the minimum. RF3 keeps three copies of each piece of data (extent group) on three different nodes, so data placement alone would only need three nodes. The binding constraint is the cluster's **metadata and configuration services**, which work by majority quorum:\n\n- **Metadata (Cassandra ring):** In an FT2/RF3 cluster, metadata is kept as **5 replicas** on 5 different nodes. Reads and writes need a majority, which is 3 of 5. If 2 nodes fail, 3 replicas remain, and 3 is still a majority. With only 3 metadata copies, 2 failures would leave 1 of 3, which has no quorum.\n- **Configuration (Zookeeper):** In FT2 mode Nutanix runs **5 Zookeeper instances** for the same reason. 5 − 2 = 3 is still a majority.\n\nThe general rule for majority-quorum systems is **2F + 1** members to survive F failures. For F = 2, that is 5. Each replica must be on a separate node, otherwise one node failure takes out several replicas. So you need at least 5 nodes.\n\nIn short: three data copies survive two node losses, but the cluster only keeps serving I/O if metadata and configuration still have quorum. That requires 5 independent members.\n\n## Caveats and nuances\n\n- **RF vs. FT are two settings.**\n  - The *cluster* redundancy factor (FT level) controls metadata and configuration resilience.\n  - The *container* RF controls how many data copies are kept.\n  - An FT2 cluster can host RF2 containers, but data in those containers only survives one failure. To truly survive two simultaneous failures, you need both FT2 on the cluster and RF3 on the containers.\n- **\"Simultaneous\" in practice.** After losing 2 of 5 nodes, the cluster keeps running on 3 nodes. It can re-protect data back to 3 copies, since 3 nodes are enough for data. It cannot restore full FT2 for metadata until nodes return, so it cannot tolerate further failures. For rebuild headroom, and for storage and CPU capacity to absorb the lost nodes, many deployments go above the minimum (e.g., 6 or more). That is a sizing recommendation, not a hard requirement.\n- **Capacity overhead.** RF3 stores three copies of data, so usable capacity is roughly one third of raw, before data reduction. Erasure coding (EC-X) changes this but has its own minimum node counts.\n- **Block/rack awareness** raises the minimums further, because replicas must be spread across blocks or racks. For example, block awareness with RF3 needs at least 5 blocks.\n- **Version details.** Exact behavior and minimums can vary between AOS releases and special configurations (1- and 2-node clusters don't support RF3 at all). Check the Nutanix documentation for your AOS version. The 5-node minimum for RF3/FT2 has been consistent across mainstream AOS versions.",
+          "fellBackFrom": [
+            "claude-fable (rate_limited)"
+          ]
+        },
+        {
+          "family": "openai",
+          "model": "codex-gpt-6-astra",
+          "label": "Response A",
+          "answer": "**Five nodes** is the minimum for a Nutanix cluster configured with redundancy factor 3 (RF3) to tolerate two simultaneous node failures.\n\nRF3 keeps **three copies of data on separate nodes**, so losing two nodes still leaves a copy. But data copies alone aren’t enough: the cluster must also retain a majority quorum for its metadata and coordination services. With five nodes, losing two leaves three—a majority. With only three or four nodes, losing two would not leave a majority.\n\nThat’s why RF3 requires **five nodes, not just three**. This assumes the cluster is healthy and fully protected before the failures; the surviving nodes also need sufficient resources to run the workloads."
+        },
+        {
+          "family": "google",
+          "model": "antigravity-gemini-pro",
+          "label": "Response C",
+          "answer": "The minimum number of nodes a Nutanix cluster needs to run with Redundancy Factor 3 (RF3) and tolerate two simultaneous node failures is **5 nodes**. \n\nHere is the concrete reasoning for why exactly 5 nodes are required:\n\n**1. The Metadata Quorum Requirement (The Primary Constraint)**\nNutanix uses a distributed architecture where cluster configuration, state, and distributed locks are managed by Apache ZooKeeper, while metadata is stored in a modified Apache Cassandra database (internally called Medusa). Both of these rely on a strict consensus mechanism to maintain data integrity and prevent a \"split-brain\" scenario (where two halves of a cluster both think they are in charge). \n\nTo tolerate $F$ simultaneous failures, a consensus-based system requires a minimum of $2F + 1$ nodes participating in the quorum. \n* To tolerate **1 failure**, it needs $2(1) + 1 =$ **3 nodes** (This is the minimum for RF2).\n* To tolerate **2 simultaneous failures**, it needs $2(2) + 1 =$ **5 nodes**. \n\nIf a 5-node cluster loses 2 nodes, 3 nodes remain online. Because 3 out of 5 constitutes a strict majority (>50%), the cluster maintains quorum and stays fully operational.\n\n**2. Data Placement and Availability**\nRedundancy Factor 3 (RF3) means that every block of guest data and metadata is written to three separate nodes. \n* If a 5-node cluster suffers 2 simultaneous node failures, the system mathematically guarantees that at least one of the remaining 3 nodes holds a copy of the required data. \n* The cluster needs at least 3 surviving nodes to temporarily maintain operations and hold the remaining copies of the data while in a degraded state.\n\n**Important Nuance: Surviving vs. Healing**\nWhile 5 nodes is the absolute architectural minimum to *enable* RF3 and *survive* a double failure, there is a practical caveat regarding self-healing:\nIf a 5-node cluster loses 2 nodes, it degrades to 3 active nodes. While the virtual machines will keep running, the cluster will no longer have enough distinct physical nodes (or likely enough free storage capacity) to rebuild the data back to full RF3 compliance. The cluster will remain in a vulnerable, degraded state until the failed nodes are replaced or repaired. For a cluster to auto-heal and fully restore RF3 compliance after a 2-node failure, you typically need at least 6 or 7 nodes (so that enough nodes and free space remain to redistribute the 3 copies). \n\nHowever, strictly speaking to the software requirements for initialization and failure tolerance, the hard minimum is **5 nodes**.\n"
+        },
+        {
+          "family": "open-weights",
+          "model": "antigravity-gpt-oss",
+          "label": "Response B",
+          "answer": "**Minimum number of nodes:** **5 nodes**\n\n**Why 5?**\n\n| Reason | Explanation |\n|--------|-------------|\n| **Redundancy factor (RF) = 3** | Each piece of data is stored on three distinct nodes. After any failures, the remaining nodes must still be able to hold those three separate copies. |\n| **Tolerance of two simultaneous node failures** | After losing two nodes you still need **three live nodes** (one for each replica) so the data remains accessible. |\n| **Cluster quorum (CVM majority)** | Nutanix runs a Controller VM (CVM) on every node. The cluster is considered “up” only when a **majority of CVMs** are reachable. For *N* nodes the majority is `⌈N/2⌉`.<br>• With 3 nodes, majority = 2 → losing 2 nodes leaves only 1 CVM → no quorum (cluster down).<br>• With 4 nodes, majority = 2 → losing 2 nodes leaves 2 CVMs (quorum OK) but you would only have **2** surviving nodes, which cannot hold the three distinct replicas required by RF‑3.<br>• With **5 nodes**, majority = 3 → losing any 2 nodes leaves **3** nodes alive, satisfying both quorum and the need for three distinct replica locations. |\n| **Result** | The smallest cluster that simultaneously meets the **RF‑3 replica distribution** and **quorum after two failures** is a 5‑node cluster. |\n\nSo, a Nutanix cluster configured with redundancy factor 3 needs **at least five nodes** to survive two node failures while staying online and keeping its data safely replicated.\n"
+        }
+      ],
+      "lost": [],
+      "rankings": [],
+      "aggregate": [],
+      "judge": {
+        "model": "codex-gpt-6-sol",
+        "blind": true
+      },
+      "calls": 6
+    }
+  }
+}

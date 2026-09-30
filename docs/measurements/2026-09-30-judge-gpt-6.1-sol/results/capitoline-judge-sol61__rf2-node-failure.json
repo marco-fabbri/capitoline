@@ -1,0 +1,67 @@
+{
+  "id": "chatcmpl-f962cf82-0a29-413b-84dd-cf8b18994d21",
+  "object": "chat.completion",
+  "created": 1790744677,
+  "model": "capitoline-judge-sol61",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "In a three-node Nutanix cluster, **RF2 stores two copies of each data block on different nodes**. If one node fails, the cluster normally remains operational and data remains accessible. However, blocks with a replica on the failed node now have only one surviving copy; blocks replicated across the two surviving nodes retain both copies.\n\n**Nutanix can automatically rebuild the missing replicas onto the two remaining nodes**, provided sufficient free storage capacity is available. It does not have to wait for the failed node to return or for a replacement node to be added to restore two copies of the data.\n\nRestoring data redundancy does **not** restore full cluster fault tolerance. The surviving nodes retain the required majority quorum, but another node failure would remove that quorum and make the cluster unavailable, even after rebuilding completes. Restoring or replacing the third node returns the cluster to full single-node failure tolerance."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 45073,
+    "completion_tokens": 3728,
+    "total_tokens": 48801
+  },
+  "capitoline": {
+    "provider": "capitoline",
+    "ignored": [],
+    "council": {
+      "deliberationId": "d9cf216c-ad4b-465c-9a66-ed51d55c2454",
+      "strategyVersion": 2,
+      "shape": "fast",
+      "members": [
+        {
+          "family": "anthropic",
+          "model": "claude-opus",
+          "label": "Response D",
+          "answer": "**Immediately:** RF2 stores two copies of every data extent on different nodes. When one node fails, any extent that had a copy on that node now has only one surviving copy. That data is temporarily unprotected, but the cluster stays online. With 3 nodes, the Cassandra and Zookeeper quorums (2 of 3) survive. VM HA restarts the affected VMs on the remaining two nodes.\n\n**Self-healing:** Curator detects the missing replicas and rebuilds them from the surviving copies. Every node participates, so the rebuild is fast. The new copies go onto the two remaining nodes, which restores full RF2 data protection without replacing hardware.\n\n**Caveats:**\n- The rebuild only succeeds if there is enough free capacity. Roughly, the used data must fit in two nodes' worth of storage, which is why Nutanix recommends N+1 headroom.\n- Metadata stays degraded until the node returns, because it needs 3 nodes.\n- A second node failure would lose quorum and take the cluster down, even after the data rebuild finishes.\n\nExact detection timeouts vary by AOS version.",
+          "fellBackFrom": [
+            "claude-fable (rate_limited)"
+          ]
+        },
+        {
+          "family": "openai",
+          "model": "codex-gpt-6-astra",
+          "label": "Response C",
+          "answer": "When one node fails in a three-node Nutanix RF2 cluster, **the cluster normally remains operational and all data remains accessible**. RF2 places two copies of each data block on different nodes, so losing one node does not lose both copies.\n\nHowever, blocks whose other copy was on the failed node now have only one surviving copy. Blocks stored on the two surviving nodes still have two copies. Thus, the cluster initially has reduced data redundancy.\n\n**Nutanix can rebuild the missing data replicas onto the two surviving nodes**, provided sufficient free capacity exists. It does not necessarily have to wait for a replacement third node to restore two copies of the data.\n\nThat does **not** mean the two-node remainder regains full tolerance of another node failure: metadata and cluster-service quorum requirements still matter. Recovering or replacing the failed node restores the supported three-node configuration and full single-node fault tolerance."
+        },
+        {
+          "family": "google",
+          "model": "antigravity-gemini-pro",
+          "label": "Response B",
+          "answer": "In a three-node Nutanix cluster with Replication Factor 2 (RF2), two copies of all data exist across the nodes. When one node fails, the cluster maintains its metadata quorum (two out of three nodes) and remains online, but data redundancy is immediately compromised. Any data block that had a copy on the failed node is reduced to a single surviving copy.\n\nTo address this, the cluster automatically initiates a self-healing process. It identifies the under-replicated data and rebuilds the missing copies onto the two surviving nodes, restoring data redundancy to RF2—provided there is sufficient free storage capacity on those remaining nodes. \n\nHowever, while *data* redundancy can be restored, the cluster's overall fault tolerance cannot. Metadata services (like Cassandra and Zookeeper) require at least three nodes to maintain full resilience. With only two nodes left, the cluster cannot survive a second node failure and will remain in a critical, degraded state until the third node is restored or replaced.\n"
+        },
+        {
+          "family": "open-weights",
+          "model": "antigravity-gpt-oss",
+          "label": "Response A",
+          "answer": "In a Nutanix cluster a **Replication Factor 2 (RF2)** means every block of data is stored on **two different nodes**.  \nWith three nodes, the two copies are automatically placed so that no single node holds both replicas of the same block.\n\nWhen one node fails:\n\n* **Data redundancy is still intact** – the two surviving nodes each hold one copy of every block, so no data is lost and the cluster can continue to serve reads and writes.  \n* **Fault‑tolerance is reduced** – because the third copy no longer exists, the cluster can survive **no further node failure**; a second failure would cause data loss.\n\nThe cluster reacts by:\n\n1. **Marking the failed node as offline** and generating alerts.  \n2. **Continuing normal I/O** on the remaining nodes (though performance may degrade because fewer resources are available).  \n3. **Scheduling background reconstruction** (re‑replication) as soon as the failed node is brought back online or a replacement node is added, copying the missing replicas to restore full RF2 redundancy.\n\nThus, the cluster remains operational but is in a degraded state until the missing replica is rebuilt.\n"
+        }
+      ],
+      "lost": [],
+      "rankings": [],
+      "aggregate": [],
+      "judge": {
+        "model": "codex-gpt-6.1-sol",
+        "blind": true
+      },
+      "calls": 6
+    }
+  }
+}

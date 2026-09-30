@@ -1,0 +1,67 @@
+{
+  "id": "chatcmpl-f7cab98f-3820-4b04-8af3-eaf1bce70841",
+  "object": "chat.completion",
+  "created": 1790744767,
+  "model": "capitoline-judge-sol61",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "**Broadcast address:** `10.23.96.95`  \n**Usable host addresses:** **30**\n\nA `/27` leaves \\(32 - 27 = 5\\) host bits, giving \\(2^5 = 32\\) total addresses.\n\n- Broadcast: \\(64 + 32 - 1 = 95\\), so `10.23.96.95`.\n- Usable hosts: \\(32 - 2 = 30\\), excluding the network and broadcast addresses.\n\nThe usable range is `10.23.96.65`–`10.23.96.94`."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 45101,
+    "completion_tokens": 2275,
+    "total_tokens": 47376
+  },
+  "capitoline": {
+    "provider": "capitoline",
+    "ignored": [],
+    "council": {
+      "deliberationId": "357e9723-4935-4d4d-97f2-5f833cd905af",
+      "strategyVersion": 2,
+      "shape": "fast",
+      "members": [
+        {
+          "family": "anthropic",
+          "model": "claude-opus",
+          "label": "Response C",
+          "answer": "**Broadcast address: 10.23.96.95**\n**Usable host addresses: 30**\n\n**Calculation**\n\n1. **Host bits:** A /27 prefix leaves 32 − 27 = **5 host bits**.\n2. **Block size:** 2⁵ = **32 addresses** per subnet. The subnet mask is 255.255.255.224, since 256 − 32 = 224 in the last octet.\n3. **Check the network address:** Subnets in the last octet start at multiples of 32: 0, 32, 64, 96, … Because 64 is a multiple of 32, **10.23.96.64 is a valid network address**.\n4. **Broadcast:** network + block size − 1 = 64 + 32 − 1 = **95**, so the broadcast is **10.23.96.95**.\n   - In binary, the last octet 64 = `010 00000`. Setting the 5 host bits to 1 gives `010 11111` = 95.\n5. **Usable hosts:** 2⁵ − 2 = **30**. You subtract the network address (.64) and the broadcast address (.95).\n   - The usable range is **10.23.96.65 – 10.23.96.94**.\n\nThe only nuance is that the \"−2\" rule assumes an ordinary subnet. It does not apply to special cases like /31 point-to-point links (RFC 3021) or /32 host routes. For a /27 there is no ambiguity, so the answer is 30.",
+          "fellBackFrom": [
+            "claude-fable (rate_limited)"
+          ]
+        },
+        {
+          "family": "openai",
+          "model": "codex-gpt-6-astra",
+          "label": "Response B",
+          "answer": "The **broadcast address is 10.23.96.95**, and the network has **30 usable host addresses**.\n\n- A `/27` leaves \\(32 - 27 = 5\\) host bits, giving \\(2^5 = 32\\) total addresses.\n- The block runs from `10.23.96.64` through `10.23.96.95` (\\(64 + 32 - 1 = 95\\)).\n- Excluding the network and broadcast addresses leaves \\(32 - 2 = 30\\) usable hosts: `10.23.96.65`–`10.23.96.94`."
+        },
+        {
+          "family": "google",
+          "model": "antigravity-gemini-pro",
+          "label": "Response D",
+          "answer": "**Broadcast Address:** `10.23.96.95`\n**Usable Host Addresses:** `30`\n\n**Calculation:**\n1. **Host Bits:** An IPv4 address has 32 bits. A `/27` prefix means 27 bits are used for the network, leaving 5 bits for hosts (32 - 27 = 5).\n2. **Total Addresses & Usable Hosts:** The total number of addresses in the subnet is $2^5 = 32$. To find the usable host addresses, subtract 2 (for the network address and the broadcast address), giving $32 - 2 = 30$ usable hosts.\n3. **Address Range & Broadcast:** The network address is `10.23.96.64`. Since the subnet contains 32 addresses, the range spans from `.64` to `.95` (64 + 32 - 1). The broadcast address is always the last address in this range, which is `10.23.96.95`.\n"
+        },
+        {
+          "family": "open-weights",
+          "model": "antigravity-gpt-oss",
+          "label": "Response A",
+          "answer": "**Network:** 10.23.96.64/27  \n**Subnet mask:** 255.255.255.224 (binary 11111111.11111111.11111111.11100000)\n\n**Calculation**\n\n* A /27 prefix leaves **5 host bits** (32 – 27 = 5).  \n* Number of IPs in the subnet = 2⁵ = 32.  \n* The block size is 32, so the subnet that contains 10.23.96.64 starts at that address (the network address).  \n* **Broadcast address** = network address + (total IPs – 1) = 10.23.96.64 + 31 = **10.23.96.95**.  \n* **Usable host addresses** = total IPs – 2 (network + broadcast) = 32 – 2 = **30**.\n\n---\n\n**Answer**\n\n- **Broadcast address:** **10.23.96.95**  \n- **Usable host addresses:** **30** (from 10.23.96.65 through 10.23.96.94)\n"
+        }
+      ],
+      "lost": [],
+      "rankings": [],
+      "aggregate": [],
+      "judge": {
+        "model": "codex-gpt-6.1-sol",
+        "blind": true
+      },
+      "calls": 6
+    }
+  }
+}

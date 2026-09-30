@@ -1,0 +1,67 @@
+{
+  "id": "chatcmpl-a85b06b9-3700-4b8d-ae9a-aaaffbd9eb84",
+  "object": "chat.completion",
+  "created": 1790744910,
+  "model": "capitoline-judge-sol61",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "```python\nr\"(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\"\n```\n\nUse with `re.fullmatch(pattern, text)`. Each octet is 0–255 with no leading zeros; `[0-9]` restricts digits to ASCII. `fullmatch` ensures nothing else appears in the string, including trailing whitespace or newlines."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 47228,
+    "completion_tokens": 7392,
+    "total_tokens": 54620
+  },
+  "capitoline": {
+    "provider": "capitoline",
+    "ignored": [],
+    "council": {
+      "deliberationId": "8ff6a89f-520d-4b45-a920-1ef607e64939",
+      "strategyVersion": 2,
+      "shape": "fast",
+      "members": [
+        {
+          "family": "anthropic",
+          "model": "claude-opus",
+          "label": "Response D",
+          "answer": "```python\nimport re\n\nIPV4 = re.compile(\n    r\"(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}\"\n    r\"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\"\n)\n\ndef is_ipv4(s: str) -> bool:\n    return IPV4.fullmatch(s) is not None\n```\n\nAs a single expression:\n\n```\n(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\n```\n\n**How each octet is matched.** The alternatives split 0–255 into ranges that don't overlap:\n\n| Alternative | Matches |\n|---|---|\n| `25[0-5]` | 250–255 |\n| `2[0-4][0-9]` | 200–249 |\n| `1[0-9]{2}` | 100–199 |\n| `[1-9]?[0-9]` | 0–99 (`0`–`9`, or `10`–`99`) |\n\n**Leading zeros are rejected.** A multi-digit octet must start with 1–9 (or `1`/`2` in the three-digit cases), so `0` is the only octet that can start with `0`. `01`, `00`, `04`, and `001` don't match any alternative. So `01.2.3.4` and `1.2.3.04` fail.\n\n**The whole string must match.** `re.fullmatch` anchors both ends, so there's no need for `^`/`$`. This also matters for trailing newlines: `$` would accept `\"1.2.3.4\\n\"`, but `fullmatch` rejects it. If you use `re.match` or `re.search` instead, write `\\A(?:...)\\Z`.\n\n**Why `[0-9]` and not `\\d`.** In Python 3, `\\d` on `str` patterns matches any Unicode decimal digit, such as Arabic-Indic `٣`. `[0-9]` accepts only ASCII digits. You could also use `\\d` with the `re.ASCII` flag.\n\n**Examples:**\n- Accepted: `0.0.0.0`, `255.255.255.255`, `192.168.1.1`, `10.0.0.254`\n- Rejected: `256.1.1.1`, `01.2.3.4`, `1.2.3.04`, `1.2.3`, `1.2.3.4.5`, `1.2.3.4 ` (trailing space), `+1.2.3.4`, `1..2.3`\n\n**Caveat on \"valid\".** This implements the strict dotted-decimal form you specified. Some real parsers accept other forms, such as `inet_aton` accepting `127.1` or octal and hex parts. Python's `ipaddress.IPv4Address` also rejects leading zeros (since 3.9.5), so it agrees with this regex. If you don't strictly need a regex, `ipaddress` is the more maintainable option.",
+          "fellBackFrom": [
+            "claude-fable (rate_limited)"
+          ]
+        },
+        {
+          "family": "openai",
+          "model": "codex-gpt-6-astra",
+          "label": "Response B",
+          "answer": "```python\nr\"(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){0}\"\n```"
+        },
+        {
+          "family": "google",
+          "model": "antigravity-gemini-pro",
+          "label": "Response C",
+          "answer": "Here is the regular expression. \n\n```python\nr\"(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])\"\n```\n\n### Reasoning and Breakdown:\n\nTo match a valid IPv4 address without leading zeros, we have to treat each of the four octets as a numeric string and break down the valid ranges (0–255) into distinct character patterns. \n\nA single valid octet is captured by this non-capturing group:\n`(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])`\n\nHere is how the alternatives inside that group work, evaluated from left to right:\n1. **`25[0-5]`**: Matches `250` through `255`.\n2. **`2[0-4][0-9]`**: Matches `200` through `249`.\n3. **`1[0-9]{2}`**: Matches `100` through `199`.\n4. **`[1-9][0-9]`**: Matches `10` through `99`. By strictly requiring the first digit to be `1-9`, this prevents leading zeros (like `04` or `09`).\n5. **`[0-9]`**: Matches `0` through `9`. This correctly allows a single `0` without allowing `00`.\n\n*(Note: I used `[0-9]` instead of `\\d`. In Python 3, `\\d` matches all Unicode digits by default, which means an Arabic numeral like `١` would technically match unless the `re.ASCII` flag is passed. Using `[0-9]` strictly limits the match to standard ASCII digits without needing extra flags).*\n\n### Overall Structure:\n* **`(?: ... \\.){3}`**: This takes the single-octet pattern described above, appends a literal dot (`\\.`), and repeats the whole sequence exactly 3 times (e.g., `192.168.1.`). \n* **`(?: ... )`**: This adds the 4th and final octet to the end, which does not have a trailing dot.\n* **Anchors**: Because you specified this will be used with Python's **`re.fullmatch()`**, explicit start (`^`) and end (`$`) anchors are omitted. `re.fullmatch()` natively enforces that the pattern must consume the entire string from start to finish. If you were to use `re.match()` or `re.search()` instead, you would need to wrap the pattern in `^` and `$` to guarantee no other characters exist in the string.\n"
+        },
+        {
+          "family": "open-weights",
+          "model": "antigravity-gpt-oss",
+          "label": "Response A",
+          "answer": "**Python `re.fullmatch` pattern**\n\n```python\nipv4_regex = r'^(?:[0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(?:\\.(?:[0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])){3}$'\n```\n\n**Explanation**\n\n- `^…$`  anchors the match to the start and end of the string, ensuring the *whole* string is checked.  \n- Octet pattern (repeated four times, the first once and the remaining three prefixed by `.`):\n  - `[0-9]`                                                                                                                          – matches `0`‑`9` (single‑digit octet)  \n  - `[1-9][0-9]`                                                                                                                                                                                                                                                                                                    \n  - `1[0-9]{2}`                                                                                                                                                                                      \n  - `2[0-4][0-9]`                                                                                                                                                                                                                           \n  - `25[0-5]`                                                                                                                                                                       \n\nThe octet pattern is repeated four times, with three leading dots (`\\.`) separating them: `(?:\\.(octet)){3}`.\n\nThe overall regex therefore matches **only** strings that are valid dotted‑decimal IPv4 addresses, reject any octet with leading zeros (e.g., `01.2.3.4`, `1.2.3.04`), and ensures nothing else is present in the string.\n"
+        }
+      ],
+      "lost": [],
+      "rankings": [],
+      "aggregate": [],
+      "judge": {
+        "model": "codex-gpt-6.1-sol",
+        "blind": true
+      },
+      "calls": 6
+    }
+  }
+}

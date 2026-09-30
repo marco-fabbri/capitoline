@@ -1,0 +1,44 @@
+[
+  {
+    "model": "antigravity-image",
+    "cliModelId": "gemini-3.1-flash-image",
+    "calls": 1,
+    "firstAt": 1790729050557,
+    "lastAt": 1790729050557
+  },
+  {
+    "model": "claude-fable",
+    "cliModelId": "claude-fable-5-1",
+    "calls": 117,
+    "firstAt": 1790382679523,
+    "lastAt": 1790627723258
+  },
+  {
+    "model": "claude-haiku",
+    "cliModelId": "claude-haiku-4-5-20251001",
+    "calls": 22,
+    "firstAt": 1790141096585,
+    "lastAt": 1790744566599
+  },
+  {
+    "model": "claude-opus",
+    "cliModelId": "claude-opus-5-5",
+    "calls": 103,
+    "firstAt": 1790169697013,
+    "lastAt": 1790729042851
+  },
+  {
+    "model": "claude-sonnet",
+    "cliModelId": "claude-sonnet-5",
+    "calls": 1,
+    "firstAt": 1790193239072,
+    "lastAt": 1790193239072
+  },
+  {
+    "model": "claude-sonnet",
+    "cliModelId": "claude-sonnet-5-5",
+    "calls": 1,
+    "firstAt": 1790687907445,
+    "lastAt": 1790687907445
+  }
+]

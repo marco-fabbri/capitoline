@@ -365,7 +365,7 @@ council:
     # are the same model as a seated one with a wider context, so a judge
     # seated there would be weighing its own answer, which is exactly what
     # judge_allow_member: false exists to prevent.
-    judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6-sol, codex-gpt-5.6-terra] }
+    judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6.1-sol, codex-gpt-5.6-terra] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to rank
@@ -397,7 +397,7 @@ council:
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
       - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
       - { family: open-weights, models: [antigravity-gpt-oss] }
-    judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6-sol, codex-gpt-5.6-terra] }
+    judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6.1-sol, codex-gpt-5.6-terra] }
     judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to synthesize

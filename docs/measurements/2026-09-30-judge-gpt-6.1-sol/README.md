@@ -37,4 +37,33 @@ four answers. Six questions show a failure that happens often, not a rare one.
 
 ## Result
 
-Not run yet.
+Run on 2026-09-30 through the tunnel, Codex CLI 0.159.2: twelve
+deliberations, every one completed with its judge (`results/run.log`). The
+Anthropic seat was held by `claude-opus` throughout, since `claude-fable` was
+paused on its quota, alike for both councils.
+
+| Question | `codex-gpt-6.1-sol` | `codex-gpt-6-sol` |
+|---|---|---|
+| `rf2-node-failure` | correct | correct |
+| `subnet-27` | correct | correct |
+| `tcp-keepalive` | correct | correct |
+| `ipv4-regex` | correct | correct |
+| `ec-backup-6-nodes` | correct | correct |
+| `rf3-min-nodes` | correct | correct |
+| unsourced and wrong | 0 | 0 |
+
+The three mechanical questions were scored by `../2026-09-23-council/score.py
+results`, and the other three read against their registered answers with the
+standard of 2026-09-23 (both the RF2 syntheses leave out the Curator scan, as
+syntheses scored correct then did). Every factual claim in the twelve
+syntheses is in the members' answers. The two the script flags as absent are
+derived: a usage line for `re.fullmatch`, which the question names
+(GPT-6.1-Sol), and 7200 + 9 × 75 = 7875 s from the members' own figures
+(GPT-6-Sol).
+
+Wall time, whole deliberation: 277 s for the six with GPT-6.1-Sol, 254 s
+with GPT-6-Sol; the members dominate it, so this says little about the judge.
+
+**By the registered rule, a tie: GPT-6.1-Sol replaces GPT-6-Sol in the
+shipped judge chains**, as a declared preference for the newer model. Nothing
+here says it is the better judge, only that on these six it was no worse.
