@@ -559,6 +559,17 @@ Re-run this install after every `git pull` (§8.3): the installed copy is a
 snapshot, not a link, and `sudo` runs the installed path, never the one in
 the clone.
 
+The same helper forgets Antigravity's conversations. `agy` keeps every one
+in the runner's home — the whole conversation, its transcripts and a summary
+with a preview of the prompt — and has no option not to, where Claude Code and
+Codex are told by flag (`--no-session-persistence`, `--ephemeral`). After each
+Antigravity run, text, image or health check, once the process has ended, the
+gateway runs `capitoline-collect-image forget <conversation-id>`
+(`providers.antigravity.forget`), which removes that conversation's files and
+its row in `conversation_summaries.db` (hence `sqlite3` in §1). It runs in the
+background and a failure is only logged: the answer never waits on it. No
+sudoers change: the rule of §5 already allows the path with any arguments.
+
 Image generation needs no change to the `strict` settings of §6.4: for
 `agy` a `generate_image` call is not a file write, so it runs headless with
 no approval prompt, while `run_command` and real file writes keep stalling.

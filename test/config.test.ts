@@ -759,6 +759,7 @@ describe("the end-to-end configuration tracks the repository one", () => {
     "council.capitoline-fast.stageTimeoutS",     // the same, for the fast shape
     "council.capitoline.stageTimeoutS",          // seconds, not minutes, so a suspended member fails fast
     "providers.antigravity.binary",              // the fake CLIs replay fixtures
+    "providers.antigravity.forget",              // no CLI home to clean behind a fake
     "providers.antigravity.image.collect",       //   and so does the collect helper
     "providers.antigravity.timeout_s",           // seconds, not minutes, so a hung fake fails fast
     "providers.antigravity.version",             // no version check: the suite never reaches the network

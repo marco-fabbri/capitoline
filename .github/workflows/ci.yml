@@ -17,6 +17,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      # The collect helper's forget mode edits a SQLite file with the sqlite3
+      # command, as it does on a host (docs/deploy.md §1).
+      - run: command -v sqlite3 || sudo apt-get install -y sqlite3
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build

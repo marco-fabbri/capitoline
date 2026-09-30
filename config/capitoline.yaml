@@ -323,6 +323,12 @@ providers:
     system_prompt_flag: null                         # none: prepended to the prompt with a role marker
     system_prompt_flag_prefix: null
     prompt_via: stdin                                # {"event":"user","message":{"role":"user","content":...}}
+    # agy keeps every conversation in the runner's home (the full conversation,
+    # its transcripts, a summary with a preview of the prompt) and has no option
+    # not to, as Claude Code (--no-session-persistence) and Codex (--ephemeral)
+    # do. The same helper as the images removes them after each run
+    # (docs/deploy.md §7.1); the sudoers rule already allows it.
+    forget: [/usr/local/bin/capitoline-collect-image, forget]
     image:
       # Image models: the CLI writes the file into its own home, never into the
       # sandbox. `collect` receives the conversation id as its last argument and

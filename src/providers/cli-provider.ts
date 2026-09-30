@@ -44,6 +44,10 @@ const DEFAULTS: Required<CliProviderOptions> = { exitGraceMs: 1000, healthDeadli
 // The conversation id becomes an argument of a privileged command: only this
 // shape is ever passed on, whatever an adapter reports.
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Bounds for the forget command: a few removals and one row deleted, which
+// can wait up to five seconds on another run holding the database.
+const FORGET_TIMEOUT_MS = 15_000;
+const FORGET_MAX_BYTES = 64 * 1024;
 
 // A run's process, its internal abort controller and the wind-down shared by
 // execute() and generateImage(): the process must never outlive its consumer.
@@ -207,12 +211,14 @@ export class CliProvider implements Provider {
     // answered 200 with empty content, a failure marked as a success. Said
     // once here, so both paths agree and no client has to check for it.
     let sawText = false;
+    let conversationId: string | undefined;
     try {
       for await (const ev of this.adapter.parse(run.handle.lines)) {
         // Adapter-internal events stay here: a text run has no use for them and
         // the Provider contract (AsyncIterable<ProviderEvent>) forbids forwarding them.
         if (ev.type === "diagnostic") { this.log.warn({ model: model.name, ...ev.data }, ev.message); continue; }
-        if (ev.type === "meta" || ev.type === "tool") continue;
+        if (ev.type === "meta") { conversationId ??= ev.conversationId; continue; }
+        if (ev.type === "tool") continue;
         if (ev.type === "text" && ev.delta.trim() !== "") sawText = true;
         if (ev.type === "done" && !sawText) {
           terminal = true;
@@ -232,7 +238,20 @@ export class CliProvider implements Provider {
       // Runs on normal completion, on the early return above and when the
       // consumer stops iterating: the process must never outlive its consumer.
       if (terminal) run.windDown(); else run.ac.abort(); // abort is a no-op when the process has already ended
+      this.forgetAfter(run, model, conversationId);
     }
+  }
+
+  // What the run left in the CLI's home goes once the process has ended (the
+  // CLI writes until it exits), in the background: the answer is already out,
+  // and neither the client nor the next request waits on a clean-up.
+  private forgetAfter(run: Run, model: ModelSpec, conversationId: string | undefined): void {
+    if (!this.cfg.forget || !conversationId || !CONVERSATION_ID.test(conversationId)) return;
+    const [binary, ...args] = this.cfg.forget;
+    void run.handle.result
+      .then(() => this.runner.capture({ binary, args: [...args, conversationId], timeoutMs: FORGET_TIMEOUT_MS, maxBytes: FORGET_MAX_BYTES }))
+      .then((r) => { if (r.exitCode !== 0) this.log.warn({ model: model.name, conversationId, exitCode: r.exitCode, timedOut: r.timedOut, stderr: r.stderr.slice(-500) }, "conversation not forgotten"); })
+      .catch((e: unknown) => this.log.warn({ model: model.name, conversationId, err: String(e) }, "conversation not forgotten"));
   }
 
   // One image: the CLI is an agent, so the run is guarded (only the configured
@@ -346,6 +365,9 @@ export class CliProvider implements Provider {
       yield { type: "done", usage };
     } finally {
       if (terminal) run.windDown(); else run.ac.abort();
+      // After the collect, which ran in the body: forgetting first would take
+      // the image with the rest.
+      this.forgetAfter(run, model, conversationId);
     }
   }
 

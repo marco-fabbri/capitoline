@@ -1,10 +1,19 @@
 #!/bin/bash
 # capitoline-collect-image <conversation-uuid>           Antigravity
 # capitoline-collect-image codex <thread-uuid>           Codex
+# capitoline-collect-image forget <conversation-uuid>    Antigravity, any run
 # Prints the newest image of that conversation to stdout, then removes the
 # conversation's image directory. Run as `runner` through sudo; the sudoers rule
 # allows any arguments to this path, so this script is what bounds them: an
-# optional literal `codex` and one UUID, nothing else.
+# optional literal `codex` or `forget` and one UUID, nothing else.
+#
+# `forget` removes what an Antigravity run leaves in the runner's home once it
+# has ended, since the CLI has no option not to keep it (Claude Code and Codex
+# are told by flag): the conversation (conversations/<id>.db), its transcripts
+# (brain/<id>/), its annotations and lock file, and its row in
+# conversation_summaries.db, which holds a title and a preview of the prompt.
+# What is gone already is not an error. The CLI rebuilds its summary index
+# (jetbox_summaries_proto.pb) from the conversations that remain.
 #
 # Both CLIs write a generated image into their own home, never into the sandbox,
 # under a directory named after the id they announce at the start of the run:
@@ -15,6 +24,21 @@
 # any PNG in it is the one, whatever the CLI calls it next.
 set -euo pipefail
 uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+if [[ "${1:-}" == "forget" ]]; then
+  cid="${2:-}"; [[ $# -eq 2 ]] || { echo "usage: $0 forget <conversation-uuid>" >&2; exit 2; }
+  [[ "$cid" =~ $uuid ]] || { echo "bad conversation id" >&2; exit 2; }
+  agy="$HOME/.gemini/antigravity-cli"
+  rm -rf "$agy/brain/$cid"
+  rm -f "$agy/conversations/$cid.db" "$agy/conversations/$cid.db-wal" "$agy/conversations/$cid.db-shm" \
+        "$agy/annotations/$cid.pbtxt" "$agy/presence/$cid.lock"
+  # Other agy processes may hold the database open: wait for them rather than
+  # fail. The id is a validated UUID, so it can go into the statement as text.
+  if [ -f "$agy/conversation_summaries.db" ] && command -v sqlite3 >/dev/null; then
+    sqlite3 -cmd ".timeout 5000" "$agy/conversation_summaries.db" \
+      "DELETE FROM conversation_summaries WHERE conversation_id = '$cid';"
+  fi
+  exit 0
+fi
 if [[ "${1:-}" == "codex" ]]; then
   cid="${2:-}"; [[ $# -eq 2 ]] || { echo "usage: $0 codex <thread-uuid>" >&2; exit 2; }
   dir="$HOME/.codex/generated_images/$cid"; pattern="*.png"

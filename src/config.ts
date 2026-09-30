@@ -164,6 +164,11 @@ const ProviderSchema = z.object({
   system_prompt_flag_prefix: z.string().min(1).nullable(),
   prompt_via: z.literal("stdin"),
   image: ImageSchema,
+  // For a CLI that keeps every conversation in its home with no option not to
+  // (Antigravity): the command, run as the runner after each run has ended,
+  // with the conversation id as its last argument, that removes what the run
+  // left. Absent for a CLI told by flag not to keep anything.
+  forget: z.array(z.string().min(1)).min(1).optional(),
 }).strict();
 
 // A seat of a council: a family and the chain of models to try for it, best

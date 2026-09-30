@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { join } from "node:path";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,7 +51,7 @@ describe("CliProvider", () => {
     // answered 200 with empty content.
     const agyCfg = config.providers.antigravity;
     const fixture = join(process.cwd(), "test/fixtures/antigravity/stream-json-tool-denied.jsonl");
-    const p = new CliProvider("antigravity", { ...agyCfg, binary: FAKE, args: ["--mode", "replay", "--file", fixture], timeout_s: 5 }, antigravityAdapter, runner, createLogger("t"));
+    const p = new CliProvider("antigravity", { ...agyCfg, binary: FAKE, args: ["--mode", "replay", "--file", fixture], timeout_s: 5, forget: undefined }, antigravityAdapter, runner, createLogger("t"));
     const m = p.models().find((x) => x.name === "antigravity-gemini-flash-high")!;
     const out: ProviderEvent[] = [];
     for await (const e of p.execute({ model: m.name, stream: false, messages: [{ role: "user", text: "q" }] }, m)) out.push(e);
@@ -200,7 +200,9 @@ describe("CliProvider.generateImage", () => {
   const imageReq: ImageRequest = { model: "antigravity-image", prompt: "a lighthouse on a cliff at dawn, watercolour" };
 
   function imageProvider(fixture: string, extra: Partial<typeof agy> = {}, r: Runner = runner, opts = {}, mode = "replay", adapter: Adapter = antigravityAdapter) {
-    const cfg = { ...agy, binary: FAKE, args: ["--mode", mode, "--file", fixture], timeout_s: 1, image: { ...agy.image, collect: [COLLECT] }, ...extra };
+    // No forget unless a test asks for it: it runs after the process, at a
+    // moment the tests counting the collect's captures cannot pin down.
+    const cfg = { ...agy, binary: FAKE, args: ["--mode", mode, "--file", fixture], timeout_s: 1, image: { ...agy.image, collect: [COLLECT] }, forget: undefined, ...extra };
     return new CliProvider("antigravity", cfg, adapter, r, createLogger("t"), { now: () => NOW, ...opts });
   }
   async function generate(p: CliProvider, signal?: AbortSignal, timeoutS?: number) {
@@ -235,6 +237,33 @@ describe("CliProvider.generateImage", () => {
     // The collect command gets the conversation id from the stream as its last argument.
     expect(spy.captures).toHaveLength(1);
     expect(spy.captures[0]).toMatchObject({ binary: COLLECT, args: [CID], timeoutMs: 30_000, maxBytes: 20 * 1024 * 1024 });
+  });
+  // Antigravity keeps every conversation in its home; the forget command
+  // removes it after each run, in the background, once the process has ended.
+  const FORGET_OK = ["/usr/bin/true", "forget"];
+  it("forgets a text run's conversation once the run has ended", async () => {
+    const spy = spyRunner();
+    const fixture = join(process.cwd(), "test/fixtures/antigravity/stream-json.jsonl");
+    const p = new CliProvider("antigravity", { ...agy, binary: FAKE, args: ["--mode", "replay", "--file", fixture], timeout_s: 5, forget: FORGET_OK }, antigravityAdapter, spy, createLogger("t"));
+    const m = p.models().find((x) => x.name === "antigravity-gemini-flash")!;
+    const out: ProviderEvent[] = [];
+    for await (const e of p.execute({ model: m.name, stream: false, messages: [{ role: "user", text: "q" }] }, m)) out.push(e);
+    expect(out.at(-1)?.type).toBe("done");
+    await vi.waitFor(() => expect(spy.captures).toHaveLength(1));
+    expect(spy.captures[0]).toMatchObject({ binary: "/usr/bin/true", args: ["forget", "fdc15146-e14d-4592-a062-8bebca386077"] });
+  });
+  it("forgets an image run's conversation after collecting the image, never before", async () => {
+    const spy = spyRunner();
+    const ev = await generate(imageProvider(IMAGE_RUN, { forget: FORGET_OK }, spy));
+    expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
+    await vi.waitFor(() => expect(spy.captures).toHaveLength(2));
+    expect(spy.captures.map((c) => c.args)).toEqual([[CID], ["forget", CID]]);
+  });
+  it("answers all the same when forgetting fails", async () => {
+    const spy = spyRunner();
+    const ev = await generate(imageProvider(IMAGE_RUN, { forget: ["/usr/bin/false"] }, spy));
+    expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
+    await vi.waitFor(() => expect(spy.captures).toHaveLength(2));
   });
   it("never forwards adapter-internal meta or tool events", async () => {
     const ev = await generate(imageProvider(IMAGE_RUN));
