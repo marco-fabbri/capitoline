@@ -569,6 +569,8 @@ gateway runs `capitoline-collect-image forget <conversation-id>`
 its row in `conversation_summaries.db` (hence `sqlite3` in §1). It runs in the
 background and a failure is only logged: the answer never waits on it. No
 sudoers change: the rule of §5 already allows the path with any arguments.
+What stays is not tied to a conversation: `agy`'s logs, which carry no prompt,
+and a 267-byte opaque file per working directory under `implicit/`.
 
 Image generation needs no change to the `strict` settings of §6.4: for
 `agy` a `generate_image` call is not a file write, so it runs headless with
