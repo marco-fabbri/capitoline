@@ -247,6 +247,17 @@ const ConfigObject = z
         // Cloudflare"); the service refuses to start on one while it would be
         // open — no Access and no key issued yet.
         host: z.string().min(1).default("127.0.0.1"),
+        // OAuth for the MCP clients that cannot hold a key, such as Claude on
+        // the web (src/server/oauth.ts). `public_url` is the address those
+        // clients reach this gateway at, over HTTPS: the issuer, with /mcp as
+        // the one resource its tokens are for. Absent, there is no OAuth.
+        oauth: z.object({
+          public_url: z.string().url().refine((u) => {
+            const url = new URL(u);
+            const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+            return (url.protocol === "https:" || local) && (url.pathname === "/" || url.pathname === "") && !url.search && !url.hash;
+          }, "server.oauth.public_url must be an https origin with no path, query or fragment (https://api.example.com)"),
+        }).strict().optional(),
         access: z.object({
           team_domain: z.string().default(""), audience: z.string().default(""),
           /**

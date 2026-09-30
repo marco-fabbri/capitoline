@@ -13,6 +13,7 @@ import type { Provider } from "./providers/adapter.js";
 import { createRunner } from "./runner/runner.js";
 import { hostMemoryMb, sizing } from "./sizing.js";
 import { createAuthMiddleware } from "./server/access.js";
+import { createOAuthServer } from "./server/oauth.js";
 import { createApp } from "./server/app.js";
 import { UsageStore } from "./usage/store.js";
 
@@ -123,7 +124,13 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // Cloudflare Access JWT when a team domain is configured. With neither a
   // key issued nor Access in front the gateway is open, and says so.
   const accessOn = cfg.server.access.team_domain !== "";
-  const access = createAuthMiddleware({ access: accessOn ? { teamDomain: cfg.server.access.team_domain, audience: cfg.server.access.audience } : undefined, keys: usage }, log.child({ mod: "access" }));
+  const oauth = cfg.server.oauth ? createOAuthServer(usage, cfg.server.oauth.public_url, log.child({ mod: "oauth" })) : undefined;
+  const access = createAuthMiddleware({
+    access: accessOn ? { teamDomain: cfg.server.access.team_domain, audience: cfg.server.access.audience } : undefined,
+    keys: usage,
+    oauth: oauth ? { verifyAccessToken: (t) => oauth.provider.verifyAccessToken(t), resourceMetadataUrl: oauth.resourceMetadataUrl } : undefined,
+  }, log.child({ mod: "access" }));
+  if (oauth) log.info({ issuer: cfg.server.oauth!.public_url, resource: oauth.provider.resource.href }, "oauth: on, for /mcp");
   if (!accessOn && !usage.hasKeys()) log.warn("identity: open — Cloudflare Access is not configured (server.access.team_domain is empty) and no API key exists; the first key closes it");
   else log.info({ access: accessOn, keys: usage.hasKeys(), admins: cfg.server.access.admins.length }, "identity");
   // Open is acceptable on loopback, where only this host can reach the port
@@ -151,7 +158,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
 
   let ready = false;
   const app = createApp(core, {
-    versions: () => versions.states(), log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins } });
+    versions: () => versions.states(), log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins }, keys: usage, oauth: oauth?.router });
   const port = overrides.port ?? cfg.server.port;
 
   // One owner for the sqlite handle: whatever fails between here and the end of

@@ -3,7 +3,7 @@ import type { VersionState } from "../versions.js";
 import type { Core } from "../core/core.js";
 import { CapitolineError, type ProviderEvent, type Usage } from "../core/types.js";
 import type { Logger } from "../log.js";
-import { callerOf } from "./access.js";
+import { callerOf, type KeyAuthenticator } from "./access.js";
 import { createAdminRouter, type AdminStore } from "./admin.js";
 import { convertImageRequest, imageResponse, type ImageEvent } from "./images.js";
 import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, ignoredHeader, sseChunk, type Converted } from "./openai.js";
@@ -45,13 +45,22 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   /** The gateway's own keys and caller names, and who may manage them: mounts /v1/admin and names /v1/usage's rows. */
   identity?: { store: AdminStore; admins: string[] };
   /** Each CLI's installed and latest version, for /health (src/versions.ts). */
-  versions?: () => Record<string, VersionState> }): express.Express {
+  versions?: () => Record<string, VersionState>;
+  /** The OAuth authorization server for MCP clients (src/server/oauth.ts), mounted at the root. */
+  oauth?: express.Router;
+  /** The gateway's keys, for the full /health to a caller who presents one. */
+  keys?: KeyAuthenticator }): express.Express {
   const app = express();
   app.disable("x-powered-by");
   // Access runs first, app-wide, so an unauthenticated caller gets a 401 before
   // any body is buffered and any route added later is protected by default.
   // /health is the one deliberate exemption: it serves the local monitor on
   // 127.0.0.1 and never reaches the CLIs (spec 4).
+  // The OAuth endpoints and their discovery documents come before it: they are
+  // where a client that has no credential yet goes to get one, and they carry
+  // their own body parsers, rate limits and error format.
+  if (opts.oauth) app.use(opts.oauth);
+
   const access = opts.access;
   if (access) app.use((req, res, next) => (req.path === "/health" ? next() : access(req, res, next)));
 
@@ -171,7 +180,14 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // also runs the `runner` user, the account docs/deploy.md §11 keeps away
   // from the usage database on purpose. The per-caller breakdown is below,
   // behind Access.
-  app.get("/health", (_req, res) => {
+  // In full to the host itself and to a caller with a key; to anyone else only
+  // that the gateway is up. Behind a tunnel or a reverse proxy every request
+  // arrives from the loopback, so "local" also means that no proxy said it
+  // forwarded the request from elsewhere.
+  app.get("/health", (req, res) => {
+    const bearer = /^Bearer\s+(\S+)$/i.exec(req.header("authorization") ?? "")?.[1];
+    const keyed = bearer !== undefined && opts.keys?.authenticateKey(bearer) != null;
+    if (!keyed && !isLocal(req)) { res.json({ ok: true }); return; }
     const versions = opts.versions?.() ?? {};
     res.json({ ok: true, providers: core.providerStates().map((p) => ({ ...p, version: versions[p.id] ?? null })), models: core.listModels() });
   });
@@ -366,4 +382,11 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   });
 
   return app;
+}
+
+const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+/** A request from this host that no proxy says it forwarded from elsewhere. */
+function isLocal(req: Request): boolean {
+  if (!LOOPBACK.has(req.socket.remoteAddress ?? "")) return false;
+  return req.header("cf-connecting-ip") === undefined && req.header("x-forwarded-for") === undefined && req.header("forwarded") === undefined;
 }

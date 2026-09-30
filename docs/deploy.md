@@ -837,9 +837,11 @@ names the command that makes a key.
 
 The traffic is plain HTTP, keys included. Keep it on a network you trust, or
 put a TLS reverse proxy on this host and leave `server.host` at `127.0.0.1`.
-`/health` needs no key on any address the service listens on: it tells
-whoever can reach the port which providers are up and which models they
-serve, never who calls.
+`/health` needs no key, but tells only the host itself, or a caller with a
+key, which providers are up and which models they serve; anyone else gets
+`{"ok":true}`. "The host itself" is a request from the loopback that no proxy
+marks as forwarded (`Cf-Connecting-Ip`, `X-Forwarded-For`, `Forwarded`): a
+reverse proxy in front has to set one of them, or every visitor looks local.
 
 ### 8.3 Updating the code
 
@@ -914,8 +916,9 @@ curl -s https://api.example.com/v1/models \
 
 From the host, `curl -s http://127.0.0.1:8080/v1/models` now answers 401
 unless it carries a key of §8.1 (no request to the loopback carries an Access
-JWT), while `curl -s http://127.0.0.1:8080/health` still answers: that is the
-intended exemption for local monitoring.
+JWT), while `curl -s http://127.0.0.1:8080/health` still answers in full: that
+is the intended exemption for local monitoring. Through the tunnel it answers
+`{"ok":true}` only, since `cloudflared` marks the request as forwarded.
 
 A verified token also says who is calling, and every usage row records it: the
 email of a user token, and for a service token the `common_name` claim —
@@ -1104,6 +1107,53 @@ generate_image: a red fox in the snow" and "use capitoline ask_council: why
 is a blind ranking better than a public one?". The last one is nine calls on
 three subscriptions and takes minutes: run it once, and not on a day when
 the quotas are already tight (§9).
+
+### 10.1 Claude on the web, and other OAuth clients
+
+Claude on the web, Desktop and mobile reach a remote MCP server from
+Anthropic's cloud and sign in with OAuth only: they cannot send a key or a
+service token. For them the gateway is its own OAuth authorization server,
+and signing in is pasting one of its keys (§8.1) once on its own page. The
+tokens the client gets are bound to that key's name: calls are recorded under
+it, and revoking the key ends every token it stood behind. The tokens are good
+for `/mcp` only; the HTTP API keeps taking keys.
+
+It needs the gateway at a public HTTPS address, which Capitoline does not
+provide itself: the tunnel of §9, or any reverse proxy. In the overlay:
+
+```yaml
+server:
+  oauth:
+    public_url: https://api.example.com
+```
+
+Restart, then check what a client reads first:
+
+```sh
+curl -s https://api.example.com/.well-known/oauth-protected-resource/mcp | jq   # resource: https://api.example.com/mcp
+curl -s -o /dev/null -D - -X POST https://api.example.com/mcp | grep -i www-authenticate   # Bearer resource_metadata="…"
+```
+
+Make a key for the purpose, so that revoking it ends this access and nothing
+else:
+
+```sh
+cd /var/lib/capitoline/app && sudo -Hu capitoline \
+  env CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml npm run -s keys -- create claude-web
+```
+
+In Claude: Customize → Connectors → add a custom connector with the URL
+`https://api.example.com/mcp`. Claude registers itself and opens the
+gateway's sign-in page, which names the host it will send you back to
+(`claude.ai`); paste the `claude-web` key there. From then on Claude renews its
+token by itself, for 30 days after its last use.
+
+With Cloudflare Access in front (§9), Access has to let these through, or
+Claude never reaches the sign-in: in the Access application, a Bypass policy
+for `/mcp`, `/authorize`, `/token`, `/register`, `/revoke`, `/oauth/*` and
+`/.well-known/*`. The gateway's own OAuth then guards `/mcp`. Or leave Access
+out and let the gateway's keys and OAuth be the only door (§8.2): the tunnel
+still opens no port.
 
 ## 11. Backup
 

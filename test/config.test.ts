@@ -231,6 +231,13 @@ describe("config", () => {
     expect(() => parseConfig(config({ discover: "{ args: [models], prefix: capitoline- }" }))).toThrow(/discover.prefix "capitoline-" is reserved/);
     expect(parseConfig(config({ discover: "{ args: [models], prefix: x- }" })).providers.x.discover).toEqual({ args: ["models"], prefix: "x-", exclude: [] });
   });
+  it("takes an https origin as the OAuth public URL, and nothing else", () => {
+    expect(parseConfig(config()).server.oauth).toBeUndefined();
+    expect(parseConfig(`server: { oauth: { public_url: "https://api.example.com" } }\n${config()}`).server.oauth?.public_url).toBe("https://api.example.com");
+    for (const bad of ["http://api.example.com", "https://api.example.com/mcp", "https://api.example.com/?x=1"]) {
+      expect(() => parseConfig(`server: { oauth: { public_url: "${bad}" } }\n${config()}`), bad).toThrow(/https origin/);
+    }
+  });
   it("rejects a notify endpoint that is not a URL, and defaults the catalog to once a day", () => {
     expect(() => parseConfig(`server: { notify: { url: not-a-url } }\n${config()}`)).toThrow(/url/i);
     expect(parseConfig(config()).server.discovery_interval_h).toBe(24);

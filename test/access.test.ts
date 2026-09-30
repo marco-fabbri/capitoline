@@ -139,6 +139,26 @@ describe("auth middleware: keys and Access together", () => {
     expect(r.body.who.type).toBe("user");
   });
 
+  // Access kept at the edge with a Bypass for /mcp: an OAuth client arrives
+  // with no Access token and must get the OAuth challenge, not Access's 401;
+  // a request that does carry an Access token still goes through Access.
+  it("sends /mcp without any credential to OAuth when OAuth is on, and the rest to Access as before", async () => {
+    const store = new UsageStore(":memory:");
+    const oauth = { verifyAccessToken: async () => { throw new Error("no"); }, resourceMetadataUrl: "https://gw.example.com/.well-known/oauth-protected-resource/mcp" };
+    const a = express();
+    a.use(createAuthMiddleware({ access: { teamDomain: team, audience: aud, jwks }, keys: store, oauth }, createLogger("t")));
+    a.post("/mcp", (_req, res) => res.json({ who: res.locals.identity ?? null }));
+    a.get("/x", (_req, res) => res.json({ who: res.locals.identity ?? null }));
+    const bare = await request(a).post("/mcp");
+    expect(bare.status).toBe(401);
+    expect(bare.headers["www-authenticate"]).toContain("resource_metadata=");
+    const viaAccess = await request(a).post("/mcp").set("Cf-Access-Jwt-Assertion", await sign({ email: "a@b.c", sub: "u1" }));
+    expect(viaAccess.status).toBe(200);
+    const elsewhere = await request(a).get("/x");
+    expect(elsewhere.status).toBe(401);
+    expect(elsewhere.headers["www-authenticate"]).toBeUndefined();
+  });
+
   it("is open without Access until the first key exists, and closed from then on", async () => {
     const { store, app: a } = withKeys();
     const open = await request(a).get("/x");

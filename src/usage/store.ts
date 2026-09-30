@@ -48,6 +48,8 @@ export interface PauseRow { provider: string; model: string | null; until: numbe
 export interface ApiKeyInfo { name: string; createdAt: number; createdBy: string | null; revokedAt: number | null; lastUsedAt: number | null }
 /** Lower case, digits and dashes, 2-64 characters: a name that is also safe in a header, a log line and a URL. */
 export const KEY_NAME = /^[a-z0-9][a-z0-9-]{1,63}$/;
+/** An OAuth token as stored, without the token: its hash is the row's key. */
+export interface OAuthTokenRow { kind: "access" | "refresh"; keyName: string; clientId: string; resource: string | null; scopes: string[]; expiresAt: number }
 const hashKey = (key: string): string => createHash("sha256").update(key).digest("hex");
 
 /** The five-hour window: the provider's short image quota and the budget windows share it. */
@@ -64,6 +66,8 @@ export class UsageStore {
     callers: StatementSync; setPause: StatementSync; clearPause: StatementSync; prunePauses: StatementSync; pauses: StatementSync; announcePause: StatementSync; expiredAnnounced: StatementSync;
     deliberation: StatementSync; identities: StatementSync;
     insertKey: StatementSync; keyByHash: StatementSync; touchKey: StatementSync; revokeKey: StatementSync; keys: StatementSync; liveKeys: StatementSync;
+    liveKey: StatementSync; saveOAuthClient: StatementSync; oauthClient: StatementSync; insertOAuthToken: StatementSync; oauthToken: StatementSync;
+    deleteOAuthToken: StatementSync; deleteOAuthTokensOfKey: StatementSync; pruneOAuthTokens: StatementSync;
     nameCaller: StatementSync; callerNames: StatementSync;
     saveCatalog: StatementSync; catalogs: StatementSync;
     announced: StatementSync; setAnnounced: StatementSync;
@@ -117,6 +121,17 @@ export class UsageStore {
       -- runtime half of server.access.callers, written by the admin API, read
       -- by /v1/usage at presentation time exactly as the configured map is.
       CREATE TABLE IF NOT EXISTS callers (id TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      -- OAuth for the MCP clients that cannot hold a key (src/server/oauth.ts).
+      -- The clients that registered themselves (RFC 7591), as the metadata the
+      -- registration returned, so a restart does not make them register again.
+      CREATE TABLE IF NOT EXISTS oauth_clients (client_id TEXT PRIMARY KEY, metadata TEXT NOT NULL, created_at INTEGER NOT NULL);
+      -- The tokens issued to them, as the sha256 of the token and never the
+      -- token, each bound to the gateway key whose owner signed in: the key is
+      -- the identity, the token only stands in for it, and dies with it.
+      CREATE TABLE IF NOT EXISTS oauth_tokens (
+        hash TEXT PRIMARY KEY, kind TEXT NOT NULL, key_name TEXT NOT NULL, client_id TEXT NOT NULL,
+        resource TEXT, scopes TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS oauth_tokens_key ON oauth_tokens(key_name);
       -- The last listing each provider's CLI gave of its models (the daily
       -- catalog, docs/deploy.md §7.2), as the JSON the adapter read. Restored
       -- at startup, so a restart neither drops the discovered models until the
@@ -197,6 +212,14 @@ export class UsageStore {
       revokeKey: this.db.prepare(`UPDATE api_keys SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL`),
       keys: this.db.prepare(`SELECT name, created_at, created_by, revoked_at, last_used_at FROM api_keys ORDER BY created_at, name`),
       liveKeys: this.db.prepare(`SELECT COUNT(*) AS n FROM api_keys WHERE revoked_at IS NULL`),
+      liveKey: this.db.prepare(`SELECT 1 AS live FROM api_keys WHERE name = ? AND revoked_at IS NULL`),
+      saveOAuthClient: this.db.prepare(`INSERT INTO oauth_clients (client_id, metadata, created_at) VALUES (?, ?, ?)`),
+      oauthClient: this.db.prepare(`SELECT metadata FROM oauth_clients WHERE client_id = ?`),
+      insertOAuthToken: this.db.prepare(`INSERT INTO oauth_tokens (hash, kind, key_name, client_id, resource, scopes, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+      oauthToken: this.db.prepare(`SELECT kind, key_name, client_id, resource, scopes, expires_at FROM oauth_tokens WHERE hash = ?`),
+      deleteOAuthToken: this.db.prepare(`DELETE FROM oauth_tokens WHERE hash = ?`),
+      deleteOAuthTokensOfKey: this.db.prepare(`DELETE FROM oauth_tokens WHERE key_name = ?`),
+      pruneOAuthTokens: this.db.prepare(`DELETE FROM oauth_tokens WHERE expires_at <= ?`),
       nameCaller: this.db.prepare(`INSERT INTO callers (id, name, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`),
       callerNames: this.db.prepare(`SELECT id, name FROM callers ORDER BY id`),
       saveCatalog: this.db.prepare(`INSERT INTO catalog (provider, listing, checked_at) VALUES (?, ?, ?) ON CONFLICT(provider) DO UPDATE SET listing = excluded.listing, checked_at = excluded.checked_at`),
@@ -340,7 +363,40 @@ export class UsageStore {
 
   /** True when the key existed and was live; a second revoke, or an unknown name, is false. */
   revokeKey(name: string, now = Date.now()): boolean {
-    return Number(this.stmts.revokeKey.run(now, name).changes) > 0;
+    const revoked = Number(this.stmts.revokeKey.run(now, name).changes) > 0;
+    // What OAuth issued on this key's authority goes with it: the check on
+    // every use (isLiveKey) would refuse the tokens anyway, and this leaves
+    // nothing behind that a later key of the same name could inherit.
+    if (revoked) this.stmts.deleteOAuthTokensOfKey.run(name);
+    return revoked;
+  }
+
+  /** True while a key of that name exists and is not revoked. */
+  isLiveKey(name: string): boolean {
+    return this.stmts.liveKey.get(name) !== undefined;
+  }
+
+  // ---- OAuth: registered clients and issued tokens (src/server/oauth.ts).
+  saveOAuthClient(clientId: string, metadata: string, now = Date.now()): void {
+    this.stmts.saveOAuthClient.run(clientId, metadata, now);
+  }
+  oauthClient(clientId: string): string | null {
+    const r = this.stmts.oauthClient.get(clientId) as { metadata: string } | undefined;
+    return r?.metadata ?? null;
+  }
+  /** Stores a token by its hash; the token itself is never kept. Expired ones are dropped on the way. */
+  saveOAuthToken(token: string, t: OAuthTokenRow, now = Date.now()): void {
+    this.stmts.pruneOAuthTokens.run(now);
+    this.stmts.insertOAuthToken.run(hashKey(token), t.kind, t.keyName, t.clientId, t.resource, t.scopes.join(" "), t.expiresAt, now);
+  }
+  oauthToken(token: string): OAuthTokenRow | null {
+    const r = this.stmts.oauthToken.get(hashKey(token)) as { kind: string; key_name: string; client_id: string; resource: string | null; scopes: string; expires_at: number } | undefined;
+    if (!r) return null;
+    return { kind: r.kind as OAuthTokenRow["kind"], keyName: r.key_name, clientId: r.client_id, resource: r.resource, scopes: r.scopes === "" ? [] : r.scopes.split(" "), expiresAt: Number(r.expires_at) };
+  }
+  /** True when the token existed. */
+  deleteOAuthToken(token: string): boolean {
+    return Number(this.stmts.deleteOAuthToken.run(hashKey(token)).changes) > 0;
   }
 
   nameCaller(id: string, name: string, now = Date.now()): void {

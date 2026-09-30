@@ -101,10 +101,39 @@ const BEARER = /^Bearer\s+(\S+)$/i;
  * the first key exists (a developer machine), and closed from then on: the
  * first key is the decision that this gateway has callers to tell apart.
  */
-export function createAuthMiddleware(opts: { access?: AccessOptions; keys: KeyAuthenticator }, log: Logger): RequestHandler {
+/**
+ * OAuth for the MCP endpoint (src/server/oauth.ts): the verifier of the tokens
+ * it issues, and the metadata URL an unauthenticated /mcp call is pointed at.
+ */
+export interface OAuthResource {
+  verifyAccessToken(token: string): Promise<{ extra?: Record<string, unknown> }>;
+  resourceMetadataUrl: string;
+}
+
+export function createAuthMiddleware(opts: { access?: AccessOptions; keys: KeyAuthenticator; oauth?: OAuthResource }, log: Logger): RequestHandler {
   const access = opts.access ? createAccessMiddleware(opts.access, log) : undefined;
+  const oauth = opts.oauth;
+  // A 401 on /mcp tells an OAuth client where to sign in (RFC 9728): without
+  // the pointer, Claude on the web has no way to find the authorization server.
+  const refuseMcp = (res: Parameters<RequestHandler>[1], error?: string): void => {
+    res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${oauth!.resourceMetadataUrl}"${error ? `, error="${error}"` : ""}`);
+    res.status(401).json(DENIED);
+  };
   return (req, res, next) => {
     const bearer = BEARER.exec(req.header("authorization") ?? "")?.[1];
+    const mcp = oauth !== undefined && req.path === "/mcp";
+    // An OAuth token stands in for the key its owner signed in with, on the
+    // resource it was issued for and nowhere else: the HTTP API takes keys.
+    if (bearer !== undefined && bearer.startsWith("capo_at_") && oauth) {
+      if (!mcp) { res.status(401).json(DENIED); return; }
+      oauth.verifyAccessToken(bearer).then((info) => {
+        const name = typeof info.extra?.keyName === "string" ? info.extra.keyName : undefined;
+        if (!name) { refuseMcp(res, "invalid_token"); return; }
+        res.locals.identity = { type: "key", name, sub: `key:${name}` } satisfies Identity;
+        next();
+      }, () => { log.warn("oauth token rejected"); refuseMcp(res, "invalid_token"); });
+      return;
+    }
     if (bearer !== undefined && bearer.startsWith("cap_")) {
       const key = opts.keys.authenticateKey(bearer);
       if (!key) { log.warn("api key rejected"); res.status(401).json(DENIED); return; }
@@ -112,6 +141,12 @@ export function createAuthMiddleware(opts: { access?: AccessOptions; keys: KeyAu
       next();
       return;
     }
+    // /mcp with no credential at all, when OAuth is on: the OAuth challenge,
+    // unless the request carries what Cloudflare Access adds. With Access at
+    // the edge and a Bypass for /mcp, that is how an OAuth client gets past
+    // the gateway's own Access check to the challenge it needs.
+    const accessCredential = req.header("cf-access-jwt-assertion") !== undefined || /(?:^|;\s*)CF_Authorization=/.test(req.header("cookie") ?? "");
+    if (mcp && !accessCredential && (access || opts.keys.hasKeys())) { refuseMcp(res); return; }
     if (access) { access(req, res, next); return; }
     if (opts.keys.hasKeys()) { res.status(401).json(DENIED); return; }
     next();
