@@ -14,6 +14,12 @@ host, since it is shown once.
 From this directory, on your own computer, with Ansible 2.15 or later and
 root SSH access to a fresh Debian 13 or Ubuntu 24.04 host:
 
+The first connection to a new host asks to trust its SSH key. Compare it with
+the one the host itself reports, from its console (`ssh-keygen -lf
+/etc/ssh/ssh_host_ed25519_key.pub`, or `pct exec <id> -- …` on Proxmox),
+before answering yes: that comparison is the only thing telling you the key is
+the host's.
+
 ```sh
 cp inventory.example.yml inventory.yml      # name the host; inventory.yml is not in git
 ansible-playbook site.yml --check --diff    # what would change

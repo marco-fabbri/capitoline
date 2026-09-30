@@ -2,7 +2,7 @@ import { createServer, connect, type AddressInfo } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { start, SHUTDOWN_GRACE_MS } from "../src/main.js";
 import { UsageStore } from "../src/usage/store.js";
 import { FakeProvider } from "./fake-provider.js";
@@ -301,6 +301,23 @@ describe("start() with a host overlay", () => {
     try {
       expect(lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.msg === "listening")).toMatchObject({ host: "0.0.0.0" });
     } finally { await app.close(); }
+  });
+
+  it("probes every provider at the interval the configuration names, not the hour", async () => {
+    // Only the intervals are faked: the server still listens on a real port.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const { path } = overlay((f) => `server:\n  health_interval_s: 120\nusage:\n  db_path: "${f}"\n`);
+      const p = new FakeProvider("claude", ["claude-opus"], OK);
+      const app = await start(CONFIG, { port: 0, providers: [p], overlayPath: path });
+      try {
+        expect(p.healthCalls).toBe(1);             // the startup check
+        await vi.advanceTimersByTimeAsync(119_000);
+        expect(p.healthCalls).toBe(1);
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(p.healthCalls).toBe(2);
+      } finally { await app.close(); }
+    } finally { vi.useRealTimers(); }
   });
 
   it("merges the overlay over the configuration it is given", async () => {

@@ -716,6 +716,12 @@ credential renewed — is noticed at the next health check, up to an hour
 later; until then that provider stays marked as signed out
 (`auth_expired`). `systemctl restart capitoline` makes it immediate.
 
+That check is one real call per provider on its `health_model`, once an hour,
+24 a day. On a plan with a small allowance (a free tier, a weekly quota) that
+is a share worth saving: `server.health_interval_s` in the overlay sets the
+interval, from 60 seconds up. The price of a longer one is the paragraph above:
+a provider stays marked down, or back up, until the next check says so.
+
 Between `listening` and the health checks the gateway sweeps `sandbox_root`
 once: the `run-*` directories older than the longest `timeout_s` of the
 configuration (per-model overrides included) plus twice `kill_grace_s` are

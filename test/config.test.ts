@@ -234,6 +234,9 @@ describe("config", () => {
   it("rejects a notify endpoint that is not a URL, and defaults the catalog to once a day", () => {
     expect(() => parseConfig(`server: { notify: { url: not-a-url } }\n${config()}`)).toThrow(/url/i);
     expect(parseConfig(config()).server.discovery_interval_h).toBe(24);
+    expect(parseConfig(config()).server.health_interval_s).toBe(3600);
+    // No "startup only": a provider a request marked down would stay so until a restart.
+    expect(() => parseConfig(`server: { health_interval_s: 0 }\n${config()}`)).toThrow(/health_interval_s/);
     expect(parseConfig(config()).server.notify).toBeUndefined();
   });
   it("rejects a health_model that is only an Object.prototype key", () => {

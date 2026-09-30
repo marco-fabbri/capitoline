@@ -193,7 +193,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     throw e;
   }
 
-  const stopHealth = core.startHealthLoop(60 * 60 * 1000);
+  const stopHealth = core.startHealthLoop(cfg.server.health_interval_s * 1000);
   // A fresh listing now, in the background — `codex debug models` takes
   // eleven seconds, and readiness does not wait for it — then once per
   // discovery_interval_h (docs/deploy.md §7.2).

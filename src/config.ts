@@ -266,6 +266,12 @@ const ConfigObject = z
         // models. The listing is free (no quota), a day is what a retirement
         // announced weeks ahead needs, and startup runs one as well.
         discovery_interval_h: z.number().int().min(1).default(24),
+        // How often every provider gets its health probe, a real call on its
+        // health_model. An hour by default. Longer spends less of a small
+        // plan's allowance, at a price: a provider a request marked signed out
+        // or down stays marked so until the next probe says otherwise, so
+        // there is no "startup only".
+        health_interval_s: z.number().int().min(60).default(3600),
         // Optional: where a change in the catalog is announced, as one plain
         // text POST. Any endpoint that takes one works — an ntfy topic is the
         // documented example (docs/deploy.md §7.2). The token, when there is
