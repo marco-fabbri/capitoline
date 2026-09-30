@@ -4,10 +4,18 @@
 #
 #   public-check pre-commit          the added lines of the staged diff, and the staged paths
 #   public-check commit-msg <file>   the commit message, without its # comment lines
+#   public-check text <file>         any other text meant for the public: a release note,
+#                                    a pull request body (.claude/hooks/public-text runs it
+#                                    on every gh command that publishes one)
 #
 # Two lists of extended regular expressions, matched case-insensitively:
 #
-# - the built-in one below, generic enough to publish: session links, keys;
+# - the built-in one below, generic enough to publish: session links, keys, and
+#   the phrasings of a rationale drawn from one private application: a change
+#   said to be for one client in particular, or sized from what its software does.
+#   A name is not the only way to publish the owner's applications: describing
+#   one's internals without naming it does it too, and a change here is justified
+#   in terms that hold for any user;
 # - a private one, never in the repository, because a public list of the
 #   owner's host names and applications would publish exactly what it guards:
 #   ${CAPITOLINE_PRIVATE_PATTERNS:-~/.config/capitoline/private-patterns}, one
@@ -25,7 +33,11 @@ BUILTIN='Claude-Session[:]
 claude[.]ai/code/session_
 cap_[A-Za-z0-9_-]{20,}
 BEGIN [A-Z ]*PRIVATE KEY
-sk-ant-[A-Za-z0-9_-]{10,}'
+sk-ant-[A-Za-z0-9_-]{10,}
+the [c]lient (this|it) (is|was) for
+(that|this|the|one|a) [c]lient.{1,3}s (code|data|pipeline|judge|app|application|batch|shortlist)
+(sized|measured|chosen|checked|taken) (from|against|on) (a|the|that|one) (real )?[c]lient
+for (a|one) (specific|particular|real) [c]lient'
 
 private="${CAPITOLINE_PRIVATE_PATTERNS:-$HOME/.config/capitoline/private-patterns}"
 patterns="$(mktemp)"
@@ -53,8 +65,12 @@ case "${1:-}" in
     [[ -n "${2:-}" && -r "$2" ]] || { echo "usage: $0 commit-msg <message file>" >&2; exit 2; }
     grep -v '^#' "$2" | awk '{ print "message:" NR ":" $0 }' > "$subject"
     ;;
+  text)
+    [[ -n "${2:-}" && -r "$2" ]] || { echo "usage: $0 text <file>" >&2; exit 2; }
+    awk '{ print "text:" NR ":" $0 }' "$2" > "$subject"
+    ;;
   *)
-    echo "usage: $0 pre-commit | commit-msg <message file>" >&2; exit 2 ;;
+    echo "usage: $0 pre-commit | commit-msg <message file> | text <file>" >&2; exit 2 ;;
 esac
 
 found=0
@@ -70,6 +86,10 @@ while IFS= read -r pattern; do
 done < "$patterns"
 
 if [[ $found -ne 0 ]]; then
-  echo "public-check: commit refused; this repository is public. Remove the text, or use git commit --no-verify if it is meant to be published." >&2
+  if [[ "${1:-}" == text ]]; then
+    echo "public-check: refused; this repository is public. Say it in terms that hold for any user, without the owner's names or the internals of their applications." >&2
+  else
+    echo "public-check: commit refused; this repository is public. Remove the text, or use git commit --no-verify if it is meant to be published." >&2
+  fi
   exit 1
 fi

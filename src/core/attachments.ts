@@ -10,9 +10,10 @@ import { CapitolineError, type Attachment } from "./types.js";
  * and the size are the gateway's own bounds: an image travels as base64 inside
  * a JSON body limited to 20 MB (src/server/app.ts), which stays the real cap on
  * volume, and a CLI run is one question, not an album. Sixteen rather than four
- * since 2026-10-01: a client's image judge compares a slot's whole shortlist in
- * one question — two searches of up to six candidates each, twelve as a rule —
- * and splitting the comparison would change what it judges.
+ * since 2026-10-01: choosing among a dozen candidate images in one question is
+ * an ordinary use, and splitting a comparison changes its answer. The original
+ * APIs take far more per request (Anthropic's, a hundred); the body limit is
+ * what keeps a request reasonable.
  */
 const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 export const MAX_ATTACHMENTS = 16;

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Claude Code PreToolUse hook: the public check for text that never passes through a commit.
+#
+# Release notes, pull request and issue bodies, comments and tag messages are published by
+# `gh` and `git tag`, and the git hooks in .githooks/ never see them. This runs the same
+# check (.githooks/public-check text) on the command about to run, heredoc included, and on
+# a --notes-file / --body-file / -F it names, and blocks the command when anything matches.
+# Registered in .claude/settings.json; exit 2 is how a hook refuses a tool call.
+set -euo pipefail
+
+cmd="$(jq -r '.tool_input.command // empty')"
+[[ -n "$cmd" ]] || exit 0
+if ! grep -qE '(^|[;&|(]|\s)(gh (release|pr|issue) (create|edit|comment)|gh api [^|]*(releases|pulls|issues|comments)|git tag )' <<< "$cmd"; then
+  exit 0
+fi
+
+root="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
+text="$(mktemp)"
+trap 'rm -f "$text"' EXIT
+# Paths on this machine are where a file is read from, not text anyone will read: dropped
+# before the check, or the owner's user name in them would refuse every command.
+sed -E "s#(~|/Users|/home|/private|/tmp|/var/folders)/[^[:space:]'\"]*#<local path>#g" <<< "$cmd" > "$text"
+# A body read from a file is published too.
+while read -r file; do
+  [[ "$file" != "-" && -r "$file" ]] && cat "$file" >> "$text"
+done < <(grep -oE -- '(--(notes|body)-file|-F)[ =][^ ]+' <<< "$cmd" | sed -E 's/^(--(notes|body)-file|-F)[ =]//')
+
+if ! out="$("$root/.githooks/public-check" text "$text" 2>&1)"; then
+  printf '%s\n' "$out" >&2
+  exit 2
+fi

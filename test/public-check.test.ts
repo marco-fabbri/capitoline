@@ -57,6 +57,31 @@ describe("the public-repository guard", () => {
     expect(leaked.status).not.toBe(0);
     expect(leaked.stderr).toMatch(/message:3 matches/);
   });
+  it("refuses a rationale drawn from one private application, without any name in it", () => {
+    // The phrasings are assembled here for the reason given at the top of this file.
+    const forClient = "The cli" + "ent this is for, an image judge.";
+    const fromData = "sized from a comment in that cli" + "ent\u2019s code";
+    expect(repo("").commit("notes.md", `${forClient}\n`).status).not.toBe(0);
+    const r = repo("").commit("src.ts", "ok\n", `a change\n\n${fromData}\n`);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/message:3 matches/);
+    // The generic uses stay allowed: a client in general is not one client.
+    expect(repo("").commit("notes.md", "a client asks for a council, and a client's request is refused\n").status).toBe(0);
+  });
+  it("checks text that never passes through a commit, and the hook runs it on a gh command", () => {
+    const dir = mkdtempSync(join(tmpdir(), "public-text-"));
+    const env = { PATH: process.env.PATH, HOME: dir, CLAUDE_PROJECT_DIR: process.cwd() };
+    const leak = join(dir, "notes.md");
+    writeFileSync(leak, "measured against one cli" + "ent\n");
+    const text = spawnSync(join(HOOKS, "public-check"), ["text", leak], { env, encoding: "utf8" });
+    expect(text.status).not.toBe(0);
+    expect(text.stderr).toMatch(/text:1 matches/);
+    const hook = (command: string) => spawnSync(join(process.cwd(), ".claude", "hooks", "public-text"), [],
+      { env, encoding: "utf8", input: JSON.stringify({ tool_input: { command } }) });
+    expect(hook(`gh release edit v9 --notes-file ${leak}`).status).toBe(2);
+    expect(hook("gh release edit v9 --notes 'Sixteen images per request'").status).toBe(0);
+    expect(hook(`cat ${leak}`).status).toBe(0);
+  });
   it("catches a gateway key and a session link in a file too", () => {
     const r = repo().commit("config.txt", `key: cap_${"a".repeat(32)}\n${SESSION}\n`);
     expect(r.status).not.toBe(0);

@@ -11,6 +11,14 @@ subscriptions.
   domains or names. Those live in the host overlay. `.githooks/` enforces it
   on the owner's machine against a private pattern list kept outside the
   repository (`git config core.hooksPath .githooks`).
+- **No private application in a rationale, even unnamed.** Every change is
+  justified in terms that hold for any user of the gateway. The internals,
+  numbers or needs of one of the owner's applications never appear in code,
+  comments, docs, commit messages, release notes or pull request bodies: "an
+  application needs N" is not a reason, why N makes sense for anyone is.
+  `.githooks/public-check` refuses the usual phrasings, and
+  `.claude/hooks/public-text` runs the same check on every `gh` or `git tag`
+  command that publishes text, which no git hook sees.
 - **English only** for everything in the repository: code, comments, docs,
   specs, plans, README, commit messages. The conversation with the owner may
   be in Italian; the repo never is.
