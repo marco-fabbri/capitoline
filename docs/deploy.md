@@ -1161,6 +1161,15 @@ is a blind ranking better than a public one?". The last one is nine calls on
 three subscriptions and takes minutes: run it once, and not on a day when
 the quotas are already tight (§9).
 
+**A conversation with one model.** By default every `ask_model` is a question
+of its own, and Claude Code puts into the prompt whatever context it needs. To
+have the gateway hold the thread instead, ask for it: "use capitoline ask_model
+with codex-gpt-6-luna and conversation new: remember the number 7", then
+"continue that conversation: which number did I give you?". The first answer
+returns a `conversation` id and Claude passes it back on the next call; the
+gateway replays the earlier turns, text only, for 30 days after the last one
+(README, "Conversations work two ways"). Only the same key can continue it.
+
 ### 10.1 Claude on the web, and other OAuth clients
 
 Claude on the web, Desktop and mobile reach a remote MCP server from
@@ -1204,6 +1213,13 @@ In Claude: Customize → Connectors → add a custom connector with the URL
 gateway's sign-in page, which names the host it will send you back to
 (`claude.ai`); paste the `claude-web` key there. From then on Claude renews its
 token by itself, for 30 days after its last use.
+
+The same `conversation` of §10 works from Claude on the web: ask for "conversation
+new" on the first question and to continue it on the next. Start a new chat
+after the gateway is upgraded, so Claude reads the tools again and sees the
+parameter. A conversation kept this way belongs to the `claude-web` key, so it
+can also be continued over HTTP (`/v1/responses`, `previous_response_id`) with
+that key, and with no other.
 
 With Cloudflare Access in front (§9.1), Access has to let these through, or
 Claude never reaches the sign-in: in the Access application, a Bypass policy
