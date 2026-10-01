@@ -15,6 +15,23 @@ if ! grep -qE '(^|[;&|(]|\s)(gh (release|pr|issue) (create|edit|comment)|gh api 
 fi
 
 root="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
+
+# Only text aimed at THIS repository: it is the public one. A session that starts here also
+# works in other repositories, private ones where the owner's names are at home, and a command
+# that first changes into one of them, or names another repository with -R/--repo, publishes
+# there, not here.
+here="$(cd "$root" && pwd -P)"
+if [[ "$cmd" =~ ^[[:space:]]*cd[[:space:]]+([^[:space:]\;\&]+) ]]; then
+  dir="${BASH_REMATCH[1]}"
+  dir="${dir/#\~/$HOME}"
+  top="$(cd "$dir" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "$top" && "$(cd "$top" && pwd -P)" == "$here" ]] || exit 0
+fi
+repo="$(grep -oE -- '(^|[[:space:]])(-R|--repo)[ =][^[:space:]]+' <<< "$cmd" | head -1 | sed -E 's/^[[:space:]]*(-R|--repo)[ =]//' || true)"
+if [[ -n "$repo" && "${repo##*/}" != "$(basename "$here")" ]]; then
+  exit 0
+fi
+
 text="$(mktemp)"
 trap 'rm -f "$text"' EXIT
 # Paths on this machine are where a file is read from, not text anyone will read: dropped
