@@ -14,7 +14,7 @@ Phase 2 (only sketched here): council, i.e. deliberation between several models 
 
 - Council (phase 2).
 - Multi-turn conversations with persistent CLI sessions. The OpenAI protocol sends the whole history on every request and the gateway flattens it into the prompt: "free" memory for short chats, no CLI-side sessions.
-- `/v1/responses`, `tools`/function calling, `n > 1`, `logprobs`.
+- `tools`/function calling, `n > 1`, `logprobs`. (`/v1/responses` was here too; it shipped on 2026-10-01, below in §6.1, with the conversation kept by the gateway and never by a CLI.)
 - Providers through paid APIs or self-hosted inference servers. The Provider abstraction allows them; no adapter until there is a use.
 - Automatic blocking when subscription budgets are exceeded (see §7.1).
 
@@ -147,6 +147,8 @@ Declared subset. Rule for edge cases: **reject explicitly what cannot be honored
 
 Response: standard format with `usage` (tokens from the CLI when available) plus the proprietary `capitoline` field (warnings; in phase 2 council details). OpenAI clients ignore unknown fields.
 
+`POST /v1/responses` (2026-10-01): the Responses API's subset for one model's text answer, with the conversation optionally kept on the server. `input` (text, `input_image` data URLs) and `instructions` (for that turn only) become a request like a chat one; `previous_response_id` puts the kept turns before it, replayed as text through the same stateless path (`flatten`), so no CLI ever holds a conversation; `store` (default true) keeps the turn; `stream` sends the API's typed events (`response.created` … `response.completed`) with the keep-alive comment; `reasoning.effort` maps onto the gateway's levels; `truncation: auto` drops the oldest turns of a conversation over its caps instead of refusing it. `tools`, `tool_choice`, structured `text.format`, `include`, `background` → 400 naming the field; councils and image models → 400 pointing to their endpoints. `GET /v1/responses/{id}` reads a kept turn; `DELETE` removes its whole conversation. The store (`src/conversations/store.ts`) is a database file of its own, created owner-only: text only, a thread forgotten `conversations.ttl_days` after its last turn, `max_turns` and `max_bytes` per conversation, and a turn readable only by the caller that created it — anyone else, like an expired or unknown id, gets 404. The MCP `ask_model` tool reaches the same store through `conversation` (§6.2).
+
 `GET /health`: process and provider state, without consuming subscription (reads the `health` cache). The one unauthenticated route (§4), so it carries nothing that names a caller.
 
 `GET /v1/usage`: the last 24 hours grouped by caller — the email of a user token, the bound name of a service token, or a key's own name — busiest first, the gateway's own health probes excluded. Authenticated like the rest of `/v1`: it is the one report that names people.
@@ -160,7 +162,7 @@ Same process, `/mcp` endpoint, streamable HTTP transport. Claude Code registers 
 Phase 1 tools:
 
 - `list_models`: available models with health state.
-- `ask_model(model, prompt, effort?, attachments?)`: text and tokens consumed.
+- `ask_model(model, prompt, effort?, attachments?)`: text and tokens consumed. Since 2026-10-01 also `conversation?`: `"new"` opens a conversation the gateway keeps and the answer returns its id; that id continues it. The store and rules are §6.1's, with truncation always `auto` (a tool caller never sees the caps); without `conversation` nothing is kept.
 
 `ask_council` arrives with phase 2. `compare_answers` and `review_answer` are not exposed: they are council cases.
 

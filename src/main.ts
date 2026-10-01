@@ -16,6 +16,7 @@ import { createAuthMiddleware } from "./server/access.js";
 import { createOAuthServer } from "./server/oauth.js";
 import { createApp } from "./server/app.js";
 import { UsageStore } from "./usage/store.js";
+import { ConversationStore } from "./conversations/store.js";
 
 /** How long close() waits for in-flight responses before destroying their connections. */
 export const SHUTDOWN_GRACE_MS = 5000;
@@ -165,8 +166,17 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const versions = new VersionWatch(Object.entries(cfg.providers).map(([id, p]) => ({ id, cfg: p })), runner, usage, log.child({ mod: "versions" }), notify);
 
   let ready = false;
+  // Opened after the refusals above, so a gateway that will not start leaves
+  // no conversation file behind it. Expired threads are dropped now, with a
+  // line in the log as for the pauses, and then on every save.
+  const conversations = new ConversationStore(cfg.conversations.db_path, cfg.conversations.ttl_days);
+  const prunedThreads = conversations.prune();
+  if (prunedThreads > 0) log.info({ threads: prunedThreads }, "expired conversations pruned");
+  const conversationLimits = { maxTurns: cfg.conversations.max_turns, maxBytes: cfg.conversations.max_bytes };
   const app = createApp(core, {
-    versions: () => versions.states(), log: log.child({ mod: "http" }), access, mcp: createMcpHandler(core, log.child({ mod: "mcp" })), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins }, keys: usage, oauth: oauth?.router });
+    conversations: { store: conversations, limits: conversationLimits },
+    versions: () => versions.states(), log: log.child({ mod: "http" }), access,
+    mcp: createMcpHandler(core, log.child({ mod: "mcp" }), { conversations: { store: conversations, limits: conversationLimits } }), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins }, keys: usage, oauth: oauth?.router });
   const port = overrides.port ?? cfg.server.port;
 
   // One owner for the sqlite handle: whatever fails between here and the end of
@@ -174,7 +184,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   let server: Server;
   try {
     server = await listen(app, host, port, log);
-  } catch (e) { usage.close(); throw e; }
+  } catch (e) { usage.close(); conversations.close(); throw e; }
   const actualPort = (server.address() as { port: number }).port;
   log.info({ host, port: actualPort, providers: providers.map((p) => p.id) }, "listening");
   try {
@@ -206,6 +216,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
     usage.close();
+    conversations.close();
     throw e;
   }
 
@@ -245,6 +256,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     // predictable for systemd (the losing case is one lost health row).
     await Promise.race([Promise.all([core.idle(), versions.idle()]), delay(graceMs, undefined, { ref: false })]);
     usage.close();
+    conversations.close();
   })());
   return { close, port: actualPort };
 }

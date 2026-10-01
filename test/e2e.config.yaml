@@ -23,6 +23,9 @@ runner:
 usage:
   db_path: ":memory:"
 
+conversations:
+  db_path: ":memory:"
+
 providers:
   claude:
     binary: test/fake-cli/fake-claude.sh

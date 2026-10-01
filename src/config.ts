@@ -323,6 +323,18 @@ const ConfigObject = z
       kill_grace_s: z.number().int().min(1).default(5),
     }).strict(),
     usage: z.object({ db_path: z.string().default("capitoline.sqlite") }).strict().default({}),
+    // The conversations kept for the Responses API and the MCP ask_model tool
+    // (src/conversations/store.ts): a file of its own, apart from the usage
+    // database, because it is the one place the gateway keeps what people
+    // wrote. A thread lives ttl_days after its last turn; the two caps bound a
+    // replayed history, which no request body limit sees because the gateway
+    // assembles it itself.
+    conversations: z.object({
+      db_path: z.string().default("conversations.sqlite"),
+      ttl_days: z.number().int().min(1).default(30),
+      max_turns: z.number().int().min(1).default(100),
+      max_bytes: z.number().int().min(1024).default(2_000_000),
+    }).strict().default({}),
     providers: z.record(z.string().min(1), ProviderSchema),
     // Virtual models, keyed by the name a client asks for in `model`. Empty by
     // default: a gateway with no council is the phase-1 gateway, unchanged.

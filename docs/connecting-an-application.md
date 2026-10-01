@@ -204,6 +204,15 @@ clears by itself. `404` for a model that is currently unavailable or retired,
 which is why `/v1/models` is worth reading rather than hard-coding a name.
 `401` for a credential the gateway does not know or has revoked.
 
+**A conversation the gateway keeps.** On `/v1/chat/completions` the
+application resends the whole history every turn. On `/v1/responses` it does
+not have to: each answer has an `id`, and the next request names it in
+`previous_response_id`. The gateway replays the kept turns, text only, for 30
+days after the last one, and only for the same credential. An OpenAI SDK does
+this with `client.responses.create({ model, input, previous_response_id })`.
+`store: false` keeps nothing, and a `404` on a previous id means the
+conversation expired or belongs to someone else: start a new one.
+
 **A council, quick or full.** `model: capitoline` is the full council, nine
 calls and minutes; the same request with `reasoning_effort: low` skips the
 peer-ranking stage and costs five. A client that cannot set the field asks for

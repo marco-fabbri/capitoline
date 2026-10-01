@@ -393,6 +393,7 @@ Edit `/etc/capitoline/overlay.yaml`. It starts as a copy of the example, whose
 | `runner.user` | `runner` |
 | `runner.sandbox_root` | `/var/lib/capitoline/sandboxes` |
 | `usage.db_path` | `/var/lib/capitoline/usage.sqlite` — absolute, because the service's working directory is the clone |
+| `conversations.db_path` | `/var/lib/capitoline/conversations.sqlite` — the conversations the Responses API and `ask_model` keep (README, "Conversations work two ways"): a file of its own, created `0600`, because it holds what people wrote and the usage database does not. `ttl_days` (30), `max_turns` and `max_bytes` stay at the repository's values unless a host has a reason |
 | `providers.claude.binary` | `/home/runner/.npm-global/bin/claude` |
 | `providers.claude.args_extra` | `[]` after the interactive login of §6.1. With the setup token instead, `[--settings, /home/runner/.claude/capitoline.json]` |
 | `providers.codex.binary` | `/home/runner/.npm-global/bin/codex` |
@@ -1214,6 +1215,10 @@ still opens no port.
 ## 11. Backup
 
 Daily, as the `capitoline` user, of the usage database and the configuration.
+The conversations database is deliberately not backed up either: it holds what
+people wrote, for 30 days, and a backup that carries it would keep it longer
+and in more places than the gateway itself does. A restore starts with no kept
+conversations, and a client continuing one gets a 404 and starts again.
 Credentials are deliberately not backed up: if one is lost, log in again
 (§6). A copy of a token is one more secret to protect, and it buys nothing —
 the CLIs bind a credential to the machine that obtained it.

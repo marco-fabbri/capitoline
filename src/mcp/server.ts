@@ -8,6 +8,9 @@ import { decodeBase64 } from "../core/attachments.js";
 import type { Deliberation } from "../council/council.js";
 import type { Logger } from "../log.js";
 import { callerOf } from "../server/access.js";
+import type { ConversationStore, StoredTurn } from "../conversations/store.js";
+import { fitChain, historyMessages, inputBytes, storedInput, type ConversationLimits } from "../conversations/history.js";
+import { newResponseId } from "../server/responses.js";
 
 export interface McpOptions {
   // How often generate_image reports progress while the CLI is working.
@@ -17,6 +20,9 @@ export interface McpOptions {
   // extends its own tool timeout on it. Raising that timeout is the client's
   // job and the installation docs explain it (spec 6.2). Tests shorten it.
   progressIntervalMs?: number;
+  // The conversations ask_model can continue (src/conversations/store.ts),
+  // shared with the Responses API: without it the tool has no `conversation`.
+  conversations?: { store: ConversationStore; limits: ConversationLimits };
 }
 
 const PROGRESS_INTERVAL_MS = 5_000;
@@ -79,7 +85,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
   });
 
   server.registerTool("ask_model", {
-    description: "Ask one model a single question through its CLI. Use list_models for names. From Claude Code, prefer codex-* and antigravity-* models: asking claude-* spends the same subscription twice. Images can go with the question to claude-* and codex-* models (antigravity-* take text only); each travels as base64 in this call, so it counts against your own context and is sent again on every retry.",
+    description: "Ask one model a single question through its CLI. Use list_models for names. From Claude Code, prefer codex-* and antigravity-* models: asking claude-* spends the same subscription twice. Images can go with the question to claude-* and codex-* models (antigravity-* take text only); each travels as base64 in this call, so it counts against your own context and is sent again on every retry. To hold a conversation with the model across calls, pass conversation \"new\" on the first question and the `conversation` id each answer returns on the next: the gateway keeps the turns (text only, 30 days) and replays them, so you do not resend them. Without `conversation` every call is independent and nothing is kept.",
     inputSchema: {
       model: z.string().describe("Model name from list_models"),
       prompt: z.string().min(1).describe("The question"),
@@ -91,6 +97,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
         data: z.string().min(1).describe("The image, base64"),
         mime_type: z.string().min(1).describe("image/png, image/jpeg, image/webp or image/gif"),
       })).optional().describe("Up to 16 images, 10 MB each, for models that take them"),
+      conversation: z.string().min(1).optional().describe("\"new\" to start a conversation the gateway keeps, or the id a previous answer returned to continue it; omit for a one-off question"),
     },
     // The answer is in the schema because a client that sees an outputSchema
     // reads structuredContent and ignores the content blocks — which is what
@@ -101,8 +108,8 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     // are aliases that move onto a new model without a word, while a Codex
     // slug and an Antigravity id are the model itself. Absent means "the CLI
     // said nothing", and a client falls back to `model` (issue #2).
-    outputSchema: { text: z.string(), model: z.string(), provider: z.string(), cliModelId: z.string().optional(), usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }) },
-  }, async ({ model, prompt, effort, system, images }, extra) => {
+    outputSchema: { text: z.string(), model: z.string(), provider: z.string(), cliModelId: z.string().optional(), usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }), conversation: z.string().optional() },
+  }, async ({ model, prompt, effort, system, images, conversation }, extra) => {
     // A council is not one model and this tool cannot run one: a deliberation
     // is nine calls over several minutes, and the only progress this tool can
     // send counts the characters of the text it is receiving — nothing at all
@@ -118,9 +125,29 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
       if (!bytes) return toolError(new CapitolineError("bad_request", `image ${i + 1} is not base64`), "ask_model", model);
       attachments.push({ mime: img.mime_type, bytes });
     }
-    const messages: Message[] = [];
-    if (system) messages.push({ role: "system", text: system });
-    messages.push({ role: "user", text: prompt });
+    // A kept conversation: its turns replayed before this question, the same
+    // store and the same rules as the Responses API, so a conversation opened
+    // here can be continued over HTTP with the same key and the other way
+    // round. Truncation is "auto": a tool caller never sees the limits, and
+    // dropping the oldest turns beats refusing the next question.
+    const conv = opts.conversations;
+    let chain: StoredTurn[] = [];
+    if (conversation !== undefined) {
+      if (!conv) return toolError(new CapitolineError("bad_request", "this gateway keeps no conversations"), "ask_model", model);
+      if (conversation !== "new") {
+        const found = conv.store.chain(conversation, caller ?? "");
+        if (!found) return toolError(new CapitolineError("bad_request", `conversation "${conversation}" not found: it is someone else's, expired, or never was; start one with "new"`), "ask_model", model);
+        chain = found;
+      }
+    }
+    const turnInput: Message[] = [];
+    if (system) turnInput.push({ role: "system", text: system });
+    turnInput.push({ role: "user", text: prompt });
+    const keep = storedInput(turnInput, attachments.length);
+    if (conv && conversation !== undefined) {
+      try { chain = fitChain(chain, inputBytes(keep), conv.limits, "auto"); } catch (e) { return toolError(e, "ask_model", model); }
+    }
+    const messages: Message[] = [...historyMessages(chain), ...turnInput];
     const token = extra._meta?.progressToken;
     let text = "";
     let usage: Usage | undefined;
@@ -142,8 +169,21 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
         else if (ev.type === "error") throw providerError(ev, providerOf(model), model);
       }
       await progress(true);
-      const structured = { text, model, provider: providerOf(model), ...(cliModelId !== undefined ? { cliModelId } : {}), usage: { prompt_tokens: usage?.input ?? 0, completion_tokens: usage?.output ?? 0 } };
-      return { content: [{ type: "text", text }], structuredContent: structured };
+      let kept: string | undefined;
+      if (conv && conversation !== undefined && !extra.signal.aborted) {
+        const id = newResponseId();
+        try {
+          conv.store.save({ id, previousId: conversation === "new" ? null : conversation, owner: caller ?? "", model, ...(cliModelId !== undefined ? { cliModelId } : {}),
+            input: keep, output: text, inputTokens: usage?.input, outputTokens: usage?.output });
+          kept = id;
+        } catch (e) {
+          log.warn({ err: String(e) }, "conversation turn not stored");
+        }
+      }
+      const structured = { text, model, provider: providerOf(model), ...(cliModelId !== undefined ? { cliModelId } : {}), usage: { prompt_tokens: usage?.input ?? 0, completion_tokens: usage?.output ?? 0 }, ...(kept ? { conversation: kept } : {}) };
+      // The id rides in a block of its own as well, for a client that reads
+      // the content blocks and not structuredContent.
+      return { content: [{ type: "text", text }, ...(kept ? [{ type: "text" as const, text: `conversation: ${kept}` }] : [])], structuredContent: structured };
     } catch (e) {
       return toolError(e, "ask_model", model);
     }

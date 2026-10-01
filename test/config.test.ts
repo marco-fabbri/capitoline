@@ -763,6 +763,7 @@ describe("the end-to-end configuration tracks the repository one", () => {
   // decision: it says this key is deliberately not the same on a developer
   // machine as on the host.
   const INTENDED = [
+    "conversations.db_path",                     // in memory too, like the usage database
     "council.capitoline-fast.stageTimeoutS",     // the same, for the fast shape
     "council.capitoline.stageTimeoutS",          // seconds, not minutes, so a suspended member fails fast
     "providers.antigravity.binary",              // the fake CLIs replay fixtures
@@ -1003,6 +1004,7 @@ describe("config/overlay.example.yaml", () => {
   // Exactly the host-specific keys, and nothing else: anything else belongs to
   // the repository file and must arrive with the pull that changes it.
   const HOST_KEYS = [
+    "conversations.db_path",
     "providers.antigravity.binary",
     "providers.claude.args_extra",        // what the host adds, never the repository's own command line
     "providers.claude.binary",

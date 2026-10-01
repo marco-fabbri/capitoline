@@ -8,6 +8,9 @@ runner:
 
 usage:
   db_path: /var/lib/capitoline/usage.sqlite    # absolute: the service's working directory is the clone
+
+conversations:
+  db_path: /var/lib/capitoline/conversations.sqlite
 {% if capitoline_providers | sort != ['antigravity', 'claude', 'codex'] or capitoline_councils is not none %}
 
 serve:

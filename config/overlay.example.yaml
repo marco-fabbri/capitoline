@@ -25,6 +25,9 @@ runner:
 usage:
   db_path: /var/lib/capitoline/usage.sqlite    # absolute: the service's working directory is the clone
 
+conversations:
+  db_path: /var/lib/capitoline/conversations.sqlite
+
 server:
   # host: 0.0.0.0   # only without Cloudflare, once a key exists (docs/deploy.md §8.2)
   # oauth: { public_url: https://api.example.com }   # Claude on the web over OAuth (docs/deploy.md §10.1)

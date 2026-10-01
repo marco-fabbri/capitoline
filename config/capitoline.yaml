@@ -24,6 +24,14 @@ runner:
 usage:
   db_path: capitoline.sqlite   # relative to the working directory of the service
 
+# Conversations kept for the Responses API and the MCP ask_model tool. A file of
+# its own: it holds what people wrote, and the usage database does not.
+conversations:
+  db_path: conversations.sqlite
+  ttl_days: 30                 # a conversation unused for this long is deleted
+  max_turns: 100               # per conversation, replayed on every turn
+  max_bytes: 2000000           # the same, in stored text
+
 providers:
   claude:
     binary: claude

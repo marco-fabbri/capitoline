@@ -1,13 +1,16 @@
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import type { VersionState } from "../versions.js";
 import type { Core } from "../core/core.js";
-import { CapitolineError, type ProviderEvent, type Usage } from "../core/types.js";
+import { CapitolineError, type InternalRequest, type ProviderEvent, type Usage } from "../core/types.js";
 import type { Logger } from "../log.js";
 import { callerOf, type KeyAuthenticator } from "./access.js";
 import { createAdminRouter, type AdminStore } from "./admin.js";
 import { convertImageRequest, imageResponse, type ImageEvent } from "./images.js";
 import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, ignoredHeader, sseChunk, type Converted } from "./openai.js";
 import type { Deliberation } from "../council/council.js";
+import type { ConversationStore, StoredTurn } from "../conversations/store.js";
+import { fitChain, historyMessages, inputBytes, storedInput, type ConversationLimits } from "../conversations/history.js";
+import { convertResponsesRequest, newResponseId, responseObject, ResponseEvents, type ResponseFields, type ResponsesRequest } from "./responses.js";
 
 function beginSse(res: Response) {
   res.status(200).setHeader("Content-Type", "text/event-stream").setHeader("Cache-Control", "no-cache");
@@ -49,7 +52,9 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   /** The OAuth authorization server for MCP clients (src/server/oauth.ts), mounted at the root. */
   oauth?: express.Router;
   /** The gateway's keys, for the full /health to a caller who presents one. */
-  keys?: KeyAuthenticator }): express.Express {
+  keys?: KeyAuthenticator;
+  /** The conversations kept for the Responses API (src/conversations/store.ts): mounts /v1/responses. */
+  conversations?: { store: ConversationStore; limits: ConversationLimits } }): express.Express {
   const app = express();
   app.disable("x-powered-by");
   // Access runs first, app-wide, so an unauthenticated caller gets a 401 before
@@ -301,6 +306,119 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
       } else sendError(res, e, opts.log);
     }
   });
+
+  // The Responses API: one model's text answer, with the conversation kept on
+  // the server when the client asks for it (store, previous_response_id). The
+  // history is replayed as text through Core.execute, the same stateless path
+  // as a chat request; nothing reaches a CLI that a chat request would not
+  // carry. A conversation is the caller's own: an id that is someone else's,
+  // expired or unknown answers 404 alike, so an id says nothing about whether
+  // it exists. Councils and image models keep their own endpoints.
+  if (opts.conversations) {
+    const conversations = opts.conversations;
+    const notFound = (res: Response, what: string) =>
+      res.status(404).json({ error: { message: `${what} not found`, type: "invalid_request_error", code: "not_found" } });
+    const messageIdOf = (id: string) => `msg_${id.slice("resp_".length)}`;
+
+    app.post("/v1/responses", async (req: Request, res: Response) => {
+      let r: ResponsesRequest;
+      try { r = convertResponsesRequest(req.body); } catch (e) { return sendError(res, e, opts.log); }
+      const owner = callerOf(res.locals.identity) ?? "";
+      const info = core.listModels().find((m) => m.name === r.model);
+      if (core.isVirtual(r.model)) return sendError(res, new CapitolineError("bad_request", `model "${r.model}" is a council: councils are served by /v1/chat/completions`), opts.log);
+      if (info?.kind === "image") return sendError(res, new CapitolineError("bad_request", `model "${r.model}" generates images: use /v1/images/generations`), opts.log);
+      let chain: StoredTurn[] = [];
+      if (r.previousId) {
+        const found = conversations.store.chain(r.previousId, owner);
+        if (!found) return notFound(res, `previous response "${r.previousId}"`);
+        chain = found;
+      }
+      const keep = storedInput(r.input, r.attachments.length);
+      let fitted: StoredTurn[];
+      try { fitted = fitChain(chain, inputBytes(keep), conversations.limits, r.truncation); } catch (e) { return sendError(res, e, opts.log); }
+      const ireq: InternalRequest = {
+        model: r.model, effort: r.effort, stream: r.stream,
+        messages: [...(r.instructions ? [{ role: "system" as const, text: r.instructions }] : []), ...historyMessages(fitted), ...r.input],
+        ...(r.attachments.length ? { attachments: r.attachments } : {}),
+      };
+      const provider = info?.provider ?? "unknown";
+      const id = newResponseId();
+      const fields: ResponseFields = {
+        id, messageId: messageIdOf(id), model: r.model, createdAt: Date.now(), status: "in_progress", text: "",
+        ...(r.previousId ? { previousId: r.previousId } : {}), ...(r.instructions ? { instructions: r.instructions } : {}),
+        store: r.store, truncation: r.truncation, extra: { provider, ignored: r.ignored },
+      };
+      const ignored = ignoredHeader(r.ignored);
+      if (ignored) res.setHeader("X-Capitoline-Ignored", ignored);
+      const ac = new AbortController();
+      res.on("close", () => { if (!res.writableFinished) ac.abort(); });
+      const events = new ResponseEvents(fields);
+      let keepAlive: ReturnType<typeof setInterval> | undefined;
+      // A stream opens at once for an available model, with the keep-alive the
+      // council uses: a replayed history makes long answers likelier, and the
+      // edge drops an origin silent for 100 s. A model already known to be
+      // unavailable is left to fail before the headers, as a plain HTTP error.
+      const open = () => {
+        if (res.headersSent) return;
+        beginSse(res);
+        res.write(events.open());
+        keepAlive = setInterval(() => res.write(KEEP_ALIVE), KEEP_ALIVE_MS);
+      };
+      let usage: Usage | undefined;
+      let cliModelId: string | undefined;
+      try {
+        if (r.stream && info?.available) open();
+        for await (const ev of core.execute(ireq, { signal: ac.signal, source: "http", caller: callerOf(res.locals.identity) })) {
+          if (ev.type === "text") {
+            fields.text += ev.delta;
+            if (r.stream) { open(); res.write(events.delta(ev.delta)); }
+          } else if (ev.type === "done") { usage = ev.usage; cliModelId = ev.cliModelId; }
+          else if (ev.type === "error") throw providerError(ev, provider, r.model);
+        }
+        if (ac.signal.aborted) return; // the client went away: no answer, and nothing kept
+        const done: ResponseFields = { ...fields, status: "completed", ...(usage ? { usage } : {}),
+          extra: { ...fields.extra, ...(cliModelId !== undefined ? { cliModelId } : {}) } };
+        if (r.store) {
+          try {
+            conversations.store.save({ id, previousId: r.previousId ?? null, owner, model: r.model, ...(cliModelId !== undefined ? { cliModelId } : {}),
+              input: keep, output: fields.text, inputTokens: usage?.input, outputTokens: usage?.output });
+          } catch (e) {
+            // The answer is real and is delivered; only its continuation is lost.
+            opts.log.warn({ err: String(e) }, "response not stored");
+          }
+        }
+        if (r.stream) { open(); res.write(events.complete(done)); res.end(); }
+        else res.json(responseObject(done));
+      } catch (e) {
+        if (res.headersSent) {
+          const err = e instanceof CapitolineError ? e : new CapitolineError("bad_output", "internal error");
+          opts.log.warn({ kind: err.kind }, "error after the response stream started");
+          res.write(events.failed({ code: err.kind, message: err.message }));
+          res.end();
+        } else sendError(res, e, opts.log);
+      } finally {
+        if (keepAlive) clearInterval(keepAlive);
+      }
+    });
+
+    app.get("/v1/responses/:id", (req: Request, res: Response) => {
+      const turn = conversations.store.get(String(req.params.id), callerOf(res.locals.identity) ?? "");
+      if (!turn) return notFound(res, `response "${req.params.id}"`);
+      res.json(responseObject({
+        id: turn.id, messageId: messageIdOf(turn.id), model: turn.model, createdAt: turn.createdAt, status: "completed", text: turn.output,
+        usage: { input: turn.inputTokens, output: turn.outputTokens }, ...(turn.previousId ? { previousId: turn.previousId } : {}),
+        store: true, truncation: "disabled", extra: { ...(turn.cliModelId ? { cliModelId: turn.cliModelId } : {}) },
+      }));
+    });
+
+    // Deletes the whole conversation the response belongs to: a turn alone
+    // cannot go without breaking the chains that run through it.
+    app.delete("/v1/responses/:id", (req: Request, res: Response) => {
+      const id = String(req.params.id);
+      if (!conversations.store.deleteThread(id, callerOf(res.locals.identity) ?? "")) return notFound(res, `response "${id}"`);
+      res.json({ id, object: "response", deleted: true });
+    });
+  }
 
   // One image per request, returned inline (b64_json): there is nothing to
   // stream, so the answer is either the whole document or a spec 8.3 error.
