@@ -81,6 +81,9 @@ describe("the public-repository guard", () => {
     expect(hook(`gh release edit v9 --notes-file ${leak}`).status).toBe(2);
     expect(hook("gh release edit v9 --notes 'Sixteen images per request'").status).toBe(0);
     expect(hook(`cat ${leak}`).status).toBe(0);
+    // Text published to another repository is that repository's business.
+    expect(hook(`cd ${dir} && gh release edit v9 --notes-file ${leak}`).status).toBe(0);
+    expect(hook(`gh release edit v9 -R someone/elsewhere --notes-file ${leak}`).status).toBe(0);
   });
   it("catches a gateway key and a session link in a file too", () => {
     const r = repo().commit("config.txt", `key: cap_${"a".repeat(32)}\n${SESSION}\n`);
