@@ -112,11 +112,25 @@ On the host, as root, from the clone:
    refuses to run a command (`docs/deploy.md` §6.4) and still has its
    self-update switched off (§6.3c), and **puts the previous version back if
    any of that fails**, then smoke-tests the restored one.
-   **It needs that image.** When the image model's quota is used up
-   (`antigravity-image`, `codex-image`: `/health` shows it `rate_limited`), the
-   script says so and stops before installing anything, because the smoke test
-   would fail on the image and put a sound version back. Run it again when the
-   quota reopens; the CLI in place keeps working meanwhile.
+   **The image is the one check that can wait.** When the image model's quota
+   is used up (`antigravity-image`, `codex-image`: `/health` shows it
+   `rate_limited`, with the time it reopens), the script says so and updates
+   anyway: every other check runs as usual, the row it prints reads "image not
+   verified (quota used up)", and it keeps what a later rollback needs under
+   `/var/lib/capitoline/update-cli` (the previous version's number, and for
+   Antigravity, whose installer cannot install an older version, the previous
+   binary). An image quota can stay used up for days, and none of the checks
+   that guard what the CLI may do depends on it. When the quota is back, run
+   the image check alone:
+
+   ```sh
+   cd /var/lib/capitoline/app && scripts/update-cli.sh antigravity image    # or codex
+   ```
+
+   It draws one image with the installed version. If that works it says so
+   and clears what was kept; if it fails it puts the previous version back,
+   as the update itself would have. Until then a broken image path would show
+   as a failed image request, never as a wrong one.
    On success it prints the row for the table above. No restart is needed:
    the gateway starts a CLI per request. What follows is what the script
    automates, and what to do by hand when it stops.

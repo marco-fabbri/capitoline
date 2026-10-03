@@ -3,6 +3,7 @@
 # a check fails. Run as root from the clone (docs/update-clis.md, "Procedure").
 #
 #   scripts/update-cli.sh <claude|codex|antigravity|agy> [version]
+#   scripts/update-cli.sh <codex|antigravity|agy> image     only the image check, later
 #
 # Never run unattended, and never from a timer: the CLIs are agents, and a new
 # version can switch on a tool the configuration never had reason to switch off
@@ -23,8 +24,13 @@
 #    the CLI must still honour the switch that stops it updating itself (§6.3c).
 # 4. On any failure: the previous version back, and the smoke test again.
 #
-# Before all of it: when the CLI has an image model and its quota is used up,
-# the script stops without installing, since step 3 could not draw its image.
+# The image is the one check that can be out of reach: an image quota can stay
+# used up for days, and holding a CLI back that long over it would be out of
+# proportion, since every other check runs without it. So with the quota used
+# up the update goes ahead, says the image was not verified, and keeps what a
+# later rollback needs (the previous version's number, and for Antigravity its
+# binary) under $STATE. `update-cli.sh <cli> image` then runs that one check
+# when the quota is back, and puts the previous version back if it fails.
 #
 # No restart is needed either way: the gateway starts a CLI per request.
 set -euo pipefail
@@ -39,7 +45,8 @@ case "$cli" in
   *) echo "usage: $0 <claude|codex|antigravity> [version]" >&2; exit 2 ;;
 esac
 [[ $EUID -eq 0 ]] || { echo "update-cli: run as root (it installs as runner and creates a gateway key as capitoline)" >&2; exit 2; }
-[[ -z "$pkg" && "$target" != "latest" ]] && { echo "update-cli: the Antigravity installer only installs the latest version" >&2; exit 2; }
+[[ -z "$pkg" && "$target" != "latest" && "$target" != "image" ]] && { echo "update-cli: the Antigravity installer only installs the latest version" >&2; exit 2; }
+[[ "$target" == "image" && -z "$image_model" ]] && { echo "update-cli: $cli has no image model to check" >&2; exit 2; }
 
 APP="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$APP"
@@ -63,6 +70,13 @@ read -r BIN RUNNER SWITCHED_OFF PROBE_MODEL < <(sudo -u capitoline env CAPITOLIN
 [[ -x "$BIN" && -n "$RUNNER" ]] || { echo "update-cli: no binary or runner user for $cli in the configuration" >&2; exit 1; }
 
 WORK="$(mktemp -d)"; chown "$RUNNER": "$WORK"
+# What an image check postponed by a used-up quota needs later. Root's, not the
+# runner's: the binary kept here is one that may be put back and run.
+STATE="${CAPITOLINE_UPDATE_STATE:-/var/lib/capitoline/update-cli}"
+PREV_VERSION_FILE="$STATE/$cli.previous-version"
+PREV_BINARY_FILE="$STATE/$cli.previous-binary"
+PREV_BINARY="$WORK/previous-binary"
+image_skip=0
 KEY_NAME="update-${cli}-$$"
 cleanup() {
   [[ -n "${KEY:-}" ]] && keys revoke "$KEY_NAME" >/dev/null 2>&1 || true
@@ -107,28 +121,62 @@ smoke() {
     [[ -n "$KEY" ]] || { echo "update-cli: could not create a temporary gateway key" >&2; return 1; }
   fi
   local image=0
-  [[ -n "$image_model" ]] && image=1
+  [[ -n "$image_model" && "$image_skip" != 1 ]] && image=1
   CAPITOLINE_API_KEY="$KEY" SMOKE_IMAGE="$image" SMOKE_IMAGE_MODEL="$image_model" bash scripts/smoke.sh "$BASE"
 }
 
-# The check below draws one image from this CLI's own image model. While that
-# model's quota is used up the image cannot be drawn, the smoke test fails, and
-# a sound new version would be put back for a reason that has nothing to do
-# with it. So that is asked first, before anything is installed.
-if [[ -n "$image_model" ]]; then
-  quota=$(node -e "
+# Whether the image model's quota is used up, and until when if /health says.
+image_quota_out() {
+  node -e "
     fetch('$BASE/health').then((r) => r.json()).then((h) => {
       const m = (h.models || []).find((x) => x.name === '$image_model');
       if (m && m.available === false && m.reason === 'rate_limited') {
         const at = m.quota && m.quota.resetAt ? new Date(m.quota.resetAt).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
-        console.log(at || 'unknown');
+        console.log(at ? 'it reopens around ' + at : 'no reset time is known');
       }
-    }).catch(() => {});" 2>/dev/null || true)
-  if [[ -n "$quota" ]]; then
-    when="no reset time is known"; [[ "$quota" != unknown ]] && when="it reopens around $quota"
-    echo "update-cli: $image_model is out of quota ($when), and the check after an update draws one image with it." >&2
-    echo "update-cli: nothing was installed. Run this again once the quota is back." >&2
+    }).catch(() => {});" 2>/dev/null || true
+}
+
+rollback() {
+  echo "update-cli: FAILED: $1. Putting $cli $before back." >&2
+  if [[ -n "$pkg" ]]; then
+    install_version "$before"
+  else
+    install -o "$RUNNER" -g "$RUNNER" -m 0755 "$PREV_BINARY" "$BIN"
+  fi
+  rm -f "$PREV_VERSION_FILE" "$PREV_BINARY_FILE"
+  echo "update-cli: $cli is $(version_of) again; smoke test of the restored version:" >&2
+  smoke || echo "update-cli: the restored version fails the smoke test too: the fault is not the update" >&2
+  exit 1
+}
+
+# The image check alone, for a version installed while the quota was used up.
+if [[ "$target" == image ]]; then
+  out=$(image_quota_out)
+  if [[ -n "$out" ]]; then
+    echo "update-cli: $image_model is still out of quota ($out). Nothing was checked; run this again later." >&2
     exit 3
+  fi
+  echo "update-cli: image check of $cli $(version_of)"
+  if smoke; then
+    rm -f "$PREV_VERSION_FILE" "$PREV_BINARY_FILE"
+    echo "update-cli: $cli $(version_of) draws an image. Add \"image verified $(date -u +%F)\" to its row in docs/update-clis.md."
+    exit 0
+  fi
+  before=$(cat "$PREV_VERSION_FILE" 2>/dev/null || true)
+  PREV_BINARY="$PREV_BINARY_FILE"
+  if [[ -z "$before" || ( -z "$pkg" && ! -f "$PREV_BINARY" ) ]]; then
+    echo "update-cli: the image check failed and no previous version was kept to put back (docs/update-clis.md, by hand)." >&2
+    exit 1
+  fi
+  rollback "image check"
+fi
+
+if [[ -n "$image_model" ]]; then
+  out=$(image_quota_out)
+  if [[ -n "$out" ]]; then
+    image_skip=1
+    echo "update-cli: $image_model is out of quota ($out): updating without the image check." >&2
   fi
 fi
 
@@ -147,18 +195,6 @@ if [[ "$after" == "$before" ]]; then
   exit 0
 fi
 echo "update-cli: $cli $before -> $after"
-
-rollback() {
-  echo "update-cli: FAILED: $1. Putting $cli $before back." >&2
-  if [[ -n "$pkg" ]]; then
-    install_version "$before"
-  else
-    install -o "$RUNNER" -g "$RUNNER" -m 0755 "$WORK/previous-binary" "$BIN"
-  fi
-  echo "update-cli: $cli is $(version_of) again; smoke test of the restored version:" >&2
-  smoke || echo "update-cli: the restored version fails the smoke test too: the fault is not the update" >&2
-  exit 1
-}
 
 if [[ "$cli" == codex ]]; then
   enabled_features > "$WORK/features-after"
@@ -203,6 +239,17 @@ if [[ "$cli" == antigravity ]]; then
   echo "update-cli: antigravity $after still has its self-update switched off"
 fi
 
+note="smoke test passed"
+if [[ "$image_skip" == 1 ]]; then
+  # Kept for the image check still owed, and for the rollback it may call for.
+  install -d -o root -g root -m 0755 "$STATE"
+  printf '%s\n' "$before" > "$PREV_VERSION_FILE"
+  [[ -z "$pkg" ]] && install -o root -g root -m 0755 "$WORK/previous-binary" "$PREV_BINARY_FILE"
+  note="smoke test passed, image not verified (quota used up)"
+else
+  rm -f "$PREV_VERSION_FILE" "$PREV_BINARY_FILE"
+fi
+
 echo
 echo "update-cli: $cli $after is in place and passed. Add to docs/update-clis.md, Versions in use:"
 case "$cli" in
@@ -210,7 +257,7 @@ case "$cli" in
   codex)       name='Codex CLI (`codex`)' ;;
   antigravity) name='Antigravity CLI (`agy`)' ;;
 esac
-echo "| $name | $after | $(date -u +%F) | updated from $before with scripts/update-cli.sh; smoke test passed |"
+echo "| $name | $after | $(date -u +%F) | updated from $before with scripts/update-cli.sh; $note |"
 echo "set providers.$cli.version.verified to $after in config/capitoline.yaml (and, for claude or codex, the"
 echo "npm install line of docs/deploy.md §4: a test keeps the three in step), and refresh the model lists"
 echo "the tests read (docs/update-clis.md, \"The model lists\")."
