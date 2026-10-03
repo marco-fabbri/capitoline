@@ -194,7 +194,7 @@ Spike result: Claude answers `/model` in `-p` mode with its alias list, and `agy
 - the configuration file declares the models per provider (source of truth);
 - each provider's `health()` verifies at startup and hourly, with a minimal request on the cheapest model, that the provider responds;
 - a failing model/provider is marked unavailable and disappears from `/v1/models` until the next check;
-- the `health` cache is invalidated immediately if a real request fails with `auth_expired`;
+- the `health` cache is invalidated if a real request fails with `auth_expired` — at once for a provider that was not healthy, and for a healthy one after the confirming probe of the next point agrees (2026-10-03);
 - a probe answering `auth_expired` for a provider that was healthy is confirmed by a second probe a minute later before the provider is marked signed out (2026-10-03): one failed token renewal looks the same as a sign-out, and the next probe is an hour away;
 - `/v1/models` reads the cache, never the CLI.
 

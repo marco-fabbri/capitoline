@@ -78,7 +78,8 @@ export const RESUME_NOTICE_MS = 3600_000;
 // seen on 2026-10-02, when one such probe took a provider's models away for an
 // hour and told the owner to log in again for nothing. So a provider that was
 // healthy is not believed on its first auth_expired: it is probed again after
-// this long, and that verdict stands. A real sign-out fails twice.
+// this long, and that verdict stands. A real sign-out fails twice. The same
+// holds when it is a request, and not the probe, that gets the answer.
 export const AUTH_RECHECK_MS = 60_000;
 
 const D7 = 7 * 24 * 3600_000;
@@ -788,11 +789,38 @@ export class Core {
       this.pauseInstalled(id, null, s.pausedUntil, retryAfterS !== undefined, fresh);
       this.opts.log.warn({ provider: id, seconds: Math.round((s.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: s.strikes }, "provider paused after rate limit");
     } else if (kind === "auth_expired") {
+      // The same doubt as for a probe (AUTH_RECHECK_MS): one failed token
+      // renewal answers a request exactly as a sign-out does. A provider that
+      // was healthy is not marked out on a request's word: a confirming probe
+      // is scheduled and its verdict stands. While it is on its way, further
+      // such answers add nothing. This request has failed either way.
+      if (this.authRechecks.has(id) || this.confirming.has(id)) return;
+      if (this.deferAuthVerdict(s)) {
+        this.opts.log.warn({ provider: id }, "auth_expired reported by a request to a healthy provider, probing before believing it");
+        return;
+      }
       const before = s.health;
       s.health = { ok: false, kind, detail: "auth_expired reported by a request", checkedAt: this.now() };
       this.healthChanged(id, before, s.health);
       this.opts.log.error({ provider: id }, "provider authentication expired");
     }
+  }
+
+  // Schedules the confirming probe for a provider that was healthy and has
+  // just answered auth_expired, to a probe or to a request. False when there
+  // is nothing to defer: the provider was not healthy (startup, or already
+  // out), or a confirming probe is already scheduled or running.
+  private deferAuthVerdict(s: State): boolean {
+    const id = s.provider.id;
+    if (!s.health?.ok || this.confirming.has(id) || this.authRechecks.has(id)) return false;
+    const timer = setTimeout(() => {
+      this.authRechecks.delete(id);
+      this.confirming.add(id);
+      void this.checkHealth(id).catch(() => {}).finally(() => this.confirming.delete(id));
+    }, this.opts.authRecheckMs ?? AUTH_RECHECK_MS);
+    timer.unref();
+    this.authRechecks.set(id, timer);
+    return true;
   }
 
   // The model's own pause, by the same rules as the provider's: an explicit
@@ -980,17 +1008,9 @@ export class Core {
       // Not at startup and not for a provider already out (s.health?.ok): there
       // the verdict is taken at once, so the port is never held for it.
       const id = s.provider.id;
-      if (!status.ok && status.kind === "auth_expired" && s.health?.ok && !this.confirming.has(id) && !this.authRechecks.has(id)) {
-        const ms = this.opts.authRecheckMs ?? AUTH_RECHECK_MS;
-        const timer = setTimeout(() => {
-          this.authRechecks.delete(id);
-          this.confirming.add(id);
-          void this.checkHealth(id).catch(() => {}).finally(() => this.confirming.delete(id));
-        }, ms);
-        timer.unref();
-        this.authRechecks.set(id, timer);
+      if (!status.ok && status.kind === "auth_expired" && this.deferAuthVerdict(s)) {
         this.usage.record({ provider: id, model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: "auth_expired", source: "health", ts: this.now() });
-        this.opts.log.warn({ provider: id, detail: status.detail, recheckS: Math.round(ms / 1000) }, "health check: auth_expired from a healthy provider, probing again before believing it");
+        this.opts.log.warn({ provider: id, detail: status.detail, recheckS: Math.round((this.opts.authRecheckMs ?? AUTH_RECHECK_MS) / 1000) }, "health check: auth_expired from a healthy provider, probing again before believing it");
         return;
       }
       // A rate limit the CLI attributed to the probe's own model is about that

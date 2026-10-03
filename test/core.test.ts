@@ -1070,6 +1070,28 @@ describe("a healthy provider's first auth_expired probe", () => {
     expect(told).toEqual([{ kind: "signed_out", provider: "a" }]);
   });
 
+  it("holds for a request too: the provider stays in, and the confirming probe decides", async () => {
+    const { a, core, told } = makeRecheck();
+    await core.checkHealth("a");
+    a.script = [{ type: "error", kind: "auth_expired", detail: "Login expired" }];
+    expect(await drain(core.execute(req("a-1"), { source: "http" }))).toMatchObject([{ type: "error", kind: "auth_expired" }]);
+    expect(await drain(core.execute(req("a-1"), { source: "http" }))).toMatchObject([{ type: "error", kind: "auth_expired" }]);
+    expect(available(core)).toBe(true);     // not out on a request's word
+    expect(told).toEqual([]);
+    await wait(80);                          // the probe finds it signed in
+    await core.idle();
+    expect(a.healthCalls).toBe(2);           // one confirming probe for the two refusals
+    expect(available(core)).toBe(true);
+    expect(told).toEqual([]);
+
+    a.healthResult = { ok: false, kind: "auth_expired", checkedAt: 0 };
+    expect(await drain(core.execute(req("a-1"), { source: "http" }))).toMatchObject([{ type: "error", kind: "auth_expired" }]);
+    await wait(80);                          // this time the probe agrees
+    await core.idle();
+    expect(available(core)).toBe(false);
+    expect(told).toEqual([{ kind: "signed_out", provider: "a" }]);
+  });
+
   it("is believed at once at startup, and never probed again after a cancel", async () => {
     const first = makeRecheck();
     first.a.healthResult = { ok: false, kind: "auth_expired", checkedAt: 0 };

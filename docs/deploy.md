@@ -762,7 +762,9 @@ token once answers a probe exactly as a signed-out one does, so a provider
 that was healthy is not marked signed out on its first such probe: the gateway
 probes it again a minute later and believes that answer. A real sign-out fails
 both, and is notified then; a passing hiccup leaves a warning in the journal
-and nothing else.
+and nothing else. The same holds when it is a request, and not the hourly
+probe, that gets the answer: that request fails, but the provider stays in
+until the confirming probe has spoken.
 
 That check is one real call per provider on its `health_model`, once an hour,
 24 a day. On a plan with a small allowance (a free tier, a weekly quota) that
