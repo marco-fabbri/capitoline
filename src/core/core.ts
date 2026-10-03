@@ -47,6 +47,8 @@ export interface CoreOptions {
   onCatalogChange?: (provider: string, change: CatalogChange) => void;
   /** Told when a quota pause starts and, if it was long, ends, and when a provider signs out or back in. */
   onAvailability?: (event: AvailabilityEvent) => void;
+  /** How long after a healthy provider's first auth_expired probe the confirming one runs (AUTH_RECHECK_MS). Tests shorten it. */
+  authRecheckMs?: number;
 }
 
 /**
@@ -67,6 +69,14 @@ export type AvailabilityEvent =
   | { kind: "signed_in"; provider: string };
 
 export const RESUME_NOTICE_MS = 3600_000;
+
+// A CLI that fails to renew its token once answers a probe exactly as a
+// signed-out one does, and the next probe an hour later finds it signed in:
+// seen on 2026-10-02, when one such probe took a provider's models away for an
+// hour and told the owner to log in again for nothing. So a provider that was
+// healthy is not believed on its first auth_expired: it is probed again after
+// this long, and that verdict stands. A real sign-out fails twice.
+export const AUTH_RECHECK_MS = 60_000;
 
 const D7 = 7 * 24 * 3600_000;
 /** The window of the per-caller breakdown /health serves. */
@@ -166,6 +176,9 @@ export class Core {
   private readonly virtuals = new Map<string, Virtual>();
   /** Health checks still running; awaited by idle() before the usage store is closed. */
   private readonly inFlight = new Set<Promise<void>>();
+  // Providers waiting for their confirming probe (AUTH_RECHECK_MS), and the ones it is running for.
+  private readonly authRechecks = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly confirming = new Set<string>();
   private readonly now: () => number;
 
   constructor(providers: Provider[], private readonly usage: UsageStore, private readonly opts: CoreOptions) {
@@ -843,6 +856,12 @@ export class Core {
     return run;
   }
 
+  /** Drops the confirming probes still waiting to run: a shutdown must not have one land on a closed store. */
+  cancelAuthRechecks(): void {
+    for (const timer of this.authRechecks.values()) clearTimeout(timer);
+    this.authRechecks.clear();
+  }
+
   /** Resolves when no health check is in flight. Never rejects. */
   idle(): Promise<void> {
     return Promise.all([...this.inFlight]).then(() => {});
@@ -877,6 +896,22 @@ export class Core {
       let status: HealthStatus;
       try { status = await s.provider.health(); }
       catch (e) { status = { ok: false, kind: "cli_crashed", detail: String(e), checkedAt: this.now() }; }
+      // Not at startup and not for a provider already out (s.health?.ok): there
+      // the verdict is taken at once, so the port is never held for it.
+      const id = s.provider.id;
+      if (!status.ok && status.kind === "auth_expired" && s.health?.ok && !this.confirming.has(id) && !this.authRechecks.has(id)) {
+        const ms = this.opts.authRecheckMs ?? AUTH_RECHECK_MS;
+        const timer = setTimeout(() => {
+          this.authRechecks.delete(id);
+          this.confirming.add(id);
+          void this.checkHealth(id).catch(() => {}).finally(() => this.confirming.delete(id));
+        }, ms);
+        timer.unref();
+        this.authRechecks.set(id, timer);
+        this.usage.record({ provider: id, model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: "auth_expired", source: "health", ts: this.now() });
+        this.opts.log.warn({ provider: id, detail: status.detail, recheckS: Math.round(ms / 1000) }, "health check: auth_expired from a healthy provider, probing again before believing it");
+        return;
+      }
       // A rate limit the CLI attributed to the probe's own model is about that
       // model, not about the provider: the very same answer coming from a
       // client request pauses the model alone (onError). Marking the provider

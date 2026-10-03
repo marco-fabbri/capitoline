@@ -104,7 +104,7 @@ printf '\nexport PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"\n' >> ~/.pr
 . ~/.profile
 # The versions this repository was last verified with: providers.<id>.version.verified
 # in config/capitoline.yaml, the newest row of each CLI in docs/update-clis.md.
-npm install -g @anthropic-ai/claude-code@2.1.286 @openai/codex@0.159.3
+npm install -g @anthropic-ai/claude-code@2.1.288 @openai/codex@0.160.0
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 claude --version; codex --version; agy --version
 exit
@@ -755,6 +755,13 @@ A login done while the service runs — a CLI signed in after §8, or a
 credential renewed — is noticed at the next health check, up to an hour
 later; until then that provider stays marked as signed out
 (`auth_expired`). `systemctl restart capitoline` makes it immediate.
+
+The other direction has a second look built in. A CLI that fails to renew its
+token once answers a probe exactly as a signed-out one does, so a provider
+that was healthy is not marked signed out on its first such probe: the gateway
+probes it again a minute later and believes that answer. A real sign-out fails
+both, and is notified then; a passing hiccup leaves a warning in the journal
+and nothing else.
 
 That check is one real call per provider on its `health_model`, once an hour,
 24 a day. On a plan with a small allowance (a free tier, a weekly quota) that

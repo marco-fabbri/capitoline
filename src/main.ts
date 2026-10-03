@@ -242,6 +242,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     stopCatalog();
     stopVersions();
     stopPauseSweep();
+    core.cancelAuthRechecks();
     // Idle keep-alive sockets go at once; the ones carrying a response get the
     // grace, after which they are destroyed too — an SSE stream with
     // timeout_s: 600 must not hold the shutdown open until SIGKILL.

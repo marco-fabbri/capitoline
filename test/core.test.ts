@@ -1025,6 +1025,59 @@ describe("availability notices", () => {
   });
 });
 
+// One failed token renewal looks like a sign-out to a probe; the next probe
+// finds the provider signed in. A healthy provider gets a second probe first.
+describe("a healthy provider's first auth_expired probe", () => {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  function makeRecheck() {
+    const a = new FakeProvider("a", ["a-1"], OK);
+    const told: AvailabilityEvent[] = [];
+    const core = new Core([a], new UsageStore(":memory:"), { maxWaitMs: 100, budgets: {}, log: createLogger("t"), onAvailability: (e) => told.push(e), authRecheckMs: 20 });
+    return { a, core, told };
+  }
+  const available = (core: Core) => core.listModels().find((m) => m.name === "a-1")!.available;
+
+  it("is not believed: the provider stays available, nothing is told, and a good second probe closes it", async () => {
+    const { a, core, told } = makeRecheck();
+    await core.checkHealth("a");
+    a.healthResult = { ok: false, kind: "auth_expired", checkedAt: 0 };
+    await core.checkHealth("a");
+    expect(available(core)).toBe(true);
+    a.healthResult = { ok: true, checkedAt: 0 };
+    await wait(80);
+    await core.idle();
+    expect(a.healthCalls).toBe(3);
+    expect(available(core)).toBe(true);
+    expect(told).toEqual([]);
+  });
+
+  it("is believed when the second probe says the same, once", async () => {
+    const { a, core, told } = makeRecheck();
+    await core.checkHealth("a");
+    a.healthResult = { ok: false, kind: "auth_expired", checkedAt: 0 };
+    await core.checkHealth("a");
+    await wait(80);
+    await core.idle();
+    expect(a.healthCalls).toBe(3);
+    expect(available(core)).toBe(false);
+    expect(told).toEqual([{ kind: "signed_out", provider: "a" }]);
+  });
+
+  it("is believed at once at startup, and never probed again after a cancel", async () => {
+    const first = makeRecheck();
+    first.a.healthResult = { ok: false, kind: "auth_expired", checkedAt: 0 };
+    await first.core.checkHealth("a");
+    expect(first.told).toEqual([{ kind: "signed_out", provider: "a" }]);
+    const { a, core } = makeRecheck();
+    await core.checkHealth("a");
+    a.healthResult = { ok: false, kind: "auth_expired", checkedAt: 0 };
+    await core.checkHealth("a");
+    core.cancelAuthRechecks();
+    await wait(80);
+    expect(a.healthCalls).toBe(2);
+  });
+});
+
 // Images a request carries: refused for a CLI that takes text only, never
 // written into its sandbox and silently ignored as they were before.
 describe("images in Core", () => {
