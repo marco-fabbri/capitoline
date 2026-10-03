@@ -112,6 +112,11 @@ On the host, as root, from the clone:
    refuses to run a command (`docs/deploy.md` §6.4) and still has its
    self-update switched off (§6.3c), and **puts the previous version back if
    any of that fails**, then smoke-tests the restored one.
+   **It needs that image.** When the image model's quota is used up
+   (`antigravity-image`, `codex-image`: `/health` shows it `rate_limited`), the
+   script says so and stops before installing anything, because the smoke test
+   would fail on the image and put a sound version back. Run it again when the
+   quota reopens; the CLI in place keeps working meanwhile.
    On success it prints the row for the table above. No restart is needed:
    the gateway starts a CLI per request. What follows is what the script
    automates, and what to do by hand when it stops.

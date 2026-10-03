@@ -23,6 +23,9 @@
 #    the CLI must still honour the switch that stops it updating itself (§6.3c).
 # 4. On any failure: the previous version back, and the smoke test again.
 #
+# Before all of it: when the CLI has an image model and its quota is used up,
+# the script stops without installing, since step 3 could not draw its image.
+#
 # No restart is needed either way: the gateway starts a CLI per request.
 set -euo pipefail
 
@@ -107,6 +110,27 @@ smoke() {
   [[ -n "$image_model" ]] && image=1
   CAPITOLINE_API_KEY="$KEY" SMOKE_IMAGE="$image" SMOKE_IMAGE_MODEL="$image_model" bash scripts/smoke.sh "$BASE"
 }
+
+# The check below draws one image from this CLI's own image model. While that
+# model's quota is used up the image cannot be drawn, the smoke test fails, and
+# a sound new version would be put back for a reason that has nothing to do
+# with it. So that is asked first, before anything is installed.
+if [[ -n "$image_model" ]]; then
+  quota=$(node -e "
+    fetch('$BASE/health').then((r) => r.json()).then((h) => {
+      const m = (h.models || []).find((x) => x.name === '$image_model');
+      if (m && m.available === false && m.reason === 'rate_limited') {
+        const at = m.quota && m.quota.resetAt ? new Date(m.quota.resetAt).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
+        console.log(at || 'unknown');
+      }
+    }).catch(() => {});" 2>/dev/null || true)
+  if [[ -n "$quota" ]]; then
+    when="its reset time is in /health"; [[ "$quota" != unknown ]] && when="it reopens around $quota"
+    echo "update-cli: $image_model is out of quota ($when), and the check after an update draws one image with it." >&2
+    echo "update-cli: nothing was installed. Run this again once the quota is back." >&2
+    exit 3
+  fi
+fi
 
 before=$(version_of)
 echo "update-cli: $cli $before installed"
