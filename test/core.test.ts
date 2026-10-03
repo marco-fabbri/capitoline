@@ -507,6 +507,13 @@ describe("Core images", () => {
 
     await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
     expect(core.listModels().map((m) => [m.name, m.available])).toEqual([["c-text", true], ["c-image", false]]);
+    // A restart still says when the image model returns: the reset is read
+    // back from the pause, a minute of slack included.
+    const c2 = new FakeProvider("c", ["c-text", { name: "c-image", kind: "image" }], OK, 1);
+    c2.aliases = c.aliases;
+    const restarted = new Core([c2], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: () => t });
+    restarted.restorePauses();
+    expect(restarted.listModels().find((m) => m.name === "c-image")!.quota!.resetAt).toBe(t + 432_060_000);
     // And the text model really answers, rather than merely being listed.
     expect(await drain(core.execute(req("c-text"), { source: "http" }))).toEqual(OK);
     expect(core.providerStates()[0]).toMatchObject({ pausedUntil: null, strikes: 0 });

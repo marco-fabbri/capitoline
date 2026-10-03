@@ -125,7 +125,7 @@ if [[ -n "$image_model" ]]; then
       }
     }).catch(() => {});" 2>/dev/null || true)
   if [[ -n "$quota" ]]; then
-    when="its reset time is in /health"; [[ "$quota" != unknown ]] && when="it reopens around $quota"
+    when="no reset time is known"; [[ "$quota" != unknown ]] && when="it reopens around $quota"
     echo "update-cli: $image_model is out of quota ($when), and the check after an update draws one image with it." >&2
     echo "update-cli: nothing was installed. Run this again once the quota is back." >&2
     exit 3

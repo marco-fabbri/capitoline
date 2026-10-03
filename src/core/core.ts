@@ -446,8 +446,9 @@ export class Core {
 
   // The quota of a provider that has image models, null for the others. `used`
   // and `windowStartedAt` are counted from the recorded generations, so they
-  // survive a restart; `resetAt` only lives in memory (a reported reset is not
-  // a fact about our own calls) and is dropped once it has passed.
+  // survive a restart; `resetAt` lives in memory (a reported reset is not a
+  // fact about our own calls), is restored from the pause it installed
+  // (restorePauses), and is dropped once it has passed.
   private imageQuota(id: string, s: State): ImageQuota | null {
     if (!s.hasImageModels) return null;
     const now = this.now();
@@ -835,6 +836,12 @@ export class Core {
           this.opts.log.info({ provider: row.provider, from: row.model, to: scope }, "pause row translated to the current shape");
         }
         this.modelPauses.set(this.pauseKey(row.provider, scope), { pausedUntil: row.until, strikes: row.strikes });
+        // The reset an image quota reported lives in memory only; after a
+        // restart it is read back from the pause it installed, so /health
+        // still says when the image model returns (the pause ends a minute
+        // after the reset, which is when a request is let through again).
+        const st = this.states.get(row.provider);
+        if (st && scope.startsWith("image:")) st.imageResetAt = Math.max(st.imageResetAt ?? 0, row.until);
         if (row.announcedAt !== null && this.opts.onAvailability) this.announced.set(`${row.provider}\u0000${scope}`, { provider: row.provider, scope, at: row.announcedAt, until: row.until });
       }
       if (row.model === null && row.announcedAt !== null && this.opts.onAvailability && this.states.has(row.provider)) {
