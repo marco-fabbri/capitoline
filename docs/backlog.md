@@ -50,7 +50,14 @@ finding has somewhere to go.
 
 **Real error fixtures.** Capture real fixtures (expired token, exhausted window) for all three CLIs, recorded when the conditions actually occur rather than synthesized. One is now in: `test/fixtures/antigravity/image-429.jsonl`, the image quota refusal captured on 2026-09-21. Still synthetic: every expired-token case, and the text-side window for all three. Derived rather than synthetic, and named here so nobody reads them as captures: the council's stage recordings (`council-ranking.jsonl` under all three providers, `council-synthesis.jsonl` under `claude`) are the chat recordings with the answer text swapped and nothing else, so the envelope each adapter parses is still the one the real CLI produced — only the words in it were never said.
 
-**Two-container pod shape.** Gateway and runner as separate containers in one pod, communicating over a local socket, as the clean alternative to running sudo inside a single container.
+**A container installation: images, and the runner as a service of its own.** Today there is one way to install the gateway: a dedicated Linux machine (a VM or a system container) with systemd and two users, by hand from the runbook or with the Ansible installer. Nothing ships for Docker or Kubernetes, and many who find a project like this expect an image. The gateway itself is easy to package; the CLIs are what makes it a piece of work, for three reasons: each CLI's login is interactive and bound to the machine that did it, so it lives on a persistent volume and is done by hand the first time; the CLIs update often and every update is checked (`docs/update-clis.md`), which an image either rebuilds for or leaves to a volume; and the separation between the gateway and the CLIs rests on `sudo` between two users, which is the unclean part inside one container. In the order it would be built:
+
+1. **The runner as a service.** A small process that owns the CLIs and takes "run this command, with this input, in an empty directory, with this deadline" over a Unix socket, in place of `sudo` from the gateway's process. It is the piece that is actually missing, and it is useful outside containers too.
+2. **Two images**, gateway and runner. The gateway's holds no CLI and the runner's holds no key or usage database: the boundary `sudo` draws today becomes the boundary between containers.
+3. **An example for each platform**: a compose file for Docker, and for Kubernetes one pod with the two containers and the socket in a shared volume. One pod rather than two: a CLI's capacity is its subscription's, so there is nothing to scale apart; the gateway keeps a single SQLite writer; and the channel between them is "execute this", which inside a pod is a socket nobody else can reach and between pods would be a network service to authenticate and fence. A container per CLI, in the same pod, is the variant for isolating the providers from each other.
+4. **The procedures that change**: signing each CLI in inside its container, and updating and checking a CLI there.
+
+Not started, and not needed by an installation on a machine of its own, which stays the supported shape.
 
 ## Shipped
 
