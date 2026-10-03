@@ -184,6 +184,25 @@ export class ConversationStore {
     }
   }
 
+  /**
+   * How much each owner has kept, for the operator: counts and sizes, never a
+   * word of what was written. Expired threads are left out.
+   */
+  summary(now = Date.now()): { owner: string; threads: number; turns: number; bytes: number; lastUsedAt: number }[] {
+    const rows = this.db.prepare(`SELECT th.owner AS owner, COUNT(DISTINCT th.id) AS threads, COUNT(tu.id) AS turns,
+      COALESCE(SUM(tu.bytes),0) AS bytes, MAX(th.last_used_at) AS last
+      FROM threads th LEFT JOIN turns tu ON tu.thread_id = th.id WHERE th.last_used_at >= ? GROUP BY th.owner ORDER BY last DESC`)
+      .all(now - this.ttlDays * DAY_MS) as { owner: string; threads: number; turns: number; bytes: number; last: number }[];
+    return rows.map((r) => ({ owner: r.owner, threads: Number(r.threads), turns: Number(r.turns), bytes: Number(r.bytes), lastUsedAt: Number(r.last) }));
+  }
+
+  /** Deletes everything an owner has kept; returns how many threads went. */
+  deleteOwner(owner: string): number {
+    const ids = this.db.prepare(`SELECT id FROM threads WHERE owner = ?`).all(owner) as { id: string }[];
+    for (const { id } of ids) this.dropThread(id);
+    return ids.length;
+  }
+
   /** Drops the threads unused for longer than ttl_days; returns how many. */
   prune(now = Date.now()): number {
     const expired = this.stmts.expiredThreads.all(now - this.ttlDays * DAY_MS) as { id: string }[];

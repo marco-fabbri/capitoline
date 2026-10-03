@@ -68,6 +68,9 @@ export type AvailabilityEvent =
   | { kind: "signed_out"; provider: string }
   | { kind: "signed_in"; provider: string };
 
+/** A pause as the operator sees it: `scope` null for the whole provider, else a model's scope, with the names it holds back. */
+export interface PauseInfo { provider: string; scope: string | null; until: number; strikes: number; models: string[] }
+
 export const RESUME_NOTICE_MS = 3600_000;
 
 // A CLI that fails to renew its token once answers a probe exactly as a
@@ -276,6 +279,77 @@ export class Core {
     this.usage.markPauseAnnounced(own.provider, own.scope, null);
     const pausedMs = own.until - own.at;
     if (pausedMs >= RESUME_NOTICE_MS) this.tell({ kind: "resumed", provider: own.provider, scope: own.scope, pausedMs });
+  }
+
+  /**
+   * The pauses standing now: a provider's own (scope null) and each model's,
+   * with the gateway names a model pause holds back. For the operator.
+   */
+  pauses(): PauseInfo[] {
+    const out: PauseInfo[] = [];
+    const now = this.now();
+    for (const [id, s] of this.states) {
+      if (s.pausedUntil !== null && s.pausedUntil > now) out.push({ provider: id, scope: null, until: s.pausedUntil, strikes: s.strikes, models: s.provider.models().map((m) => m.name) });
+      for (const [key, p] of this.modelPauses) {
+        if (!key.startsWith(`${id}\u0000`) || p.pausedUntil <= now) continue;
+        const scope = key.slice(id.length + 1);
+        out.push({ provider: id, scope, until: p.pausedUntil, strikes: p.strikes, models: s.provider.models().filter((m) => scopeOf(m.kind, s.provider.cliId(m)) === scope).map((m) => m.name) });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Lifts a pause by hand, the provider's own (scope null) or one model's.
+   * Silent: nothing is announced, since the operator who lifts it knows. False
+   * when no such pause stands.
+   */
+  liftPause(providerId: string, scope: string | null): boolean {
+    const s = this.states.get(providerId);
+    if (!s) return false;
+    const announcedKey = `${providerId}\u0000${scope ?? ""}`;
+    if (scope === null) {
+      if (s.pausedUntil === null || s.pausedUntil <= this.now()) return false;
+      s.pausedUntil = null; s.strikes = 0;
+    } else {
+      const key = this.pauseKey(providerId, scope);
+      if (this.keyRemainingS(key) === undefined) return false;
+      this.modelPauses.delete(key);
+      if (scope.startsWith("image:")) s.imageResetAt = null;
+    }
+    this.usage.clearPause(providerId, scope);
+    this.announced.delete(announcedKey);
+    this.opts.log.info({ provider: providerId, scope }, "pause lifted by hand");
+    return true;
+  }
+
+  /**
+   * Holds a provider, or one of its models by gateway name, back for a while
+   * by hand: a pause like any other, stored and restored and lifted the same
+   * way, and never announced. For maintenance, or to stop spending a quota.
+   */
+  holdBack(providerId: string, model: string | undefined, forMs: number): PauseInfo {
+    const s = this.states.get(providerId);
+    if (!s) throw new CapitolineError("bad_request", `unknown provider "${providerId}"`);
+    if (!(forMs > 0)) throw new CapitolineError("bad_request", "the pause must last some time");
+    const until = this.now() + forMs;   // by Core's own clock, like every other pause
+    let scope: string | null = null;
+    if (model === undefined) {
+      s.pausedUntil = Math.max(s.pausedUntil ?? 0, until);
+      this.usage.setPause(providerId, null, s.pausedUntil, s.strikes, this.now());
+    } else {
+      const spec = s.provider.models().find((m) => m.name === model);
+      if (!spec) throw new CapitolineError("bad_request", `provider "${providerId}" has no model "${model}"`);
+      scope = scopeOf(spec.kind, s.provider.cliId(spec));
+      const key = this.pauseKey(providerId, scope);
+      const p = this.modelPauses.get(key) ?? { pausedUntil: 0, strikes: 0 };
+      p.pausedUntil = Math.max(p.pausedUntil, until);
+      this.modelPauses.set(key, p);
+      this.usage.setPause(providerId, scope, p.pausedUntil, p.strikes, this.now());
+    }
+    this.usage.markPauseAnnounced(providerId, scope, null);
+    this.opts.log.info({ provider: providerId, model, until }, "pause installed by hand");
+    return this.pauses().find((x) => x.provider === providerId && x.scope === scope)!;
   }
 
   /** Announces the end of every announced pause that has run out. Cheap: no CLI, no store read. */

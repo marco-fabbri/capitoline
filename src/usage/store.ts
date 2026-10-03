@@ -32,6 +32,9 @@ export interface CallRecord {
 export interface Totals { calls: number; inputTokens: number; outputTokens: number }
 /** What one caller spent in a window. `caller` is null for the calls nothing identified. */
 export interface CallerUsage { caller: string | null; calls: number; inputTokens: number; outputTokens: number }
+export interface UsageDayRow { day: string; caller: string | null; provider: string; model: string; outcome: string; calls: number; inputTokens: number; outputTokens: number }
+export interface DeliberationSummary { id: string; startedAt: number; endedAt: number; calls: number; ok: number; inputTokens: number; outputTokens: number; caller: string | null }
+export interface DeliberationCall { ts: number; provider: string; model: string; cliModelId: string | null; outcome: string; durationMs: number; inputTokens: number; outputTokens: number }
 /**
  * Which real model served a gateway name, and when. More than one row for the
  * same `model` is the thing worth seeing: the name did not change and the
@@ -71,6 +74,7 @@ export class UsageStore {
     nameCaller: StatementSync; callerNames: StatementSync;
     saveCatalog: StatementSync; catalogs: StatementSync;
     announced: StatementSync; setAnnounced: StatementSync;
+    usageByDay: StatementSync; deliberations: StatementSync; deliberationCalls: StatementSync;
   };
   private closed = false;
   constructor(path: string) {
@@ -181,6 +185,16 @@ export class UsageStore {
       // host), so they would bury the breakdown under one huge null row.
       callers: this.db.prepare(`SELECT caller, COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o
         FROM calls WHERE ts > ? AND source <> 'health' GROUP BY caller ORDER BY calls DESC, caller`),
+      // The admin views (/v1/admin/usage, /deliberations): days in UTC, the
+      // gateway's own probes left out as everywhere else.
+      usageByDay: this.db.prepare(`SELECT strftime('%Y-%m-%d', ts / 1000, 'unixepoch') AS day, caller, provider, model, outcome,
+        COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o
+        FROM calls WHERE ts > ? AND source <> 'health' GROUP BY day, caller, provider, model, outcome ORDER BY day DESC, calls DESC`),
+      deliberations: this.db.prepare(`SELECT deliberation AS id, MIN(ts) AS started, MAX(ts) AS ended, COUNT(*) AS calls,
+        SUM(outcome = 'ok') AS ok, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o, MAX(caller) AS caller
+        FROM calls WHERE deliberation IS NOT NULL GROUP BY deliberation ORDER BY started DESC LIMIT ?`),
+      deliberationCalls: this.db.prepare(`SELECT ts, provider, model, cli_model_id, outcome, duration_ms, input_tokens, output_tokens
+        FROM calls WHERE deliberation = ? ORDER BY ts, id`),
       // One statement, so the row is never absent between two of them: a
       // delete followed by an insert is two transactions in WAL, and a SIGKILL
       // in the gap (systemd Restart=always, an OOM kill) would lose a five-day
@@ -245,6 +259,24 @@ export class UsageStore {
   callers(sinceMs: number, now = Date.now()): CallerUsage[] {
     const rows = this.stmts.callers.all(now - sinceMs) as { caller: string | null; calls: number; i: number; o: number }[];
     return rows.map((r) => ({ caller: r.caller, calls: Number(r.calls), inputTokens: Number(r.i), outputTokens: Number(r.o) }));
+  }
+
+  /** Calls per UTC day, caller, model and outcome since `sinceMs` ago, newest day first. */
+  usageByDay(sinceMs: number, now = Date.now()): UsageDayRow[] {
+    const rows = this.stmts.usageByDay.all(now - sinceMs) as { day: string; caller: string | null; provider: string; model: string; outcome: string; calls: number; i: number; o: number }[];
+    return rows.map((r) => ({ day: r.day, caller: r.caller, provider: r.provider, model: r.model, outcome: r.outcome, calls: Number(r.calls), inputTokens: Number(r.i), outputTokens: Number(r.o) }));
+  }
+
+  /** The latest deliberations by id, newest first, each summed over its calls. */
+  deliberations(limit: number): DeliberationSummary[] {
+    const rows = this.stmts.deliberations.all(limit) as { id: string; started: number; ended: number; calls: number; ok: number; i: number; o: number; caller: string | null }[];
+    return rows.map((r) => ({ id: r.id, startedAt: Number(r.started), endedAt: Number(r.ended), calls: Number(r.calls), ok: Number(r.ok), inputTokens: Number(r.i), outputTokens: Number(r.o), caller: r.caller }));
+  }
+
+  /** One deliberation's calls, in order. Empty for an id nothing was recorded under. */
+  deliberationCalls(id: string): DeliberationCall[] {
+    const rows = this.stmts.deliberationCalls.all(id) as { ts: number; provider: string; model: string; cli_model_id: string | null; outcome: string; duration_ms: number; input_tokens: number; output_tokens: number }[];
+    return rows.map((r) => ({ ts: Number(r.ts), provider: r.provider, model: r.model, cliModelId: r.cli_model_id, outcome: r.outcome, durationMs: Number(r.duration_ms), inputTokens: Number(r.input_tokens), outputTokens: Number(r.output_tokens) }));
   }
 
   /**

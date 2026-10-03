@@ -4,7 +4,7 @@ import type { Core } from "../core/core.js";
 import { CapitolineError, type InternalRequest, type ProviderEvent, type Usage } from "../core/types.js";
 import type { Logger } from "../log.js";
 import { callerOf, type KeyAuthenticator } from "./access.js";
-import { createAdminRouter, type AdminStore } from "./admin.js";
+import { createAdminRouter, type AdminOps, type AdminStore } from "./admin.js";
 import { convertImageRequest, imageResponse, type ImageEvent } from "./images.js";
 import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, ignoredHeader, sseChunk, type Converted } from "./openai.js";
 import type { Deliberation } from "../council/council.js";
@@ -46,7 +46,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   /** What to call each service token in /v1/usage, by its client id (server.access.callers). */
   callerNames?: Record<string, string>;
   /** The gateway's own keys and caller names, and who may manage them: mounts /v1/admin and names /v1/usage's rows. */
-  identity?: { store: AdminStore; admins: string[] };
+  identity?: { store: AdminStore; admins: string[]; ops?: AdminOps };
   /** Each CLI's installed and latest version, for /health (src/versions.ts). */
   versions?: () => Record<string, VersionState>;
   /** The OAuth authorization server for MCP clients (src/server/oauth.ts), mounted at the root. */
@@ -210,7 +210,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // One reading of a caller's name for the admin gate and for /v1/usage: the
   // runtime registry first, the configured map second.
   const callerNames = () => ({ ...(opts.callerNames ?? {}), ...(opts.identity?.store.callerNames() ?? {}) });
-  if (opts.identity) app.use("/v1/admin", createAdminRouter(opts.identity.store, opts.identity.admins, callerNames, opts.log));
+  if (opts.identity) app.use("/v1/admin", createAdminRouter(opts.identity.store, opts.identity.admins, callerNames, opts.log, opts.identity.ops));
 
   app.get("/v1/usage", (_req, res) => {
     // Named here and not when the row was written: a row stores the client id

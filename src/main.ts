@@ -176,7 +176,13 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const app = createApp(core, {
     conversations: { store: conversations, limits: conversationLimits },
     versions: () => versions.states(), log: log.child({ mod: "http" }), access,
-    mcp: createMcpHandler(core, log.child({ mod: "mcp" }), { conversations: { store: conversations, limits: conversationLimits } }), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins }, keys: usage, oauth: oauth?.router });
+    mcp: createMcpHandler(core, log.child({ mod: "mcp" }), { conversations: { store: conversations, limits: conversationLimits } }), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins, ops: {
+      core, usage, conversations, ...(notify ? { notify } : {}),
+      // What an administrator may read back: everything, except the address
+      // notifications are posted to, which is a secret for services that
+      // route by it (an ntfy topic).
+      config: () => ({ ...cfg, server: { ...cfg.server, ...(cfg.server.notify ? { notify: { ...cfg.server.notify, url: new URL(cfg.server.notify.url).origin + "/…" } } : {}) } }),
+    } }, keys: usage, oauth: oauth?.router });
   const port = overrides.port ?? cfg.server.port;
 
   // One owner for the sqlite handle: whatever fails between here and the end of
