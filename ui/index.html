@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Capitoline</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Everything here is filled in by app.js from the gateway's own API. -->
+  <main id="signin" hidden>
+    <h1>Capitoline</h1>
+    <p>Sign in with an administrator's key. It stays in this tab and is forgotten when the tab closes.</p>
+    <form id="signin-form" autocomplete="off">
+      <label for="key">Key</label>
+      <input id="key" type="password" placeholder="cap_…" required spellcheck="false" autocapitalize="off">
+      <button type="submit">Sign in</button>
+    </form>
+    <p id="signin-error" class="error" role="alert"></p>
+  </main>
+
+  <div id="app" hidden>
+    <header>
+      <h1>Capitoline</h1>
+      <span id="who"></span>
+      <span class="grow"></span>
+      <button id="refresh" type="button">Refresh</button>
+      <button id="signout" type="button">Sign out</button>
+    </header>
+    <nav id="tabs" aria-label="Sections"></nav>
+    <p id="notice" role="status"></p>
+    <section id="view"></section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -53,6 +53,8 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   oauth?: express.Router;
   /** The gateway's keys, for the full /health to a caller who presents one. */
   keys?: KeyAuthenticator;
+  /** The operator's page (src/server/ui.ts), mounted at /ui when server.ui.enabled says so. */
+  ui?: express.Router;
   /** The conversations kept for the Responses API (src/conversations/store.ts): mounts /v1/responses. */
   conversations?: { store: ConversationStore; limits: ConversationLimits } }): express.Express {
   const app = express();
@@ -65,6 +67,13 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
   // where a client that has no credential yet goes to get one, and they carry
   // their own body parsers, rate limits and error format.
   if (opts.oauth) app.use(opts.oauth);
+  // The operator's page comes before it too: three static files with nothing
+  // in them, which then ask the API below for everything, with a key. "/ui"
+  // without the slash is sent to "/ui/", so the page's relative files resolve.
+  if (opts.ui) {
+    app.get("/ui", (req, res, next) => (req.originalUrl.split("?")[0] === "/ui" ? res.redirect(308, "/ui/") : next()));
+    app.use("/ui", opts.ui);
+  }
 
   const access = opts.access;
   if (access) app.use((req, res, next) => (req.path === "/health" ? next() : access(req, res, next)));

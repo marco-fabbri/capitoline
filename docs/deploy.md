@@ -392,6 +392,7 @@ Edit `/etc/capitoline/overlay.yaml`. It starts as a copy of the example, whose
 |---|---|
 | `runner.user` | `runner` |
 | `runner.sandbox_root` | `/var/lib/capitoline/sandboxes` |
+| `server.ui.enabled` | not in the example: `true` serves the operator's page at `/ui` (§8.4) |
 | `usage.db_path` | `/var/lib/capitoline/usage.sqlite` — absolute, because the service's working directory is the clone |
 | `conversations.db_path` | `/var/lib/capitoline/conversations.sqlite` — the conversations the Responses API and `ask_model` keep (README, "Conversations work two ways"): a file of its own, created `0600`, because it holds what people wrote and the usage database does not. `ttl_days` (30), `max_turns` and `max_bytes` stay at the repository's values unless a host has a reason |
 | `providers.claude.binary` | `/home/runner/.npm-global/bin/claude` |
@@ -876,6 +877,47 @@ curl -s http://127.0.0.1:8080/health | jq -c '.providers[] | {id, ok: .health.ok
 A pull that needs more than this — a new sudoers rule, a new overlay key —
 says so in its commit message. The CLIs are updated separately, one at a
 time, with `scripts/update-cli.sh` (`docs/update-clis.md`).
+
+### 8.4 The operator's page
+
+Off by default. With `server.ui: { enabled: true }` in the overlay and a
+restart, the gateway serves a page at `/ui`: the providers' health and CLI
+versions, the models with their pauses and image quotas, usage per caller,
+model and day, the keys, the callers' names, the kept conversations (counts,
+never text), the latest deliberations, and the configuration in force,
+read-only.
+
+It signs in with a key of §8.1 whose name is in `server.access.admins`: paste
+it on the page, and it stays in that browser tab until the tab closes. A key
+made for the purpose keeps it apart from an application's:
+
+```sh
+cd /var/lib/capitoline/app && sudo -Hu capitoline \
+  env CAPITOLINE_OVERLAY=/etc/capitoline/overlay.yaml npm run -s keys -- create dashboard
+# then, in the overlay:  server.access.admins: [dashboard]   and restart
+```
+
+The page holds no data and no secret of its own, so its three files are served
+without a credential; everything it shows and does is a call to `/v1/admin`
+with that key, and `curl` can do the same:
+
+| Call | What it does |
+|---|---|
+| `GET /v1/admin/usage?days=N` | calls and tokens per day (UTC), caller, model and outcome, 1 to 90 days |
+| `GET /v1/admin/deliberations`, `…/{id}` | the latest councils, and one's calls |
+| `GET /v1/admin/pauses` | the pauses standing, with the names each holds back |
+| `POST /v1/admin/pauses {provider, model?, minutes}` | holds a model or a provider back by hand, a week at most |
+| `DELETE /v1/admin/pauses/{provider}?scope=…` | lifts a pause, the provider's own without `scope` |
+| `POST /v1/admin/health-check {provider?}` | runs the hourly probe now (a real call) |
+| `POST /v1/admin/catalog-check` | reads the model catalogs now |
+| `POST /v1/admin/notify-test` | sends a test notification |
+| `GET /v1/admin/conversations`, `DELETE …/{owner}` | how much each caller has kept, and its removal |
+| `GET /v1/admin/config` | the configuration in force, without the notification address |
+
+What it cannot do is change the configuration: models, councils and limits
+stay in the two files, and an administrator's key that leaked can pause and
+revoke, never reconfigure. The CLIs are updated and signed in from a terminal
+(§6, `docs/update-clis.md`).
 
 ## 9. A Cloudflare tunnel
 

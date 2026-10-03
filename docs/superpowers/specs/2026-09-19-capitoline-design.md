@@ -155,6 +155,10 @@ Response: standard format with `usage` (tokens from the CLI when available) plus
 
 `/v1/admin` (2026-09-27), for the callers named in `server.access.admins`, 403 for everyone else: `POST /keys {name}` issues a key and returns it once (201); `GET /keys` lists names, dates and last use, never a hash; `DELETE /keys/:name` revokes without deleting, so usage rows keep their name; `PUT /callers/:id {name}` and `GET /callers` bind and list the names of Cloudflare-identified callers. Nothing in the configuration file is written from here: keys and names are state, and the file stays the source of truth for everything else (§8.5).
 
+The operator's routes (2026-10-03), under the same gate: `GET /usage?days=` (per UTC day, caller, model, outcome), `GET /deliberations` and `/deliberations/{id}`, `GET /pauses`, `POST /pauses {provider, model?, minutes}` (a pause by hand, a week at most, stored and lifted like any other and never announced), `DELETE /pauses/{provider}?scope=`, `POST /health-check`, `POST /catalog-check`, `POST /notify-test`, `GET /conversations` (counts per owner, never text) and `DELETE /conversations/{owner}`, `GET /config` (the configuration in force, minus the notification address). All of it is state or reading; none of it writes the configuration, which stays the source of truth (§8.5), so what an administrator's key can do stops short of reconfiguring the host.
+
+`/ui` (2026-10-03, `server.ui.enabled`, off by default): the operator's page, three static files with no framework and no build, served without a credential because they hold nothing; the page signs in with an administrator's key kept in the tab's session storage and does everything through the routes above. A content security policy lets it load only its own files and reach only its own origin.
+
 ### 6.2 MCP
 
 Same process, `/mcp` endpoint, streamable HTTP transport. Claude Code registers it as an HTTP server with the Access service token headers. Discarded: a local stdio server on the Mac, a second program to install that gives nothing more.

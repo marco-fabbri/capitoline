@@ -251,7 +251,11 @@ const ConfigObject = z
         // the web (src/server/oauth.ts). `public_url` is the address those
         // clients reach this gateway at, over HTTPS: the issuer, with /mcp as
         // the one resource its tokens are for. Absent, there is no OAuth.
-        oauth: z.object({
+        // The operator's page under /ui (src/server/ui.ts). Off unless asked for:
+      // it holds nothing by itself, but a gateway that never wanted a page
+      // should not serve one.
+      ui: z.object({ enabled: z.boolean().default(false) }).strict().default({}),
+      oauth: z.object({
           public_url: z.string().url().refine((u) => {
             const url = new URL(u);
             const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";

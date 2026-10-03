@@ -17,6 +17,7 @@ import { createOAuthServer } from "./server/oauth.js";
 import { createApp } from "./server/app.js";
 import { UsageStore } from "./usage/store.js";
 import { ConversationStore } from "./conversations/store.js";
+import { createUiRouter } from "./server/ui.js";
 
 /** How long close() waits for in-flight responses before destroying their connections. */
 export const SHUTDOWN_GRACE_MS = 5000;
@@ -175,6 +176,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const conversationLimits = { maxTurns: cfg.conversations.max_turns, maxBytes: cfg.conversations.max_bytes };
   const app = createApp(core, {
     conversations: { store: conversations, limits: conversationLimits },
+    ...(cfg.server.ui.enabled ? { ui: createUiRouter() } : {}),
     versions: () => versions.states(), log: log.child({ mod: "http" }), access,
     mcp: createMcpHandler(core, log.child({ mod: "mcp" }), { conversations: { store: conversations, limits: conversationLimits } }), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins, ops: {
       core, usage, conversations, ...(notify ? { notify } : {}),
