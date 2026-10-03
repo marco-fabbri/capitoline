@@ -45,7 +45,7 @@ providers:
     health_model: claude-haiku
     # The daily "a new version exists" notice (docs/update-clis.md); installing
     # is scripts/update-cli.sh, run by a person.
-    version: { args: [--version], verified: 2.1.286, latest: { npm: "@anthropic-ai/claude-code" } }
+    version: { args: [--version], verified: 2.1.288, latest: { npm: "@anthropic-ai/claude-code" } }
     models:
       claude-opus:   { cli_model: opus }
       claude-sonnet: { cli_model: sonnet }
@@ -103,7 +103,7 @@ providers:
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: codex-gpt-6-luna
-    version: { args: [--version], verified: 0.159.3, latest: { npm: "@openai/codex" } }
+    version: { args: [--version], verified: 0.160.0, latest: { npm: "@openai/codex" } }
     # Probed instead when the catalog says health_model is no longer listed.
     health_fallback: [codex-gpt-5.6-luna]
     # The daily catalog (docs/deploy.md §7.2): `codex debug models` is the

@@ -39,6 +39,8 @@ procedure below, which a person runs.
 | Antigravity CLI (`agy`) | 1.2.14 | 2026-09-30 | with `scripts/update-cli.sh`, image smoke test passed; a command request is still refused (`denied_actions`), `agy models` unchanged |
 | Claude Code (`claude`) | 2.1.286 | 2026-10-01 | updated from 2.1.285 with scripts/update-cli.sh; smoke test passed |
 | Codex CLI (`codex`) | 0.159.3 | 2026-10-01 | updated from 0.159.2 with scripts/update-cli.sh; smoke test with an image passed, no new feature, the tool probe took no step; `codex debug models` unchanged |
+| Claude Code (`claude`) | 2.1.288 | 2026-10-03 | updated from 2.1.286 with scripts/update-cli.sh; smoke test passed |
+| Codex CLI (`codex`) | 0.160.0 | 2026-10-03 | updated from 0.159.3 with scripts/update-cli.sh; smoke test with an image passed, no new feature, the tool probe took no step; `codex debug models` unchanged |
 
 Add a row for every update, newest last.
 
