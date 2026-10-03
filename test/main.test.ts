@@ -303,6 +303,18 @@ describe("start() with a host overlay", () => {
     } finally { await app.close(); }
   });
 
+  it("warns when the operator's page is on while it listens beyond the loopback", async () => {
+    const { path, db } = overlay((f) => `server:\n  host: "0.0.0.0"\n  ui: { enabled: true }\nusage:\n  db_path: "${f}"\nconversations:\n  db_path: ":memory:"\n`);
+    const store = new UsageStore(db);
+    store.createKey("operator", "test");
+    store.close();
+    const lines: string[] = [];
+    const app = await start(CONFIG, { port: 0, providers: [new FakeProvider("claude", ["claude-opus"], OK)], overlayPath: path, logDest: { write: (chunk: string) => { lines.push(chunk); } } });
+    try {
+      expect(lines.some((l) => /ui: the operator's page is on while the gateway listens beyond the loopback/.test(l))).toBe(true);
+    } finally { await app.close(); }
+  });
+
   it("refuses to start with OAuth on a public URL while the gateway would be open, even on loopback", async () => {
     const { path, db } = overlay((f) => `server:\n  oauth:\n    public_url: "https://gw.example.com"\nusage:\n  db_path: "${f}"\n`);
     const p = new FakeProvider("claude", ["claude-opus"], OK);

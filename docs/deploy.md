@@ -914,6 +914,18 @@ with that key, and `curl` can do the same:
 | `GET /v1/admin/conversations`, `DELETE …/{owner}` | how much each caller has kept, and its removal |
 | `GET /v1/admin/config` | the configuration in force, without the notification address |
 
+**Use it over an encrypted connection.** The key is sent with every call, so
+the page belongs behind TLS: the tunnel of §9, or a reverse proxy. On a
+network of your own with no TLS in front (§8.2) the key would cross it in
+clear, and the service says so in the journal at startup when the page is on
+and it listens beyond the loopback.
+
+**One operator, not accounts.** There are no users and no roles: whoever holds
+an administrator's key can do everything the page offers, and the journal
+names the key behind each action. An address that keeps presenting wrong keys
+to `/v1/admin` is answered `429` for a few minutes; a live key is never held
+back.
+
 What it cannot do is change the configuration: models, councils and limits
 stay in the two files, and an administrator's key that leaked can pause and
 revoke, never reconfigure. The CLIs are updated and signed in from a terminal

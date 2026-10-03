@@ -167,6 +167,10 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const versions = new VersionWatch(Object.entries(cfg.providers).map(([id, p]) => ({ id, cfg: p })), runner, usage, log.child({ mod: "versions" }), notify);
 
   let ready = false;
+  // The page signs in with an administrator's key sent on every request. On an
+  // address other than the loopback nothing here encrypts it: said once, so
+  // whoever set it up that way knows a proxy with TLS belongs in front.
+  if (cfg.server.ui.enabled && !loopback) log.warn({ host }, "ui: the operator's page is on while the gateway listens beyond the loopback; unless TLS is terminated in front, an administrator's key would cross the network in clear (docs/deploy.md §8.4)");
   // Opened after the refusals above, so a gateway that will not start leaves
   // no conversation file behind it. Expired threads are dropped now, with a
   // line in the log as for the pauses, and then on every save.

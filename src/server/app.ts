@@ -5,6 +5,7 @@ import { CapitolineError, type InternalRequest, type ProviderEvent, type Usage }
 import type { Logger } from "../log.js";
 import { callerOf, type KeyAuthenticator } from "./access.js";
 import { createAdminRouter, type AdminOps, type AdminStore } from "./admin.js";
+import { createFailureThrottle } from "./throttle.js";
 import { convertImageRequest, imageResponse, type ImageEvent } from "./images.js";
 import { CLIENT_MESSAGE, completionResponse, convertChatRequest, httpStatus, ignoredHeader, sseChunk, type Converted } from "./openai.js";
 import type { Deliberation } from "../council/council.js";
@@ -74,6 +75,16 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
     app.get("/ui", (req, res, next) => (req.originalUrl.split("?")[0] === "/ui" ? res.redirect(308, "/ui/") : next()));
     app.use("/ui", opts.ui);
   }
+
+  // Before the door, so the refusals it counts include the door's own 401s:
+  // the administrators' routes answer 429 to an address that keeps being
+  // refused (src/server/throttle.ts). A live key is never held back.
+  app.use("/v1/admin", createFailureThrottle({
+    hasLiveKey: (req) => {
+      const bearer = /^Bearer\s+(\S+)$/i.exec(req.header("authorization") ?? "")?.[1];
+      return bearer !== undefined && opts.keys?.authenticateKey(bearer) != null;
+    },
+  }));
 
   const access = opts.access;
   if (access) app.use((req, res, next) => (req.path === "/health" ? next() : access(req, res, next)));
