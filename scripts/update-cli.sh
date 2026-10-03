@@ -78,14 +78,28 @@ PREV_BINARY_FILE="$STATE/$cli.previous-binary"
 PREV_BINARY="$WORK/previous-binary"
 image_skip=0
 KEY_NAME="update-${cli}-$$"
+# A check that fails calls rollback(). This is for the script itself failing
+# after the install and before the end, on something no check foresaw: the new
+# version must not stay in place unchecked while the copy of the old one goes
+# with $WORK (it did once, 2026-10-03). No smoke test here: the script is
+# already going down, and what it leaves must be the version that was verified.
+installed=0; finished=0
 cleanup() {
-  [[ -n "${KEY:-}" ]] && keys revoke "$KEY_NAME" >/dev/null 2>&1 || true
+  local rc=$?
+  set +e
+  if [[ "$installed" == 1 && "$finished" != 1 && $rc -ne 0 ]]; then
+    echo "update-cli: stopped unexpectedly (exit $rc) after installing; putting $cli ${before:-the previous version} back." >&2
+    if [[ -n "$pkg" ]]; then install_version "$before"
+    elif [[ -f "$WORK/previous-binary" ]]; then install -o "$RUNNER" -g "$RUNNER" -m 0755 "$WORK/previous-binary" "$BIN"; fi
+    echo "update-cli: $cli is $(version_of) again." >&2
+  fi
+  [[ -n "${KEY:-}" ]] && keys revoke "$KEY_NAME" >/dev/null 2>&1
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
 as_runner() { (cd "$WORK" && sudo -u "$RUNNER" -H "$@"); }
-version_of() { as_runner "$BIN" --version 2>/dev/null | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+' | head -1; }
+version_of() { as_runner "$BIN" --version 2>/dev/null | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+' | sed -n 1p; }
 enabled_features() { as_runner "$BIN" features list 2>/dev/null | awk '$NF == "true" { print $1 }' | sort; }
 keys() {
   # The usage database can be busy for a moment after a restart: retried.
@@ -117,7 +131,7 @@ install_version() {  # $1: npm version, or "latest"
 
 smoke() {
   if [[ -z "${KEY:-}" ]]; then
-    KEY=$(keys create "$KEY_NAME" | grep -o 'cap_[A-Za-z0-9_-]*' | head -1)
+    KEY=$(keys create "$KEY_NAME" | grep -o 'cap_[A-Za-z0-9_-]*' | sed -n 1p)
     [[ -n "$KEY" ]] || { echo "update-cli: could not create a temporary gateway key" >&2; return 1; }
   fi
   local image=0
@@ -145,6 +159,7 @@ rollback() {
     install -o "$RUNNER" -g "$RUNNER" -m 0755 "$PREV_BINARY" "$BIN"
   fi
   rm -f "$PREV_VERSION_FILE" "$PREV_BINARY_FILE"
+  finished=1   # the previous version is back: nothing left for cleanup to restore
   echo "update-cli: $cli is $(version_of) again; smoke test of the restored version:" >&2
   smoke || echo "update-cli: the restored version fails the smoke test too: the fault is not the update" >&2
   exit 1
@@ -194,6 +209,7 @@ if [[ "$after" == "$before" ]]; then
   echo "update-cli: $cli is still $after; nothing to check, nothing changed."
   exit 0
 fi
+installed=1
 echo "update-cli: $cli $before -> $after"
 
 if [[ "$cli" == codex ]]; then
@@ -232,7 +248,10 @@ if [[ "$cli" == antigravity ]]; then
   agy_home="$(getent passwd "$RUNNER" | cut -d: -f6)/.gemini/antigravity-cli"
   rm -f "$agy_home/last_check.timestamp"
   as_runner "$BIN" -p "Reply with the single word: ok" --model "$PROBE_MODEL" --output-format json < /dev/null > /dev/null 2>&1 || true
-  newest=$(ls -t "$agy_home"/log/cli-*.log 2>/dev/null | head -1)
+  # sed, not head: head leaves at the first line, and with a few hundred logs
+  # ls is still writing, takes a SIGPIPE, and pipefail turns that into the end
+  # of this script (2026-10-03, at 472 logs, after the update was in place).
+  newest=$(ls -t "$agy_home"/log/cli-*.log 2>/dev/null | sed -n 1p)
   if [[ -z "$newest" ]] || ! grep -q "Auto-update disabled via environment variable" "$newest"; then
     rollback "Antigravity no longer reports its self-update switched off (AGY_CLI_DISABLE_AUTO_UPDATE)"
   fi
@@ -249,6 +268,8 @@ if [[ "$image_skip" == 1 ]]; then
 else
   rm -f "$PREV_VERSION_FILE" "$PREV_BINARY_FILE"
 fi
+
+finished=1
 
 echo
 echo "update-cli: $cli $after is in place and passed. Add to docs/update-clis.md, Versions in use:"
