@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import { attachmentFiles } from "../core/attachments.js";
-import type { ErrorKind, InternalRequest, ProviderEvent, RateLimitWindow } from "../core/types.js";
+import type { AdapterEvent, ErrorKind, InternalRequest, ProviderEvent, RateLimitWindow } from "../core/types.js";
 import { withPreamble, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ModelSpec } from "./adapter.js";
 import { classifyError, isModelScoped } from "./errors.js";
 
@@ -58,7 +58,7 @@ export const claudeAdapter: Adapter = {
     return { args, stdin: prompt };
   },
 
-  async *parse(lines): AsyncIterable<ProviderEvent> {
+  async *parse(lines): AsyncIterable<AdapterEvent> {
     let sawDelta = false;
     // The dated id of the model that answered, which `--model opus` does not
     // say and the alias hides: `opus` meant Opus 5 on 2026-09-22 and Opus 5.5
@@ -70,6 +70,13 @@ export const claudeAdapter: Adapter = {
     // error capture, while `message_start` arrives before anything can go
     // wrong, so the id is known even for a run that then fails.
     let cliModelId: string | undefined;
+    // What the run's rate limit events said, kept for one purpose: when the
+    // run ends refused for a limit, they go to the journal as they came
+    // (status, type, reset instants; never text). A per-model limit is worded
+    // without a reset ("You've reached your Fable limit"), and whether these
+    // events carry one for it is not known until a refusal is captured with
+    // them. The pause can be given its real end once that is seen.
+    const limitEvents: unknown[] = [];
     for await (const o of jsonLines(lines)) {
       const type = o.type;
       if (type === "stream_event") {
@@ -86,6 +93,7 @@ export const claudeAdapter: Adapter = {
         const msg = o.message as { content?: { type?: string; text?: string }[] } | undefined;
         for (const block of msg?.content ?? []) if (block.type === "text" && block.text) yield { type: "text", delta: block.text };
       } else if (type === "rate_limit_event") {
+        if (limitEvents.length < 20) limitEvents.push(o.rate_limit_info ?? null);
         const info = o.rate_limit_info as { unifiedWindows?: { five_hour?: unknown; seven_day?: unknown } } | undefined;
         const fiveHour = window(info?.unifiedWindows?.five_hour);
         const sevenDay = window(info?.unifiedWindows?.seven_day);
@@ -105,6 +113,9 @@ export const claudeAdapter: Adapter = {
           // A per-model limit is not a provider-wide one: the subscription
           // kept answering on the other models while Fable was refused.
           const scoped = kind === "rate_limited" && isModelScoped(detail);
+          if (kind === "rate_limited") {
+            yield { type: "diagnostic", message: "claude refused for a limit: the rate limit events of the run", data: { scope: scoped ? "model" : "provider", apiErrorStatus: o.api_error_status ?? null, events: limitEvents } };
+          }
           yield { type: "error", kind, detail, ...(scoped ? { scope: "model" as const } : {}) };
           return;
         }

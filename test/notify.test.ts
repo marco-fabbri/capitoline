@@ -110,6 +110,12 @@ describe("the availability messages", () => {
     expect(describeAvailability(cfg, { kind: "resumed", provider: "codex", scope: "text:gpt-9", pausedMs: 3 * 86_400_000 + 2 * 3600_000 }))
       .toBe("gpt-9 available again, after 3d 2h.");
   });
+  it("says a model has been refused for a while with no reset given, and offers the weekly window's", () => {
+    expect(describeAvailability(cfg, { kind: "refusing", provider: "codex", scope: "text:gpt-6.1-sol", refusedMs: 65 * 60_000 }))
+      .toBe("codex-gpt-6.1-sol has been refused for 1h 5m, and the provider gives no reset time.");
+    expect(describeAvailability(cfg, { kind: "refusing", provider: "codex", scope: null, refusedMs: 2 * 3600_000, weeklyResetAt: at }))
+      .toBe("codex has been refused for 2h 0m, and the provider gives no reset time. The subscription's weekly window resets 2026-10-03 18:49 UTC, which may be when it returns.");
+  });
   it("says what to do when a provider signs out", () => {
     expect(describeAvailability(cfg, { kind: "signed_out", provider: "codex" })).toMatch(/^codex is signed out: log in again as runner/);
     expect(describeAvailability(cfg, { kind: "signed_in", provider: "codex" })).toBe("codex is signed in again.");

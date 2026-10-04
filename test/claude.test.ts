@@ -111,9 +111,12 @@ describe("claude adapter", () => {
     expect(raw.subtype).toBe("success");          // never a success signal: is_error decides
     expect(classifyError(String(raw.result))).toBe("cli_crashed");
     const ev = await events("test/fixtures/claude/rate-limited-model.json");
-    expect(ev).toHaveLength(1);
-    expect(ev[0]).toMatchObject({ type: "error", kind: "rate_limited", scope: "model" });
-    expect((ev[0] as any).detail).toContain("You've reached your Fable limit");
+    // A refusal for a limit is preceded by what the run's rate limit events
+    // said, for the journal: none in this capture, which holds the result alone.
+    expect(ev).toHaveLength(2);
+    expect(ev[0]).toMatchObject({ type: "diagnostic", data: { scope: "model", apiErrorStatus: 429, events: [] } });
+    expect(ev[1]).toMatchObject({ type: "error", kind: "rate_limited", scope: "model" });
+    expect((ev[1] as any).detail).toContain("You've reached your Fable limit");
   });
   it("classifies the real expired-credential capture as auth_expired, provider-wide", async () => {
     const ev = await events("test/fixtures/claude/auth-expired.json");
@@ -124,7 +127,7 @@ describe("claude adapter", () => {
   it("prefers the status over the prose, and falls back to the prose without one", async () => {
     const one = async (o: Record<string, unknown>) => {
       const src = (async function* () { yield JSON.stringify({ type: "result", is_error: true, subtype: "success", ...o }); })();
-      const out: AdapterEvent[] = []; for await (const e of claudeAdapter.parse(src)) out.push(e); return out[0] as any;
+      const out: AdapterEvent[] = []; for await (const e of claudeAdapter.parse(src)) out.push(e); return out.find((e) => e.type === "error") as any;
     };
     expect(await one({ api_error_status: 429, result: "Login expired · Please run /login" })).toMatchObject({ kind: "rate_limited" });
     expect(await one({ api_error_status: 403, result: "quota exceeded" })).toMatchObject({ kind: "auth_expired" });
@@ -222,5 +225,17 @@ describe("claude adapter, images", () => {
     expect(c.args).not.toContain("--input-format");
     expect(c.stdin).toContain("what colour?");
     expect(() => JSON.parse(c.stdin)).toThrow();
+  });
+
+  it("hands the journal the rate limit events of a run refused for a limit, and only then", async () => {
+    const limit = { status: "rejected", rateLimitType: "seven_day_model", resetsAt: 1790362800, unifiedWindows: { seven_day: { utilization: 1, resetsAt: 1790362800 } } };
+    const run = async (lines: object[]) => {
+      const src = (async function* () { for (const l of lines) yield JSON.stringify(l); })();
+      const out: AdapterEvent[] = []; for await (const e of claudeAdapter.parse(src)) out.push(e); return out;
+    };
+    const refused = await run([{ type: "rate_limit_event", rate_limit_info: limit }, { type: "result", is_error: true, api_error_status: 429, result: "You've reached your Fable limit." }]);
+    expect(refused.find((e) => e.type === "diagnostic")).toMatchObject({ data: { events: [limit] } });
+    const crashed = await run([{ type: "rate_limit_event", rate_limit_info: limit }, { type: "result", is_error: true, api_error_status: 503, result: "busy" }]);
+    expect(crashed.some((e) => e.type === "diagnostic")).toBe(false);
   });
 });

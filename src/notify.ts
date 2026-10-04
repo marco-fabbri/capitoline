@@ -111,6 +111,7 @@ export function describeAvailability(cfg: Config, e: AvailabilityEvent): string 
   switch (e.kind) {
     case "paused": return `${scopeName(cfg, e.provider, e.scope)} paused until ${when(e.until)}: ${e.scope === null ? "the subscription's" : "its"} quota is used up.`;
     case "resumed": return `${scopeName(cfg, e.provider, e.scope)} available again, after ${span(e.pausedMs)}.`;
+    case "refusing": return `${scopeName(cfg, e.provider, e.scope)} has been refused for ${span(e.refusedMs)}, and the provider gives no reset time.${e.weeklyResetAt !== undefined ? ` The subscription's weekly window resets ${when(e.weeklyResetAt)}, which may be when it returns.` : ""}`;
     case "signed_out": return `${e.provider} is signed out: log in again as runner (docs/deploy.md §6), then restart the service.`;
     case "signed_in": return `${e.provider} is signed in again.`;
   }

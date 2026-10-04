@@ -663,8 +663,15 @@ command that installs it, and these:
   so a five-hour window reopening every few hours stays quiet. The end of a
   pause is nothing happening, so the gateway looks once a minute; one that ran
   out while the service was stopped is told when it starts again;
-- **signed out**, when a request or a health check finds a CLI's login gone,
-  with what to do, and **signed in again** when a check finds it back.
+- **refused for an hour with no reset**, when the refusals that name no reset
+  keep coming: a limit worded as "you've reached your limit", with no instant
+  attached, can keep a model away for days. Told once, with the subscription's
+  weekly reset when the CLI reports one ("which may be when it returns": an
+  indication, not a promise), and **available again** at its first answer
+  after that. A restart in between starts the hour again;
+- **signed out**, when a health check finds a CLI's login gone twice a minute
+  apart (§8), with what to do, and **signed in again** when a check finds it
+  back.
 
 Each is sent once: a restart does not repeat a pause already announced.
 Nothing else is ever sent. A POST that fails on the network or on the

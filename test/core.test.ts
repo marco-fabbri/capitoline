@@ -1004,6 +1004,32 @@ describe("availability notices", () => {
     expect(third.told).toEqual([{ kind: "resumed", provider: "b", scope: null, pausedMs: 7_260_000 }]);
   });
 
+  it("tells a run of refusals with no reset once it has lasted an hour, and its end", async () => {
+    let t = 1_000_000;
+    const { a, usage, core, told } = makeTold(() => t);
+    const bare: ProviderEvent[] = [{ type: "error", kind: "rate_limited", detail: "You've reached your limit", scope: "model" }];
+    usage.setWindow("a", "seven_day", { utilization: 0.4, resetsAt: Math.floor((t + 5 * 86_400_000) / 1000) }, t);
+    a.script = bare;
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    t += 10 * 60_000;                          // the backoff has passed; refused again, still under the hour
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(told).toEqual([]);
+    t += 55 * 60_000;                          // refused again, 65 minutes after the first
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(told).toEqual([{ kind: "refusing", provider: "a", scope: "text:a-1", refusedMs: 65 * 60_000, weeklyResetAt: Math.floor((1_000_000 + 5 * 86_400_000) / 1000) * 1000 }]);
+    t += 40 * 60_000;                          // told once, however long it goes on
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(told).toHaveLength(1);
+    t += 3 * 3600_000;
+    a.script = OK;                             // and its return
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(told[1]).toEqual({ kind: "resumed", provider: "a", scope: "text:a-1", pausedMs: (65 + 40 + 180) * 60_000 });
+    // A fresh run of refusals starts its own hour.
+    a.script = bare;
+    await drain(core.execute(req("a-1"), { source: "http" }));
+    expect(told).toHaveLength(2);
+  });
+
   it("records nothing as announced when nobody listens", async () => {
     let t = 1_000_000;
     const { a, core, usage } = makeTold(() => t, new UsageStore(":memory:"), false);

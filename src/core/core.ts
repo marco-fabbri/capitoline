@@ -65,6 +65,7 @@ export interface CoreOptions {
 export type AvailabilityEvent =
   | { kind: "paused"; provider: string; scope: string | null; until: number }
   | { kind: "resumed"; provider: string; scope: string | null; pausedMs: number }
+  | { kind: "refusing"; provider: string; scope: string | null; refusedMs: number; weeklyResetAt?: number }
   | { kind: "signed_out"; provider: string }
   | { kind: "signed_in"; provider: string };
 
@@ -72,6 +73,15 @@ export type AvailabilityEvent =
 export interface PauseInfo { provider: string; scope: string | null; until: number; strikes: number; models: string[] }
 
 export const RESUME_NOTICE_MS = 3600_000;
+
+// A refusal with no reset time is a backoff and not news, until it keeps
+// coming: a limit the provider words as "you've reached your limit", with no
+// instant attached, kept a model away for days with nothing announced at
+// either end (2026-09-28 to 2026-10-03). So a provider or a model refused for
+// this long with no reset given is told once (`refusing`), and its first
+// success after that is told too (`resumed`). In memory only: a restart in the
+// middle starts the count again, which delays the notice and loses nothing.
+export const REFUSING_NOTICE_MS = 3600_000;
 
 // A CLI that fails to renew its token once answers a probe exactly as a
 // signed-out one does, and the next probe an hour later finds it signed in:
@@ -92,12 +102,14 @@ interface State {
   imageLimit: number | null;
   /** The instant the exhausted image quota frees up, as the provider reported it. */
   imageResetAt: number | null;
+  /** When the provider's current run of refusals began; null while it answers. */
+  refusedSince: number | null;
   hasImageModels: boolean;
   /** The last listing attempt, for a provider that lists its models; null until the first. */
   catalog: { checkedAt: number; ok: boolean } | null;
 }
 /** A model paused on its own, by a refusal that named it. Mirrors the provider's pause and strikes. */
-interface ModelPause { pausedUntil: number; strikes: number }
+interface ModelPause { pausedUntil: number; strikes: number; /** When the run of refusals this pause belongs to began. */ since?: number }
 interface Entry { provider: Provider; model: ModelSpec }
 // caller: who the Access identity says is asking, null when nothing
 // identified them (verification disabled, or a token with nothing in it).
@@ -191,7 +203,7 @@ export class Core {
       const models = p.models();
       this.states.set(p.id, {
         provider: p, sem: new Semaphore(p.concurrencyLimit), health: null, pausedUntil: null, strikes: 0,
-        imageLimit: opts.imageQuotas?.[p.id] ?? null, imageResetAt: null, hasImageModels: models.some((m) => m.kind === "image"),
+        imageLimit: opts.imageQuotas?.[p.id] ?? null, imageResetAt: null, refusedSince: null, hasImageModels: models.some((m) => m.kind === "image"),
         catalog: null,
       });
       this.reindex(p);
@@ -246,6 +258,8 @@ export class Core {
   // ("" for the whole provider), with when it was announced and when the
   // pause ends as it stands. Rebuilt from the store at startup.
   private readonly announced = new Map<string, { provider: string; scope: string | null; at: number; until: number }>();
+  // The runs of refusals with no reset that were told (REFUSING_NOTICE_MS), by the same key, with when each began.
+  private readonly refusing = new Map<string, number>();
 
   private tell(event: AvailabilityEvent): void {
     try { this.opts.onAvailability?.(event); }
@@ -320,6 +334,7 @@ export class Core {
     }
     this.usage.clearPause(providerId, scope);
     this.announced.delete(announcedKey);
+    this.refusing.delete(announcedKey);
     this.opts.log.info({ provider: providerId, scope }, "pause lifted by hand");
     return true;
   }
@@ -743,8 +758,34 @@ export class Core {
   // Nothing is written when there is no pause to clear: this runs on every
   // successful request, and an unconditional pair of DELETEs would open a write
   // transaction on the WAL database for each one of them.
+  // Told once when a run of refusals with no reset time has lasted
+  // REFUSING_NOTICE_MS, with the weekly window's reset when the provider
+  // reports one: not a promise that the limit lifts then, but the one instant
+  // there is to offer.
+  private noteRefusing(provider: string, scope: string | null, since: number): void {
+    if (!this.opts.onAvailability) return;
+    const key = `${provider}\u0000${scope ?? ""}`;
+    if (this.refusing.has(key) || this.now() - since < REFUSING_NOTICE_MS) return;
+    this.refusing.set(key, since);
+    const weekly = this.usage.windows(provider).seven_day?.resetsAt;
+    // The CLI reports epoch seconds; anything already past says nothing.
+    const weeklyMs = weekly === undefined ? undefined : (weekly < 1e12 ? weekly * 1000 : weekly);
+    this.tell({ kind: "refusing", provider, scope, refusedMs: this.now() - since, ...(weeklyMs !== undefined && weeklyMs > this.now() ? { weeklyResetAt: weeklyMs } : {}) });
+  }
+
+  private endRefusing(provider: string, scope: string | null): void {
+    const key = `${provider}\u0000${scope ?? ""}`;
+    const since = this.refusing.get(key);
+    if (since === undefined) return;
+    this.refusing.delete(key);
+    this.tell({ kind: "resumed", provider, scope, pausedMs: this.now() - since });
+  }
+
   private onSuccess(id: string, s: State, key: string, scope: string) {
     s.strikes = 0;
+    s.refusedSince = null;
+    this.endRefusing(id, null);
+    this.endRefusing(id, scope);
     if (this.isPaused(s)) this.usage.setPause(id, null, s.pausedUntil!, 0, this.now());
     else if (s.pausedUntil !== null) { s.pausedUntil = null; this.usage.clearPause(id, null); }
     const own = this.modelPauses.get(key);
@@ -783,10 +824,12 @@ export class Core {
       if (ev.scope === "model") { this.pauseModel(id, scope, retryAfterS, key); return; }
       const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** s.strikes) * 60_000;
       const fresh = !this.isPaused(s);
+      if (s.strikes === 0 || s.refusedSince === null) s.refusedSince = this.now();
       s.strikes++;
       s.pausedUntil = Math.max(s.pausedUntil ?? 0, this.now() + waitMs);
       this.usage.setPause(id, null, s.pausedUntil, s.strikes, this.now());
       this.pauseInstalled(id, null, s.pausedUntil, retryAfterS !== undefined, fresh);
+      if (retryAfterS === undefined) this.noteRefusing(id, null, s.refusedSince);
       this.opts.log.warn({ provider: id, seconds: Math.round((s.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: s.strikes }, "provider paused after rate limit");
     } else if (kind === "auth_expired") {
       // The same doubt as for a probe (AUTH_RECHECK_MS): one failed token
@@ -833,11 +876,13 @@ export class Core {
     const p = this.modelPauses.get(key) ?? { pausedUntil: 0, strikes: 0 };
     const waitMs = retryAfterS !== undefined ? (Math.max(0, retryAfterS) + 60) * 1000 : Math.min(30, 2 ** p.strikes) * 60_000;
     const fresh = p.pausedUntil <= this.now();
+    if (p.strikes === 0 || p.since === undefined) p.since = this.now();
     p.strikes++;
     p.pausedUntil = Math.max(p.pausedUntil, this.now() + waitMs);
     this.modelPauses.set(key, p);
     this.usage.setPause(providerId, scope, p.pausedUntil, p.strikes, this.now());
     this.pauseInstalled(providerId, scope, p.pausedUntil, retryAfterS !== undefined, fresh);
+    if (retryAfterS === undefined) this.noteRefusing(providerId, scope, p.since);
     this.opts.log.warn({ provider: providerId, model: scope, seconds: Math.round((p.pausedUntil - this.now()) / 1000), explicit: retryAfterS !== undefined, strikes: p.strikes }, "model paused after a rate limit");
   }
 
