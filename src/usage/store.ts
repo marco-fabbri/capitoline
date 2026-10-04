@@ -87,7 +87,7 @@ export class UsageStore {
     insertKey: StatementSync; keyByHash: StatementSync; touchKey: StatementSync; revokeKey: StatementSync; keys: StatementSync; liveKeys: StatementSync;
     liveKey: StatementSync; saveOAuthClient: StatementSync; oauthClient: StatementSync; insertOAuthToken: StatementSync; oauthToken: StatementSync;
     deleteOAuthToken: StatementSync; deleteOAuthTokensOfKey: StatementSync; pruneOAuthTokens: StatementSync;
-    nameCaller: StatementSync; callerNames: StatementSync;
+    nameCaller: StatementSync; callerNames: StatementSync; setting: StatementSync; setSetting: StatementSync;
     saveCatalog: StatementSync; catalogs: StatementSync;
     announced: StatementSync; setAnnounced: StatementSync;
     usageByDay: StatementSync; spend: StatementSync; deliberations: StatementSync; deliberationCalls: StatementSync;
@@ -141,6 +141,9 @@ export class UsageStore {
       -- runtime half of server.access.callers, written by the admin API, read
       -- by /v1/usage at presentation time exactly as the configured map is.
       CREATE TABLE IF NOT EXISTS callers (id TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      -- What an operator sets from the admin API and is state, not
+      -- configuration: one JSON value per name (what the subscriptions cost).
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
       -- OAuth for the MCP clients that cannot hold a key (src/server/oauth.ts).
       -- The clients that registered themselves (RFC 7591), as the metadata the
       -- registration returned, so a restart does not make them register again.
@@ -264,6 +267,8 @@ export class UsageStore {
       pruneOAuthTokens: this.db.prepare(`DELETE FROM oauth_tokens WHERE expires_at <= ?`),
       nameCaller: this.db.prepare(`INSERT INTO callers (id, name, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`),
       callerNames: this.db.prepare(`SELECT id, name FROM callers ORDER BY id`),
+      setting: this.db.prepare(`SELECT value FROM settings WHERE key = ?`),
+      setSetting: this.db.prepare(`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`),
       saveCatalog: this.db.prepare(`INSERT INTO catalog (provider, listing, checked_at) VALUES (?, ?, ?) ON CONFLICT(provider) DO UPDATE SET listing = excluded.listing, checked_at = excluded.checked_at`),
       catalogs: this.db.prepare(`SELECT provider, listing, checked_at FROM catalog ORDER BY provider`),
       announced: this.db.prepare(`SELECT announced FROM versions WHERE provider = ?`),
@@ -468,6 +473,16 @@ export class UsageStore {
 
   nameCaller(id: string, name: string, now = Date.now()): void {
     this.stmts.nameCaller.run(id, name, now);
+  }
+
+  /** A value the admin API keeps, as the JSON it was given; undefined when never set or unreadable. */
+  setting(key: string): unknown {
+    const row = this.stmts.setting.get(key) as { value: string } | undefined;
+    if (!row) return undefined;
+    try { return JSON.parse(row.value) as unknown; } catch { return undefined; }
+  }
+  setSetting(key: string, value: unknown, now = Date.now()): void {
+    this.stmts.setSetting.run(key, JSON.stringify(value), now);
   }
 
   callerNames(): Record<string, string> {

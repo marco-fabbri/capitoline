@@ -914,6 +914,7 @@ with that key, and `curl` can do the same:
 |---|---|
 | `GET /v1/admin/usage?days=N` | calls and tokens per day (UTC), caller, model and outcome, 1 to 90 days |
 | `GET /v1/admin/costs?days=N` | what the same calls would have cost at the vendors' list prices, per caller and model, 1 to 90 days (see below) |
+| `GET`, `PUT /v1/admin/subscriptions` | what each subscription costs a month, its currency and that currency's worth in USD |
 | `GET /v1/admin/deliberations`, `…/{id}` | the latest councils, and one's calls |
 | `GET /v1/admin/pauses` | the pauses standing, with the names each holds back |
 | `POST /v1/admin/pauses {provider, model?, minutes}` | holds a model or a provider back by hand, a week at most |
@@ -929,13 +930,20 @@ subscriptions. `/v1/admin/costs` and the page's Costs tab multiply the tokens
 each call recorded by the `prices` section of the configuration, which holds
 each model's API list price in USD per million tokens and the day they were
 read. It answers one question: what the same traffic would have cost without
-the subscription, per model, per subscription and per key. To set a
-subscription's monthly cost beside it, name it in the overlay:
+the subscription, per model, per subscription and per key.
 
-```yaml
-prices:
-  subscriptions: { claude: 100, codex: 20 }   # USD a month, by provider id
+What each subscription costs a month is set on the Costs tab, or with
+`PUT /v1/admin/subscriptions`, in the currency it is paid in:
+
+```json
+{ "currency": "EUR", "usdPerUnit": 1.1, "monthly": { "claude": 90, "codex": 20 } }
 ```
+
+`usdPerUnit` is what one unit of that currency is worth in USD, the currency of
+every list price: your own figure, typed by hand, since the gateway asks no
+service for an exchange rate. The value is kept in the usage database, takes
+effect at once and replaces the previous one whole. Until one is set, the
+figures are `prices.subscriptions` of the configuration, read as USD.
 
 How to read the figure:
 

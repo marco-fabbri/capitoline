@@ -37,8 +37,9 @@ conversations:
 # reread when the alias moves (docs/update-clis.md).
 prices:
   verified: "2026-10-04"       # the day these were read from the vendors' pricing pages
-  # USD a month, by provider id; a host's own figure, set in its overlay:
-  #   subscriptions: { claude: 100, codex: 20 }
+  # USD a month, by provider id: a host's own figure. Set from the operator's
+  # page or PUT /v1/admin/subscriptions, in any currency; what is written here
+  # (in an overlay) is only the starting value, until one is set there.
   subscriptions: {}
   models:
     claude-fable:      { input: 10,   cached_input: 0.25,  output: 50 }

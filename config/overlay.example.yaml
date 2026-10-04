@@ -28,10 +28,11 @@ usage:
 conversations:
   db_path: /var/lib/capitoline/conversations.sqlite
 
-# What each subscription costs a month, to set beside the list-price figure of
-# /v1/admin/costs (docs/deploy.md §8.4). Optional.
+# What each subscription costs a month is set from the operator's page, in the
+# currency it is paid in (docs/deploy.md §8.4). A starting value in USD can be
+# given here instead:
 # prices:
-#   subscriptions: { claude: 100, codex: 20 }   # USD, by provider id
+#   subscriptions: { claude: 100, codex: 20 }   # by provider id
 
 server:
   # host: 0.0.0.0   # only without Cloudflare, once a key exists (docs/deploy.md §8.2)

@@ -70,7 +70,8 @@ describe("the operator's routes under /v1/admin", () => {
     usage.record({ ...row, model: "a-image", kind: "image", inputTokens: 0, outputTokens: 0, caller: "app-two" });
     usage.record({ ...row, model: "a-1", inputTokens: 9, outputTokens: 9, source: "health" });
     const r = await get("/costs?days=30");
-    expect(r.body).toMatchObject({ days: 30, pricesVerified: "2026-10-04", subscriptions: { a: 30 } });
+    // Until an operator sets them, the subscriptions are the configuration's, in USD.
+    expect(r.body).toMatchObject({ days: 30, pricesVerified: "2026-10-04", subscriptions: { currency: "USD", usdPerUnit: 1, monthly: { a: 30 } } });
     const cost = Object.fromEntries(r.body.rows.map((x: { model: string; caller: string; cost: number | null }) => [x.caller === "app-two" && x.model === "a-1" ? "a-1 (app-two)" : x.model, x.cost]));
     expect(cost["a-9"]).toBeCloseTo(0.5, 6);
     expect(cost["a-1 (app-two)"]).toBeCloseTo(0.25 + 10, 6);
@@ -80,6 +81,24 @@ describe("the operator's routes under /v1/admin", () => {
     expect(cost["a-image"]).toBeCloseTo(0.04, 6);
     expect(r.body.rows.find((x: { model: string }) => x.model === "a-1")).toMatchObject({ caller: "app-one", provider: "a", firstAt: t, lastAt: t, calls: 2, ok: 1, inputTokens: 2_000_000, cachedInputTokens: 400_000, outputTokens: 100_000 });
     expect((await get("/costs?days=91")).status).toBe(400);
+  });
+
+  it("keeps what the subscriptions cost in the operator's currency, over the configuration's figures", async () => {
+    expect((await get("/subscriptions")).body).toEqual({ currency: "USD", usdPerUnit: 1, monthly: { a: 30 }, source: "configuration" });
+    const put = (body: object) => request(app).put("/v1/admin/subscriptions").set("x-test-caller", "operator").send(body);
+    const set = await put({ currency: "EUR", usdPerUnit: 1.1, monthly: { a: 90 } });
+    expect(set.body).toEqual({ currency: "EUR", usdPerUnit: 1.1, monthly: { a: 90 }, source: "admin" });
+    expect((await get("/subscriptions")).body).toEqual(set.body);
+    expect((await get("/costs")).body.subscriptions).toEqual({ currency: "EUR", usdPerUnit: 1.1, monthly: { a: 90 } });
+    // Kept in the store, so a restart finds it.
+    expect(usage.setting("subscriptions")).toEqual({ currency: "EUR", usdPerUnit: 1.1, monthly: { a: 90 } });
+    for (const wrong of [{ currency: "eur", usdPerUnit: 1, monthly: {} }, { currency: "EUR", usdPerUnit: 0, monthly: {} }, { currency: "EUR", usdPerUnit: 1, monthly: { a: -1 } },
+      { currency: "EUR", usdPerUnit: 1, monthly: { nobody: 5 } }, { currency: "EUR", usdPerUnit: 1 }]) {
+      expect((await put(wrong)).status, JSON.stringify(wrong)).toBe(400);
+    }
+    expect((await request(app).put("/v1/admin/subscriptions").set("x-test-caller", "app-one").send({ currency: "EUR", usdPerUnit: 1, monthly: {} })).status).toBe(403);
+    // Leaving a provider out removes its figure.
+    expect((await put({ currency: "EUR", usdPerUnit: 1.1, monthly: {} })).body.monthly).toEqual({});
   });
 
   it("lists the pauses, installs one by hand on a model or a provider, and lifts it", async () => {

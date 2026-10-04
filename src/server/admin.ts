@@ -2,7 +2,7 @@ import express, { type Request, type Response } from "express";
 import type { Logger } from "../log.js";
 import { CapitolineError } from "../core/types.js";
 import type { ApiKeyInfo, DeliberationCall, DeliberationSummary, SpendRow, UsageDayRow } from "../usage/store.js";
-import { costOf, type Prices } from "../usage/costs.js";
+import { costOf, parseSubscriptions, SUBSCRIPTIONS_KEY, type Prices, type Subscriptions } from "../usage/costs.js";
 import type { ModelInfo, PauseInfo, ProviderState } from "../core/core.js";
 import { callerOf } from "./access.js";
 
@@ -35,6 +35,8 @@ export interface AdminOps {
   usage: {
     usageByDay(sinceMs: number): UsageDayRow[];
     spend(sinceMs: number): SpendRow[];
+    setting(key: string): unknown;
+    setSetting(key: string, value: unknown): void;
     deliberations(limit: number): DeliberationSummary[];
     deliberationCalls(id: string): DeliberationCall[];
   };
@@ -143,6 +145,29 @@ export function createAdminRouter(store: AdminStore, admins: string[], names: ()
       res.json({ days, rows: ops.usage.usageByDay(days * DAY_MS).map((r) => ({ ...r, caller: named(r.caller) })) });
     });
 
+    // What the subscriptions cost: what the operator set here, and until then
+    // the configuration's own figures, which are in USD.
+    const subscriptions = (): { value: Subscriptions; source: "admin" | "configuration" } => {
+      const kept = parseSubscriptions(ops.usage.setting(SUBSCRIPTIONS_KEY));
+      return kept ? { value: kept, source: "admin" } : { value: { currency: "USD", usdPerUnit: 1, monthly: ops.prices?.subscriptions ?? {} }, source: "configuration" };
+    };
+
+    router.get("/subscriptions", (_req: Request, res: Response) => {
+      const s = subscriptions();
+      res.json({ ...s.value, source: s.source });
+    });
+
+    // State, not configuration: a subscription's price changes with the plan
+    // and with the vendor, and is paid in the operator's own currency. The
+    // whole value is replaced, so leaving a provider out removes its figure.
+    router.put("/subscriptions", (req: Request, res: Response) => {
+      const s = parseSubscriptions(req.body, ops.core.providerStates().map((p) => p.id));
+      if (!s) return void bad(res, "expected { currency: three capital letters, usdPerUnit: a number above 0, monthly: { <provider id>: a number from 0 } }");
+      ops.usage.setSetting(SUBSCRIPTIONS_KEY, s);
+      log.info({ admin: res.locals.admin, currency: s.currency, providers: Object.keys(s.monthly) }, "admin: subscriptions set");
+      res.json({ ...s, source: "admin" });
+    });
+
     // What the recorded traffic would have cost at the vendors' list prices:
     // a comparison with the subscriptions, not a bill. `cost` is null for a
     // model the configuration gives no price, so a sum can say what it left out.
@@ -151,7 +176,7 @@ export function createAdminRouter(store: AdminStore, admins: string[], names: ()
       if (days === null) return void bad(res, "days must be a whole number from 1 to 90");
       const prices = ops.prices ?? { subscriptions: {}, models: {} };
       res.json({
-        days, pricesVerified: prices.verified ?? null, subscriptions: prices.subscriptions,
+        days, pricesVerified: prices.verified ?? null, subscriptions: subscriptions().value,
         rows: ops.usage.spend(days * DAY_MS).map((r) => ({ ...r, caller: named(r.caller), cost: costOf(r, prices.models[r.model]) })),
       });
     });

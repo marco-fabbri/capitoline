@@ -44,6 +44,7 @@ button.danger { color: var(--bad); }
 button.confirming { background: var(--bad); border-color: var(--bad); color: var(--panel); }
 button:disabled { opacity: 0.55; cursor: default; }
 input, select { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+input.short { width: 6rem; }
 input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 12px; margin-top: 12px; }

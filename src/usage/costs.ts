@@ -5,6 +5,28 @@ export interface Price { input: number; output: number; cached_input?: number; i
 /** The `prices` section of the configuration, as the admin API reads it. */
 export interface Prices { verified?: string; subscriptions: Record<string, number>; models: Record<string, Price> }
 
+/**
+ * What the subscriptions cost a month, in the currency they are paid in, and
+ * what one unit of it is worth in USD, the currency of every list price. The
+ * rate is the operator's own figure: the gateway asks nobody for it.
+ */
+export interface Subscriptions { currency: string; usdPerUnit: number; monthly: Record<string, number> }
+export const SUBSCRIPTIONS_KEY = "subscriptions";
+
+/** Null when `v` is not a well-formed Subscriptions, or names a provider outside `providers`. */
+export function parseSubscriptions(v: unknown, providers?: string[]): Subscriptions | null {
+  if (typeof v !== "object" || v === null) return null;
+  const { currency, usdPerUnit, monthly } = v as Record<string, unknown>;
+  if (typeof currency !== "string" || !/^[A-Z]{3}$/.test(currency)) return null;
+  if (typeof usdPerUnit !== "number" || !Number.isFinite(usdPerUnit) || usdPerUnit <= 0) return null;
+  if (typeof monthly !== "object" || monthly === null || Array.isArray(monthly)) return null;
+  for (const [id, n] of Object.entries(monthly)) {
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return null;
+    if (providers && !providers.includes(id)) return null;
+  }
+  return { currency, usdPerUnit, monthly: monthly as Record<string, number> };
+}
+
 const MTOK = 1_000_000;
 
 /**

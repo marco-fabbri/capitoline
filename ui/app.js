@@ -190,7 +190,9 @@ const VIEWS = {
   // (/v1/admin/costs): a comparison with the subscriptions, never a bill.
   costs: ["Costs", async () => {
     const days = costDays;
-    const { rows, subscriptions, pricesVerified } = await api(`/v1/admin/costs?days=${days}`);
+    const [{ rows, subscriptions, pricesVerified }, health] = await Promise.all([api(`/v1/admin/costs?days=${days}`), api("/health")]);
+    const providers = health.providers.map((p) => p.id);
+    const own = (n) => `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${subscriptions.currency}`;
     const usd = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     // A group's cost is the sum of what has a price; what has none is named
     // beside it, so a total never looks more complete than it is.
@@ -211,16 +213,37 @@ const VIEWS = {
     // The range asked for is a ceiling: a gateway younger than it has less.
     const first = Math.min(...rows.map((r) => r.firstAt)), last = Math.max(...rows.map((r) => r.lastAt));
     const covered = Math.max(1, Math.ceil((Date.now() - first) / 86_400_000));
-    const bySubscription = sum((r) => r.provider).map(([k, a]) => {
-      const monthly = subscriptions[k], share = monthly === undefined ? null : monthly * Math.min(days, covered) / 30;
-      return [k, when(a.first), num(a.calls), num(a.i), num(a.o), cost(a), share === null ? "—" : usd(share),
+    // A subscription with no call in the range is still paid for: it gets a row.
+    const spent = new Map(sum((r) => r.provider));
+    const idle = { calls: 0, i: 0, c: 0, o: 0, cost: 0, priced: 0, unpriced: 0, first: 0, last: 0 };
+    const bySubscription = [...new Set([...spent.keys(), ...Object.keys(subscriptions.monthly)])].map((k) => {
+      const a = spent.get(k) ?? idle, monthly = subscriptions.monthly[k];
+      // The same days in the subscription's currency, and in USD to stand beside the list price.
+      const paid = monthly === undefined ? null : monthly * Math.min(days, covered) / 30, share = paid === null ? null : paid * subscriptions.usdPerUnit;
+      return [k, when(a.first), num(a.calls), num(a.i), num(a.o), cost(a), share === null ? "—" : subscriptions.currency === "USD" ? usd(share) : `${own(paid)} = ${usd(share)}`,
         share === null || a.priced === 0 ? "—" : chip(a.cost >= share ? `${(a.cost / (share || 1)).toFixed(1)}× the subscription` : `${Math.round(100 * a.cost / share)}% of the subscription`, a.cost >= share ? "ok" : "")];
     });
     const total = rows.reduce((s, r) => s + (r.cost ?? 0), 0);
+    // A month of each subscription, in the currency it is paid in, and what one
+    // unit of that currency is worth in USD: the operator's own figures.
+    const currency = el("input", { class: "short", value: subscriptions.currency, size: 4, maxlength: 3, "aria-label": "Currency", spellcheck: "false", autocapitalize: "characters" });
+    const rate = el("input", { class: "short", type: "number", min: "0", step: "any", value: subscriptions.usdPerUnit, "aria-label": "USD for one unit of the currency" });
+    const amounts = providers.map((id) => [id, el("input", { class: "short", type: "number", min: "0", step: "any", value: subscriptions.monthly[id] ?? "", placeholder: "none", "aria-label": `${id}, a month` })]);
+    const subscriptionForm = el("form", { class: "row", on: { submit: (e) => {
+      e.preventDefault();
+      run(async () => {
+        const monthly = Object.fromEntries(amounts.filter(([, input]) => input.value !== "").map(([id, input]) => [id, Number(input.value)]));
+        await api("/v1/admin/subscriptions", { method: "PUT", body: { currency: currency.value.trim().toUpperCase(), usdPerUnit: Number(rate.value), monthly } });
+        return "Subscriptions saved.";
+      });
+    } } },
+      ...amounts.map(([id, input]) => el("label", {}, `${id} `, input)), el("label", {}, "a month, in ", currency), el("label", {}, "one of which is worth ", rate, " USD"),
+      el("button", { type: "submit", class: "primary" }, "Save"));
     return [
       el("div", { class: "row" }, el("label", {}, "Show the ", range), el("span", {}, `At list price: ${usd(total)}`)),
       el("p", {}, rows.length === 0 ? "" : `Calls from ${when(first)} to ${when(last)}${covered < days ? `: ${covered} of the ${days} days asked for, since nothing was recorded before` : ""}.`),
       el("h2", {}, "By subscription"), table(["Provider", "First call", "#Calls", "#Input tokens", "#Output tokens", "#At list price", "#Subscription, same days", ""], bySubscription, "No calls in this range."),
+      el("h2", {}, "What the subscriptions cost"), subscriptionForm,
       el("h2", {}, "By model"), table(["Model", "First call", "Last call", "#Calls", "#Input tokens", "#Of which cached", "#Output tokens", "#At list price"], sum((r) => r.model).map(([k, a]) => [k, when(a.first), when(a.last), num(a.calls), num(a.i), num(a.c), num(a.o), cost(a)]), "No calls in this range."),
       el("h2", {}, "By key"), table(["Caller", "First call", "Last call", "#Calls", "#Input tokens", "#Output tokens", "#At list price"], sum((r) => r.caller ?? "(not identified)").map(([k, a]) => [k, when(a.first), when(a.last), num(a.calls), num(a.i), num(a.o), cost(a)]), "No calls in this range."),
       el("p", {}, `Nobody is charged these amounts: they are what the same calls would have cost through each vendor's API, at the list prices in the configuration${pricesVerified ? ` (read on ${pricesVerified})` : ""}; where a CLI reports the cost of a call itself, that figure is used instead. `
