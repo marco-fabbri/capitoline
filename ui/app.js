@@ -196,7 +196,7 @@ const VIEWS = {
       const keys = hideRevoked ? all.filter((k) => !k.revoked_at) : all;
       const toggle = el("input", { type: "checkbox", id: "hide-revoked", checked: hideRevoked, on: { change: (e) => { hideRevoked = e.target.checked; drawList(); } } });
       list.replaceChildren(el("div", { class: "row" }, toggle, el("label", { for: "hide-revoked" }, `Hide revoked (${revoked})`)), table(["Name", "Created", "By", "Last used", "State", ""], keys.map((k) => [
-        el("span", { class: "mono" }, k.name), when(k.created_at), k.created_by ?? "", k.last_used_at ? when(k.last_used_at) : "never",
+        k.name, when(k.created_at), k.created_by ?? "", k.last_used_at ? when(k.last_used_at) : "never",
         k.revoked_at ? chip(`revoked ${when(k.revoked_at)}`) : chip("live", "ok"),
         k.revoked_at ? "" : confirmButton("Revoke", async () => { await api(`/v1/admin/keys/${encodeURIComponent(k.name)}`, { method: "DELETE" }); return `Key "${k.name}" revoked, with every OAuth token it stood behind.`; }),
       ]), all.length ? "No live key." : "No keys yet."));
@@ -224,7 +224,7 @@ const VIEWS = {
     return [
       el("p", {}, "A name for a caller that reaches the gateway under an id (a Cloudflare service token's client id). Keys are already called by their own name."),
       el("div", { class: "row" }, id, name, save),
-      table(["Id", "Shown as"], Object.entries(callers).map(([k, v]) => [el("span", { class: "mono" }, k), v]), "No caller has been named."),
+      table(["Id", "Shown as"], Object.entries(callers).map(([k, v]) => [k, v]), "No caller has been named."),
     ];
   }],
 
