@@ -143,7 +143,7 @@ const VIEWS = {
     const minutes = el("select", { "aria-label": "For how long" },
       [[30, "30 minutes"], [120, "2 hours"], [720, "12 hours"], [1440, "1 day"], [10080, "7 days"]].map(([v, t]) => el("option", { value: v }, t)));
     const rows = health.models.map((m) => [
-      el("span", { class: "mono" }, m.name), m.provider, m.kind,
+      m.name, m.provider, m.kind,
       m.available ? chip("available", "ok") : chip(m.reason ?? "unavailable", m.reason === "retired" ? "" : "bad"),
       m.quota ? `${m.quota.used}${m.quota.limit ? ` / ${m.quota.limit}` : ""}${m.quota.resetAt ? `, back ${until(m.quota.resetAt)}` : ""}` : "",
       m.kind === "council" || !m.available ? "" : confirmButton("Hold back", async () => {
