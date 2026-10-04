@@ -225,7 +225,7 @@ const VIEWS = {
       el("h2", {}, "By key"), table(["Caller", "First call", "Last call", "#Calls", "#Input tokens", "#Output tokens", "#At list price"], sum((r) => r.caller ?? "(not identified)").map(([k, a]) => [k, when(a.first), when(a.last), num(a.calls), num(a.i), num(a.o), cost(a)]), "No calls in this range."),
       el("p", {}, `Nobody is charged these amounts: they are what the same calls would have cost through each vendor's API, at the list prices in the configuration${pricesVerified ? ` (read on ${pricesVerified})` : ""}; where a CLI reports the cost of a call itself, that figure is used instead. `
         + "The input includes what each CLI adds around the question, so it is more than the same question would send through an API. "
-        + "Cached input is priced at its lower rate only for calls recorded since the gateway started keeping it; older calls are priced whole, so the figure errs upwards. "
+        + "For the other calls the list is an estimate that can miss on either side: a cached read costs less than the input rate and is priced apart only since the gateway started keeping it, a cache write costs more and is priced as plain input. "
         + "A subscription is also used outside the gateway, so its figure here is the least it was worth, not all of it."),
     ];
   }],

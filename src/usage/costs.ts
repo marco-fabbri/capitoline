@@ -14,10 +14,13 @@ const MTOK = 1_000_000;
  * A call whose CLI reported its own cost is taken at that figure, which knows
  * the model that answered and every cache rate. The others are priced from the
  * list: cached input at its own rate when the price names one and at the input
- * rate when it does not, a cache write as plain input, which undercounts it
- * slightly. Rows written before cached tokens were kept carry none, so their
- * input is priced whole: the figure errs upwards, never down. Null when calls
- * remain that nothing can price.
+ * rate when it does not, a cache write as plain input. Rows written before
+ * cached tokens were kept carry none, so their input is priced whole. The two
+ * pull opposite ways — a cached read costs a fraction of the input rate, a
+ * cache write up to twice it — so the list figure is an estimate that can
+ * miss on either side: a short Claude Code call whose prompt was written to
+ * cache was reported at about twice what the list gives (2026-10-04). Null
+ * when calls remain that nothing can price.
  */
 export function costOf(row: SpendRow, price: Price | undefined): number | null {
   if (row.reportedCalls === row.calls) return row.reportedCost;

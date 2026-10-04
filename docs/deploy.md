@@ -952,9 +952,10 @@ How to read the figure:
   overlay, by the name the model is asked for under.
 - The input a CLI reports includes what the CLI itself adds around the
   question, so it is more than the same question would send through an API.
-- Cached input is priced at its own lower rate only for calls recorded since
-  the gateway started keeping it; earlier calls are priced whole, so the
-  figure errs upwards. A cache write is priced as plain input.
+- For the calls no CLI costs itself the list is an estimate that can miss on
+  either side. A cached read costs a fraction of the input rate, and is priced
+  apart only for calls recorded since the gateway started keeping it; a cache
+  write costs up to twice the input rate, and is priced as plain input.
 - An image is not counted in tokens: it has a cost only where the model's
   price names one (`image: <USD>`).
 - A subscription is also used outside the gateway, so what the page shows is
