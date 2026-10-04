@@ -25,6 +25,17 @@ const ModelSchema = z.object({
   timeout_s: z.number().int().min(1).optional(),
 }).strict();
 
+// What a model costs through its vendor's API, in USD per million tokens (and
+// per image, for a model that makes them). Never charged by anyone: it is what
+// /v1/admin/costs multiplies the recorded tokens by, to say what the same
+// traffic would have cost without the subscription.
+const PriceSchema = z.object({
+  input: z.number().min(0),
+  output: z.number().min(0),
+  cached_input: z.number().min(0).optional(),
+  image: z.number().min(0).optional(),
+}).strict();
+
 // How a provider produces images. The CLI writes the file outside the sandbox,
 // so the bytes are collected only through `collect` (command + args; the
 // conversation id is appended), never by reading the CLI's home directly.
@@ -333,6 +344,16 @@ const ConfigObject = z
     // wrote. A thread lives ttl_days after its last turn; the two caps bound a
     // replayed history, which no request body limit sees because the gateway
     // assembles it itself.
+    prices: z.object({
+      // The day the list prices below were last read from the vendors' pages.
+      verified: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      // What each subscription costs a month, by provider id: a host's own
+      // figure, so it belongs in the overlay.
+      subscriptions: z.record(z.string().min(1), z.number().min(0)).default({}),
+      // By the name a model is asked for under. A model without a price is
+      // reported without a cost, never as free.
+      models: z.record(z.string().min(1), PriceSchema).default({}),
+    }).strict().default({}),
     conversations: z.object({
       db_path: z.string().default("conversations.sqlite"),
       ttl_days: z.number().int().min(1).default(30),

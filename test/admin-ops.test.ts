@@ -36,12 +36,13 @@ beforeEach(() => {
   notified = [];
   app = createApp(core, { log: createLogger("t"), access: asHeader, identity: { store: usage, admins: ["operator"], ops: {
     core, usage, conversations, notify: async (m) => { notified.push(m); return true; }, config: () => ({ server: { port: 8080 } }),
+    prices: { verified: "2026-10-04", subscriptions: { a: 30 }, models: { "a-1": { input: 10, cached_input: 1, output: 50 }, "a-image": { input: 0, output: 0, image: 0.04 } } },
   } } });
 });
 
 describe("the operator's routes under /v1/admin", () => {
   it("are the administrators' alone", async () => {
-    for (const path of ["/whoami", "/usage", "/deliberations", "/pauses", "/conversations", "/config"]) {
+    for (const path of ["/whoami", "/usage", "/costs", "/deliberations", "/pauses", "/conversations", "/config"]) {
       expect((await get(path, "app-one")).status, path).toBe(403);
     }
     expect((await get("/whoami")).body).toEqual({ admin: "operator" });
@@ -55,6 +56,24 @@ describe("the operator's routes under /v1/admin", () => {
     expect(r.body.rows).toEqual([{ day: "2026-10-03", caller: "app-one", provider: "a", model: "a-1", outcome: "ok", calls: 2, inputTokens: 6, outputTokens: 4 }]);
     expect((await get("/usage?days=0")).status).toBe(400);
     expect((await get("/usage?days=1.5")).status).toBe(400);
+  });
+
+  it("prices the recorded tokens at the configured list prices, cached input at its own rate, and leaves an unpriced model without a cost", async () => {
+    const row = { provider: "a", durationMs: 1, outcome: "ok" as const, source: "http" as const, ts: t, caller: "app-one" };
+    usage.record({ ...row, model: "a-1", inputTokens: 1_000_000, cachedInputTokens: 400_000, outputTokens: 100_000 });
+    usage.record({ ...row, model: "a-1", inputTokens: 1_000_000, outputTokens: 0, outcome: "timeout" });
+    usage.record({ ...row, model: "a-2", inputTokens: 500, outputTokens: 500 });
+    usage.record({ ...row, model: "a-image", kind: "image", inputTokens: 0, outputTokens: 0, caller: "app-two" });
+    usage.record({ ...row, model: "a-1", inputTokens: 9, outputTokens: 9, source: "health" });
+    const r = await get("/costs?days=30");
+    expect(r.body).toMatchObject({ days: 30, pricesVerified: "2026-10-04", subscriptions: { a: 30 } });
+    const cost = Object.fromEntries(r.body.rows.map((x: { model: string; cost: number | null }) => [x.model, x.cost]));
+    // 600k fresh at $10, 400k cached at $1, 100k out at $50, and a failed call's million of input at $10.
+    expect(cost["a-1"]).toBeCloseTo(6 + 0.4 + 5 + 10, 6);
+    expect(cost["a-2"]).toBeNull();
+    expect(cost["a-image"]).toBeCloseTo(0.04, 6);
+    expect(r.body.rows.find((x: { model: string }) => x.model === "a-1")).toMatchObject({ caller: "app-one", provider: "a", calls: 2, ok: 1, inputTokens: 2_000_000, cachedInputTokens: 400_000, outputTokens: 100_000 });
+    expect((await get("/costs?days=91")).status).toBe(400);
   });
 
   it("lists the pauses, installs one by hand on a model or a provider, and lifts it", async () => {

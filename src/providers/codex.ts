@@ -126,7 +126,7 @@ export const codexAdapter: Adapter = {
         if (item?.type === "agent_message" && typeof item.text === "string") yield { type: "text", delta: item.text };
       } else if (type === "turn.completed") {
         const u = (o.usage ?? {}) as Record<string, number>;
-        yield { type: "done", usage: { input: u.input_tokens ?? 0, output: u.output_tokens ?? 0 } };
+        yield { type: "done", usage: { input: u.input_tokens ?? 0, output: u.output_tokens ?? 0, cachedInput: u.cached_input_tokens ?? 0 } };
         return;
       } else if (type === "turn.failed" || type === "error") {
         const detail = errorDetail(o);

@@ -152,7 +152,7 @@ export const antigravityAdapter: Adapter = {
         // three providers' figures are not comparable with each other — said
         // where the numbers are read, docs/deploy.md §9.
         const u = r.usage ?? {};
-        yield { type: "done", usage: { input: (u.input_tokens ?? 0) + (u.cache_read_tokens ?? 0), output: u.output_tokens ?? 0 } };
+        yield { type: "done", usage: { input: (u.input_tokens ?? 0) + (u.cache_read_tokens ?? 0), output: u.output_tokens ?? 0, cachedInput: u.cache_read_tokens ?? 0 } };
         return;
       }
     }

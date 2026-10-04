@@ -56,7 +56,7 @@ describe("CliProvider", () => {
     const out: ProviderEvent[] = [];
     for await (const e of p.execute({ model: m.name, stream: false, messages: [{ role: "user", text: "q" }] }, m)) out.push(e);
     // The failure, and the tokens the quota was charged for it.
-    expect(out).toEqual([{ type: "error", kind: "bad_output", detail: "the model answered with nothing", usage: { input: 12659, output: 608 } }]);
+    expect(out).toEqual([{ type: "error", kind: "bad_output", detail: "the model answered with nothing", usage: { input: 12659, output: 608, cachedInput: 0 } }]);
   });
   it("replays fixture output through the adapter", async () => {
     const ev = await run(provider("replay"));
@@ -233,7 +233,7 @@ describe("CliProvider.generateImage", () => {
     expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
     expect(ev[0]).toMatchObject({ type: "image", mime: "image/jpeg", width: 1376, height: 768 });
     expect((ev[0] as { bytes: Buffer }).bytes.equals(SAMPLE)).toBe(true);
-    expect(ev[1]).toEqual({ type: "done", usage: { input: 26711, output: 60 } });
+    expect(ev[1]).toEqual({ type: "done", usage: { input: 26711, output: 60, cachedInput: 0 } });
     // The collect command gets the conversation id from the stream as its last argument.
     expect(spy.captures).toHaveLength(1);
     expect(spy.captures[0]).toMatchObject({ binary: COLLECT, args: [CID], timeoutMs: 30_000, maxBytes: 20 * 1024 * 1024 });

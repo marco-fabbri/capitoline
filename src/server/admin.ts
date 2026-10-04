@@ -1,7 +1,8 @@
 import express, { type Request, type Response } from "express";
 import type { Logger } from "../log.js";
 import { CapitolineError } from "../core/types.js";
-import type { ApiKeyInfo, DeliberationCall, DeliberationSummary, UsageDayRow } from "../usage/store.js";
+import type { ApiKeyInfo, DeliberationCall, DeliberationSummary, SpendRow, UsageDayRow } from "../usage/store.js";
+import { costOf, type Prices } from "../usage/costs.js";
 import type { ModelInfo, PauseInfo, ProviderState } from "../core/core.js";
 import { callerOf } from "./access.js";
 
@@ -33,9 +34,12 @@ export interface AdminOps {
   };
   usage: {
     usageByDay(sinceMs: number): UsageDayRow[];
+    spend(sinceMs: number): SpendRow[];
     deliberations(limit: number): DeliberationSummary[];
     deliberationCalls(id: string): DeliberationCall[];
   };
+  /** The `prices` section of the configuration; without it every cost is unknown. */
+  prices?: Prices;
   /** Counts only: an operator never reads what a caller wrote. */
   conversations?: { summary(): { owner: string; threads: number; turns: number; bytes: number; lastUsedAt: number }[]; deleteOwner(owner: string): number };
   /** server.notify, when configured. */
@@ -137,6 +141,19 @@ export function createAdminRouter(store: AdminStore, admins: string[], names: ()
       const days = intParam(req.query.days, 7, 1, 90);
       if (days === null) return void bad(res, "days must be a whole number from 1 to 90");
       res.json({ days, rows: ops.usage.usageByDay(days * DAY_MS).map((r) => ({ ...r, caller: named(r.caller) })) });
+    });
+
+    // What the recorded traffic would have cost at the vendors' list prices:
+    // a comparison with the subscriptions, not a bill. `cost` is null for a
+    // model the configuration gives no price, so a sum can say what it left out.
+    router.get("/costs", (req: Request, res: Response) => {
+      const days = intParam(req.query.days, 30, 1, 90);
+      if (days === null) return void bad(res, "days must be a whole number from 1 to 90");
+      const prices = ops.prices ?? { subscriptions: {}, models: {} };
+      res.json({
+        days, pricesVerified: prices.verified ?? null, subscriptions: prices.subscriptions,
+        rows: ops.usage.spend(days * DAY_MS).map((r) => ({ ...r, caller: named(r.caller), cost: costOf(r, prices.models[r.model]) })),
+      });
     });
 
     router.get("/deliberations", (req: Request, res: Response) => {

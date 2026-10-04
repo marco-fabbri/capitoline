@@ -28,7 +28,10 @@ export type ErrorKind = "auth_expired" | "rate_limited" | "busy" | "timeout" | "
 // every Date.now() around it. The two units sit in the same table, so the
 // annotation is part of the type.
 export interface RateLimitWindow { utilization: number; resetsAt: number }
-export interface Usage { input: number; output: number }
+// cachedInput: the part of `input` the provider read from its cache, when the
+// CLI says. It is inside `input`, never beside it, and exists because a cached
+// token is priced far below a fresh one (src/usage/costs.ts).
+export interface Usage { input: number; output: number; cachedInput?: number }
 export type ImageMime = "image/jpeg" | "image/png";
 
 export type ProviderEvent =

@@ -146,6 +146,20 @@ describe("config", () => {
       expect([...new Set([...carriers, codex.effort_flag, codex.system_prompt_flag_prefix])]).toEqual(["-c"]);
     }
   });
+  // A price under a name no provider declares would be a typo nothing reads:
+  // the model it was meant for would be reported without a cost, silently.
+  it("prices only models the shipped configuration declares, cached input never above fresh input", () => {
+    const cfg = loadConfig("config/capitoline.yaml");
+    const declared = new Set(Object.values(cfg.providers).flatMap((p) => Object.keys(p.models)));
+    expect(cfg.prices.verified).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(Object.keys(cfg.prices.models).length).toBeGreaterThan(0);
+    for (const [name, price] of Object.entries(cfg.prices.models)) {
+      expect(declared.has(name), name).toBe(true);
+      expect(price.cached_input ?? 0, name).toBeLessThanOrEqual(price.input);
+    }
+    // A host's own figure: the repository names no subscription's cost.
+    expect(cfg.prices.subscriptions).toEqual({});
+  });
   it("defaults a model's kind to text with no per-model timeout", () => {
     const m = parseConfig(config()).providers.x.models.a;
     expect(m.kind).toBe("text");

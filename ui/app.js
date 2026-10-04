@@ -9,6 +9,7 @@ let key = null;
 try { key = sessionStorage.getItem(STORE); } catch { /* a browser without storage still signs in, for this page load */ }
 let tab = "overview";
 let usageDays = 7;
+let costDays = 30;
 let hideRevoked = true;   // a gateway gathers revoked keys (every CLI update makes and revokes one); they are history, not the working list
 
 // ---- small helpers -------------------------------------------------------
@@ -182,6 +183,45 @@ const VIEWS = {
       el("h2", {}, "What actually answered, last 7 days"),
       table(["Name asked for", "Model that answered", "#Calls", "First", "Last"], day.models.map((m) => [m.model, m.cliModelId, num(m.calls), when(m.firstAt), when(m.lastAt)]), "No CLI reported a model id."),
       el("p", {}, "Token counts follow each provider's own convention, so they compare within a provider and not across."),
+    ];
+  }],
+
+  // What the recorded traffic would have cost at the vendors' list prices
+  // (/v1/admin/costs): a comparison with the subscriptions, never a bill.
+  costs: ["Costs", async () => {
+    const days = costDays;
+    const { rows, subscriptions, pricesVerified } = await api(`/v1/admin/costs?days=${days}`);
+    const usd = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    // A group's cost is the sum of what has a price; what has none is named
+    // beside it, so a total never looks more complete than it is.
+    const sum = (keyOf) => {
+      const out = new Map();
+      for (const r of rows) {
+        const k = keyOf(r), a = out.get(k) ?? { calls: 0, i: 0, c: 0, o: 0, cost: 0, priced: 0, unpriced: 0 };
+        a.calls += r.calls; a.i += r.inputTokens; a.c += r.cachedInputTokens; a.o += r.outputTokens;
+        if (r.cost === null) a.unpriced += r.calls; else { a.cost += r.cost; a.priced += r.calls; }
+        out.set(k, a);
+      }
+      return [...out].sort((a, b) => b[1].cost - a[1].cost || b[1].calls - a[1].calls);
+    };
+    const cost = (a) => a.priced === 0 ? "—" : a.unpriced === 0 ? usd(a.cost) : [usd(a.cost), " ", chip(`${num(a.unpriced)} calls without a price`, "warn")];
+    const range = el("select", { "aria-label": "Range", on: { change: (e) => { costDays = Number(e.target.value); show(); } } },
+      [7, 30, 90].map((d) => el("option", { value: d, selected: d === days }, `last ${d} days`)));
+    const bySubscription = sum((r) => r.provider).map(([k, a]) => {
+      const monthly = subscriptions[k], share = monthly === undefined ? null : monthly * days / 30;
+      return [k, num(a.calls), num(a.i), num(a.o), cost(a), share === null ? "—" : usd(share),
+        share === null || a.priced === 0 ? "—" : chip(a.cost >= share ? `${(a.cost / (share || 1)).toFixed(1)}× the subscription` : `${Math.round(100 * a.cost / share)}% of the subscription`, a.cost >= share ? "ok" : "")];
+    });
+    const total = rows.reduce((s, r) => s + (r.cost ?? 0), 0);
+    return [
+      el("div", { class: "row" }, el("label", {}, "Show the ", range), el("span", {}, `At list price: ${usd(total)}`)),
+      el("h2", {}, "By subscription"), table(["Provider", "#Calls", "#Input tokens", "#Output tokens", "#At list price", "#Subscription, same days", ""], bySubscription, "No calls in this range."),
+      el("h2", {}, "By model"), table(["Model", "#Calls", "#Input tokens", "#Of which cached", "#Output tokens", "#At list price"], sum((r) => r.model).map(([k, a]) => [k, num(a.calls), num(a.i), num(a.c), num(a.o), cost(a)]), "No calls in this range."),
+      el("h2", {}, "By key"), table(["Caller", "#Calls", "#Input tokens", "#Output tokens", "#At list price"], sum((r) => r.caller ?? "(not identified)").map(([k, a]) => [k, num(a.calls), num(a.i), num(a.o), cost(a)]), "No calls in this range."),
+      el("p", {}, `Nobody is charged these amounts: they are what the same calls would have cost through each vendor's API, at the list prices in the configuration${pricesVerified ? ` (read on ${pricesVerified})` : ""}. `
+        + "The input includes what each CLI adds around the question, so it is more than the same question would send through an API. "
+        + "Cached input is priced at its lower rate only for calls recorded since the gateway started keeping it; older calls are priced whole, so the figure errs upwards. "
+        + "A subscription is also used outside the gateway, so its figure here is the least it was worth, not all of it."),
     ];
   }],
 

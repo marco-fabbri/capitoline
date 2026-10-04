@@ -913,6 +913,7 @@ with that key, and `curl` can do the same:
 | Call | What it does |
 |---|---|
 | `GET /v1/admin/usage?days=N` | calls and tokens per day (UTC), caller, model and outcome, 1 to 90 days |
+| `GET /v1/admin/costs?days=N` | what the same calls would have cost at the vendors' list prices, per caller and model, 1 to 90 days (see below) |
 | `GET /v1/admin/deliberations`, `…/{id}` | the latest councils, and one's calls |
 | `GET /v1/admin/pauses` | the pauses standing, with the names each holds back |
 | `POST /v1/admin/pauses {provider, model?, minutes}` | holds a model or a provider back by hand, a week at most |
@@ -922,6 +923,37 @@ with that key, and `curl` can do the same:
 | `POST /v1/admin/notify-test` | sends a test notification |
 | `GET /v1/admin/conversations`, `DELETE …/{owner}` | how much each caller has kept, and its removal |
 | `GET /v1/admin/config` | the configuration in force, without the notification address |
+
+**Costs at list price.** Nobody is charged for a call: the gateway runs on
+subscriptions. `/v1/admin/costs` and the page's Costs tab multiply the tokens
+each call recorded by the `prices` section of the configuration, which holds
+each model's API list price in USD per million tokens and the day they were
+read. It answers one question: what the same traffic would have cost without
+the subscription, per model, per subscription and per key. To set a
+subscription's monthly cost beside it, name it in the overlay:
+
+```yaml
+prices:
+  subscriptions: { claude: 100, codex: 20 }   # USD a month, by provider id
+```
+
+How to read the figure:
+
+- A model without a price has no cost and stays out of every total; the page
+  says how many calls that leaves out. The shipped list covers the models the
+  vendors publish a price for; add or correct one under `prices.models` in the
+  overlay, by the name the model is asked for under.
+- The input a CLI reports includes what the CLI itself adds around the
+  question, so it is more than the same question would send through an API.
+- Cached input is priced at its own lower rate only for calls recorded since
+  the gateway started keeping it; earlier calls are priced whole, so the
+  figure errs upwards. A cache write is priced as plain input.
+- An image is not counted in tokens: it has a cost only where the model's
+  price names one (`image: <USD>`).
+- A subscription is also used outside the gateway, so what the page shows is
+  the least it was worth, not all of it.
+- Prices change. `prices.verified` is the day the list was last read; reread
+  it when a vendor changes its prices or an alias moves to a new model.
 
 **Use it over an encrypted connection.** The key is sent with every call, so
 the page belongs behind TLS: the tunnel of §9, or a reverse proxy. On a

@@ -6,7 +6,7 @@ import type { CatalogChange, HealthStatus, ModelKind, ModelSpec, Provider } from
 import { H5, type CallerUsage, type ModelIdentity, type UsageStore } from "../usage/store.js";
 import { flatten, splitSystem } from "./prompt.js";
 import { Semaphore } from "./semaphore.js";
-import { CLIENT_MESSAGE, CapitolineError, type ErrorKind, type ImageRequest, type InternalRequest, type ProviderEvent } from "./types.js";
+import { CLIENT_MESSAGE, CapitolineError, type ErrorKind, type ImageRequest, type InternalRequest, type ProviderEvent, type Usage } from "./types.js";
 
 /**
  * What a virtual model is owned by in `/v1/models` and in the `capitoline`
@@ -720,7 +720,7 @@ export class Core {
 
     const started = this.now();
     let outcome: "ok" | ErrorKind = "bad_output";
-    let usage = { input: 0, output: 0 };
+    let usage: Usage = { input: 0, output: 0 };
     // What the provider says actually answered, when it says anything.
     let cliModelId: string | undefined;
     let sawTerminal = false;
@@ -741,7 +741,7 @@ export class Core {
       // No terminal event and no provider failure: the caller gave up, either
       // through its signal or by stopping the iteration (client disconnected).
       const aborted = !sawTerminal && phase !== "threw" && (phase === "running" || ctx.signal?.aborted === true);
-      this.usage.record({ provider: id, model: modelName, kind, inputTokens: usage.input, outputTokens: usage.output,
+      this.usage.record({ provider: id, model: modelName, kind, inputTokens: usage.input, outputTokens: usage.output, cachedInputTokens: usage.cachedInput ?? 0,
         durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, caller: ctx.caller ?? null,
         deliberation: ctx.deliberation ?? null, council: ctx.council ?? null, cliModelId: cliModelId ?? null, ts: this.now() });
     }

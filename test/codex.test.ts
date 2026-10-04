@@ -99,7 +99,7 @@ describe("codex adapter", () => {
     // The thread id comes first, as meta: the image path needs it to find the
     // generated file, and the text path drops it (CliProvider.execute).
     expect(ev[0]).toMatchObject({ type: "meta" });
-    expect(ev.slice(1)).toEqual([{ type: "text", delta: "OK" }, { type: "done", usage: { input: 10566, output: 5 } }]);
+    expect(ev.slice(1)).toEqual([{ type: "text", delta: "OK" }, { type: "done", usage: { input: 10566, output: 5, cachedInput: 8448 } }]);
   });
   it("maps turn.failed to a typed error", async () => {
     async function* l() { yield JSON.stringify({ type: "turn.failed", error: { message: "429 Too Many Requests" } }); }

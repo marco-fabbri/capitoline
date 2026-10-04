@@ -8,6 +8,8 @@ import type { ListedModel } from "../providers/adapter.js";
 
 export interface CallRecord {
   provider: string; model: string; inputTokens: number; outputTokens: number; durationMs: number;
+  /** The part of inputTokens read from the provider's cache; 0 when the CLI did not say, and for every row written before it was kept. */
+  cachedInputTokens?: number;
   outcome: "ok" | ErrorKind | "aborted"; source: "http" | "mcp" | "health"; ts?: number;
   /** What the model produces; defaults to text (health probes and every pre-image row). */
   kind?: ModelKind;
@@ -35,6 +37,8 @@ export interface Totals { calls: number; inputTokens: number; outputTokens: numb
 /** What one caller spent in a window. `caller` is null for the calls nothing identified. */
 export interface CallerUsage { caller: string | null; calls: number; inputTokens: number; outputTokens: number }
 export interface UsageDayRow { day: string; caller: string | null; provider: string; model: string; outcome: string; calls: number; inputTokens: number; outputTokens: number }
+/** What a caller spent on a model since some instant: the rows a cost is worked out from (src/usage/costs.ts). */
+export interface SpendRow { caller: string | null; provider: string; model: string; kind: string; calls: number; ok: number; inputTokens: number; cachedInputTokens: number; outputTokens: number }
 export interface DeliberationSummary { id: string; council: string | null; startedAt: number; endedAt: number; calls: number; ok: number; inputTokens: number; outputTokens: number; caller: string | null }
 export interface DeliberationCall { ts: number; provider: string; model: string; cliModelId: string | null; outcome: string; durationMs: number; inputTokens: number; outputTokens: number }
 /**
@@ -76,7 +80,7 @@ export class UsageStore {
     nameCaller: StatementSync; callerNames: StatementSync;
     saveCatalog: StatementSync; catalogs: StatementSync;
     announced: StatementSync; setAnnounced: StatementSync;
-    usageByDay: StatementSync; deliberations: StatementSync; deliberationCalls: StatementSync;
+    usageByDay: StatementSync; spend: StatementSync; deliberations: StatementSync; deliberationCalls: StatementSync;
   };
   private closed = false;
   constructor(path: string) {
@@ -166,6 +170,8 @@ export class UsageStore {
     // And the council's name, added 2026-10-04: the id says which calls are one
     // question, not which council it was put to. NULL for the rows before.
     if (!columns.has("council")) this.db.exec(`ALTER TABLE calls ADD COLUMN council TEXT`);
+    // Inside input_tokens, not beside it: 0 for the rows written before.
+    if (!columns.has("cached_input_tokens")) this.db.exec(`ALTER TABLE calls ADD COLUMN cached_input_tokens INTEGER NOT NULL DEFAULT 0`);
     // And the dated model id, added 2026-09-23 when `opus` moved from Opus 5
     // to Opus 5.5 with nothing in the history saying which one any measurement
     // had used. Nullable with no default, for the same reason `caller` is:
@@ -179,7 +185,7 @@ export class UsageStore {
     if (!pauseColumns.has("announced_at")) this.db.exec(`ALTER TABLE pauses ADD COLUMN announced_at INTEGER`);
 
     this.stmts = {
-      record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind, caller, deliberation, cli_model_id, council) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind, caller, deliberation, cli_model_id, council, cached_input_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
       imageWindow: this.db.prepare(`SELECT COUNT(*) AS used, MIN(ts) AS started FROM calls WHERE provider = ? AND kind = 'image' AND outcome = 'ok' AND ts > ?`),
       totals: this.db.prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o FROM calls WHERE provider = ? AND ts > ?`),
       setWindow: this.db.prepare(`INSERT INTO rate_windows (provider, window, utilization, resets_at, updated_at) VALUES (?, ?, ?, ?, ?)
@@ -195,6 +201,9 @@ export class UsageStore {
       usageByDay: this.db.prepare(`SELECT strftime('%Y-%m-%d', ts / 1000, 'unixepoch') AS day, caller, provider, model, outcome,
         COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o
         FROM calls WHERE ts > ? AND source <> 'health' GROUP BY day, caller, provider, model, outcome ORDER BY day DESC, calls DESC`),
+      spend: this.db.prepare(`SELECT caller, provider, model, kind, COUNT(*) AS calls, SUM(outcome = 'ok') AS ok,
+        COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(cached_input_tokens),0) AS c, COALESCE(SUM(output_tokens),0) AS o
+        FROM calls WHERE ts > ? AND source <> 'health' GROUP BY caller, provider, model, kind ORDER BY provider, model, caller`),
       deliberations: this.db.prepare(`SELECT deliberation AS id, MIN(ts) AS started, MAX(ts) AS ended, COUNT(*) AS calls,
         SUM(outcome = 'ok') AS ok, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o, MAX(caller) AS caller, MAX(council) AS council
         FROM calls WHERE deliberation IS NOT NULL GROUP BY deliberation ORDER BY started DESC LIMIT ?`),
@@ -248,7 +257,7 @@ export class UsageStore {
     };
   }
   record(c: CallRecord): void {
-    this.stmts.record.run(c.ts ?? Date.now(), c.provider, c.model, c.inputTokens, c.outputTokens, c.durationMs, c.outcome, c.source, c.kind ?? "text", c.caller ?? null, c.deliberation ?? null, c.cliModelId ?? null, c.council ?? null);
+    this.stmts.record.run(c.ts ?? Date.now(), c.provider, c.model, c.inputTokens, c.outputTokens, c.durationMs, c.outcome, c.source, c.kind ?? "text", c.caller ?? null, c.deliberation ?? null, c.cliModelId ?? null, c.council ?? null, c.cachedInputTokens ?? 0);
   }
 
   // What one deliberation spent, across every model that served it: the other
@@ -270,6 +279,12 @@ export class UsageStore {
   usageByDay(sinceMs: number, now = Date.now()): UsageDayRow[] {
     const rows = this.stmts.usageByDay.all(now - sinceMs) as { day: string; caller: string | null; provider: string; model: string; outcome: string; calls: number; i: number; o: number }[];
     return rows.map((r) => ({ day: r.day, caller: r.caller, provider: r.provider, model: r.model, outcome: r.outcome, calls: Number(r.calls), inputTokens: Number(r.i), outputTokens: Number(r.o) }));
+  }
+
+  /** Calls and tokens per caller and model since `sinceMs` ago, the gateway's own probes left out. */
+  spend(sinceMs: number, now = Date.now()): SpendRow[] {
+    const rows = this.stmts.spend.all(now - sinceMs) as { caller: string | null; provider: string; model: string; kind: string; calls: number; ok: number; i: number; c: number; o: number }[];
+    return rows.map((r) => ({ caller: r.caller, provider: r.provider, model: r.model, kind: r.kind, calls: Number(r.calls), ok: Number(r.ok), inputTokens: Number(r.i), cachedInputTokens: Number(r.c), outputTokens: Number(r.o) }));
   }
 
   /** The latest deliberations by id, newest first, each summed over its calls. */

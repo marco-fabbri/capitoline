@@ -79,7 +79,8 @@ describe("claude adapter", () => {
     expect(rl.sevenDay.resetsAt).toBe(1790362800);
     const done = ev.at(-1) as any;
     expect(done.type).toBe("done");
-    expect(done.usage).toEqual({ input: 2 + 2947 + 3046, output: 6 });
+    // The cached reads are inside the input and named beside it, for the price they are charged at.
+    expect(done.usage).toEqual({ input: 2 + 2947 + 3046, output: 6, cachedInput: 3046 });
     // The dated id of what actually answered, which `--model opus` never says.
     // Read from message_start and not from the result object's modelUsage,
     // although both carry it: modelUsage is `{}` in every error capture, while

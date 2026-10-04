@@ -96,7 +96,7 @@ describe("antigravity adapter", () => {
   it("parses stream-json into text deltas and done with usage", async () => {
     const ev = await events(linesOf("test/fixtures/antigravity/stream-json.jsonl"));
     expect(ev.filter((e) => e.type === "text").map((e) => (e as any).delta).join("")).toBe("ok ok\n");
-    expect(ev.at(-1)).toEqual({ type: "done", usage: { input: 14198, output: 2 } });
+    expect(ev.at(-1)).toEqual({ type: "done", usage: { input: 14198, output: 2, cachedInput: 0 } });
   });
   it("yields meta, tool call/done, text and done in order for a real image run", async () => {
     const ev = await events(linesOf("test/fixtures/antigravity/image-run.jsonl"));
@@ -203,8 +203,9 @@ describe("antigravity adapter", () => {
       expect(ev.map((e) => e.type)).toEqual(["done"]);
       usage.push((ev[0] as any).usage);
     }
-    expect(usage[0]).toEqual({ input: 12887, output: 397 });
-    expect(usage[1]).toEqual({ input: 12881, output: 357 });
+    expect(usage[0]).toEqual({ input: 12887, output: 397, cachedInput: 0 });
+    // The second run read the first one's prompt from cache: inside the input, and named beside it.
+    expect(usage[1]).toEqual({ input: 12881, output: 357, cachedInput: 8092 });
     runs.forEach((line, i) => {
       const u = line.result.usage;
       // The identity itself: the CLI's total is input plus output and

@@ -183,7 +183,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     ...(cfg.server.ui.enabled ? { ui: createUiRouter() } : {}),
     versions: () => versions.states(), log: log.child({ mod: "http" }), access,
     mcp: createMcpHandler(core, log.child({ mod: "mcp" }), { conversations: { store: conversations, limits: conversationLimits } }), ready: () => ready, callerNames: cfg.server.access.callers, identity: { store: usage, admins: cfg.server.access.admins, ops: {
-      core, usage, conversations, ...(notify ? { notify } : {}),
+      core, usage, conversations, prices: cfg.prices, ...(notify ? { notify } : {}),
       // What an administrator may read back: everything, except the address
       // notifications are posted to, which is a secret for services that
       // route by it (an ntfy topic).

@@ -235,6 +235,34 @@ describe("UsageStore", () => {
     s.close();
   });
 
+  // The same upgrade for the cached share of the input: the rows written
+  // before carry none, which prices their input whole (src/usage/costs.ts).
+  it("adds the cached input column to a database written before it was kept, and sums what a caller spent on a model", () => {
+    const dir = mkdtempSync(join(tmpdir(), "capitoline-usage-"));
+    const path = join(dir, "usage.sqlite");
+    const now = Date.now();
+    try {
+      const legacy = new DatabaseSync(path);
+      legacy.exec(`CREATE TABLE calls (
+        id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
+        outcome TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', caller TEXT)`);
+      legacy.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, caller)
+        VALUES (?, 'claude', 'claude-opus', 10, 2, 5, 'ok', 'http', 'app-one')`).run(now - 1000);
+      legacy.close();
+
+      const s = new UsageStore(path);
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: 30, cachedInputTokens: 20, outputTokens: 1, durationMs: 5, outcome: "timeout", source: "http", caller: "app-one", ts: now });
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: 99, outputTokens: 9, durationMs: 5, outcome: "ok", source: "health", ts: now });
+      expect(s.spend(H5, now + 1)).toEqual([
+        { caller: "app-one", provider: "claude", model: "claude-opus", kind: "text", calls: 2, ok: 1, inputTokens: 40, cachedInputTokens: 20, outputTokens: 3 },
+      ]);
+      s.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // The deployed database was written before attribution existed: its `calls`
   // table has no `caller` column and CREATE TABLE IF NOT EXISTS leaves it
   // alone, so only the ALTER TABLE keeps that history readable.
