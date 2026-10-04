@@ -40,6 +40,7 @@ procedure below, which a person runs.
 | Claude Code (`claude`) | 2.1.286 | 2026-10-01 | updated from 2.1.285 with scripts/update-cli.sh; smoke test passed |
 | Codex CLI (`codex`) | 0.159.3 | 2026-10-01 | updated from 0.159.2 with scripts/update-cli.sh; smoke test with an image passed, no new feature, the tool probe took no step; `codex debug models` unchanged |
 | Claude Code (`claude`) | 2.1.288 | 2026-10-03 | updated from 2.1.286 with scripts/update-cli.sh; smoke test passed |
+| Claude Code (`claude`) | 2.1.289 | 2026-10-04 | updated from 2.1.288 with scripts/update-cli.sh; smoke test passed |
 | Codex CLI (`codex`) | 0.160.0 | 2026-10-03 | updated from 0.159.3 with scripts/update-cli.sh; smoke test with an image passed, no new feature, the tool probe took no step; `codex debug models` unchanged |
 | Antigravity CLI (`agy`) | 1.2.16 | 2026-10-03 | updated from 1.2.14 with `scripts/update-cli.sh` while the image quota was used up: smoke test passed, image not verified; a command request is still refused. The script then died reading the newest of 472 logs (`ls \| head` under pipefail, fixed the same day), so the self-update switch was read by hand (still off) and no previous binary was kept; image verified 2026-10-03 with `scripts/update-cli.sh antigravity image`, once the quota was back |
 

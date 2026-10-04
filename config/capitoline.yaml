@@ -98,7 +98,7 @@ providers:
     health_model: claude-haiku
     # The daily "a new version exists" notice (docs/update-clis.md); installing
     # is scripts/update-cli.sh, run by a person.
-    version: { args: [--version], verified: 2.1.288, latest: { npm: "@anthropic-ai/claude-code" } }
+    version: { args: [--version], verified: 2.1.289, latest: { npm: "@anthropic-ai/claude-code" } }
     models:
       claude-opus:   { cli_model: opus }
       claude-sonnet: { cli_model: sonnet }
