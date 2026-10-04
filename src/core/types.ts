@@ -31,7 +31,10 @@ export interface RateLimitWindow { utilization: number; resetsAt: number }
 // cachedInput: the part of `input` the provider read from its cache, when the
 // CLI says. It is inside `input`, never beside it, and exists because a cached
 // token is priced far below a fresh one (src/usage/costs.ts).
-export interface Usage { input: number; output: number; cachedInput?: number }
+// costUsd: what the CLI itself says the run cost at its vendor's API prices,
+// when it says (Claude Code does). Better than any price list kept here: it
+// knows the model that answered and every cache rate.
+export interface Usage { input: number; output: number; cachedInput?: number; costUsd?: number }
 export type ImageMime = "image/jpeg" | "image/png";
 
 export type ProviderEvent =

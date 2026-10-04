@@ -8,16 +8,21 @@ export interface Prices { verified?: string; subscriptions: Record<string, numbe
 const MTOK = 1_000_000;
 
 /**
- * What the calls of one row would have cost through the vendor's API at list
- * price: a comparison, never a bill, since the gateway runs on subscriptions.
- * Cached input is charged at its own rate when the price names one and at the
- * input rate when it does not; a cache write is charged as plain input, which
- * undercounts it slightly. Rows written before cached tokens were kept carry
- * none, so their input is priced whole: the figure errs upwards, never down.
+ * What the calls of one row would have cost through the vendor's API: a
+ * comparison, never a bill, since the gateway runs on subscriptions.
+ *
+ * A call whose CLI reported its own cost is taken at that figure, which knows
+ * the model that answered and every cache rate. The others are priced from the
+ * list: cached input at its own rate when the price names one and at the input
+ * rate when it does not, a cache write as plain input, which undercounts it
+ * slightly. Rows written before cached tokens were kept carry none, so their
+ * input is priced whole: the figure errs upwards, never down. Null when calls
+ * remain that nothing can price.
  */
 export function costOf(row: SpendRow, price: Price | undefined): number | null {
+  if (row.reportedCalls === row.calls) return row.reportedCost;
   if (!price) return null;
-  const cached = Math.min(row.cachedInputTokens, row.inputTokens);
-  const tokens = ((row.inputTokens - cached) * price.input + cached * (price.cached_input ?? price.input) + row.outputTokens * price.output) / MTOK;
-  return tokens + row.ok * (price.image ?? 0);
+  const u = row.unreported, cached = Math.min(u.cachedInputTokens, u.inputTokens);
+  const tokens = ((u.inputTokens - cached) * price.input + cached * (price.cached_input ?? price.input) + u.outputTokens * price.output) / MTOK;
+  return row.reportedCost + tokens + u.ok * (price.image ?? 0);
 }

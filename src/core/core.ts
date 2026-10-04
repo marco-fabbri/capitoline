@@ -741,7 +741,7 @@ export class Core {
       // No terminal event and no provider failure: the caller gave up, either
       // through its signal or by stopping the iteration (client disconnected).
       const aborted = !sawTerminal && phase !== "threw" && (phase === "running" || ctx.signal?.aborted === true);
-      this.usage.record({ provider: id, model: modelName, kind, inputTokens: usage.input, outputTokens: usage.output, cachedInputTokens: usage.cachedInput ?? 0,
+      this.usage.record({ provider: id, model: modelName, kind, inputTokens: usage.input, outputTokens: usage.output, cachedInputTokens: usage.cachedInput ?? 0, costUsd: usage.costUsd ?? null,
         durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, caller: ctx.caller ?? null,
         deliberation: ctx.deliberation ?? null, council: ctx.council ?? null, cliModelId: cliModelId ?? null, ts: this.now() });
     }

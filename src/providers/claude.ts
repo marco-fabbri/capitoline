@@ -121,7 +121,7 @@ export const claudeAdapter: Adapter = {
         }
         const u = (o.usage ?? {}) as Record<string, number>;
         const input = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-        yield { type: "done", usage: { input, output: u.output_tokens ?? 0, cachedInput: u.cache_read_input_tokens ?? 0 }, ...(cliModelId !== undefined ? { cliModelId } : {}) };
+        yield { type: "done", usage: { input, output: u.output_tokens ?? 0, cachedInput: u.cache_read_input_tokens ?? 0, ...(typeof o.total_cost_usd === "number" ? { costUsd: o.total_cost_usd } : {}) }, ...(cliModelId !== undefined ? { cliModelId } : {}) };
         return;
       }
     }

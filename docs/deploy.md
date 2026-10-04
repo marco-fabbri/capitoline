@@ -939,6 +939,13 @@ prices:
 
 How to read the figure:
 
+- Where a CLI reports the cost of a call itself, that figure is used and the
+  price list is not: Claude Code does, at its vendor's API prices, with the
+  model that answered and every cache rate already counted. It applies to
+  calls recorded since the gateway started keeping it.
+- The range asked for is a ceiling. The page says from when to when the calls
+  it counted run, per model and per key too, and sets the subscription's cost
+  against the days actually covered.
 - A model without a price has no cost and stays out of every total; the page
   says how many calls that leaves out. The shipped list covers the models the
   vendors publish a price for; add or correct one under `prices.models` in the

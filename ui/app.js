@@ -197,7 +197,8 @@ const VIEWS = {
     const sum = (keyOf) => {
       const out = new Map();
       for (const r of rows) {
-        const k = keyOf(r), a = out.get(k) ?? { calls: 0, i: 0, c: 0, o: 0, cost: 0, priced: 0, unpriced: 0 };
+        const k = keyOf(r), a = out.get(k) ?? { calls: 0, i: 0, c: 0, o: 0, cost: 0, priced: 0, unpriced: 0, first: Infinity, last: 0 };
+        a.first = Math.min(a.first, r.firstAt); a.last = Math.max(a.last, r.lastAt);
         a.calls += r.calls; a.i += r.inputTokens; a.c += r.cachedInputTokens; a.o += r.outputTokens;
         if (r.cost === null) a.unpriced += r.calls; else { a.cost += r.cost; a.priced += r.calls; }
         out.set(k, a);
@@ -207,18 +208,22 @@ const VIEWS = {
     const cost = (a) => a.priced === 0 ? "—" : a.unpriced === 0 ? usd(a.cost) : [usd(a.cost), " ", chip(`${num(a.unpriced)} calls without a price`, "warn")];
     const range = el("select", { "aria-label": "Range", on: { change: (e) => { costDays = Number(e.target.value); show(); } } },
       [7, 30, 90].map((d) => el("option", { value: d, selected: d === days }, `last ${d} days`)));
+    // The range asked for is a ceiling: a gateway younger than it has less.
+    const first = Math.min(...rows.map((r) => r.firstAt)), last = Math.max(...rows.map((r) => r.lastAt));
+    const covered = Math.max(1, Math.ceil((Date.now() - first) / 86_400_000));
     const bySubscription = sum((r) => r.provider).map(([k, a]) => {
-      const monthly = subscriptions[k], share = monthly === undefined ? null : monthly * days / 30;
-      return [k, num(a.calls), num(a.i), num(a.o), cost(a), share === null ? "—" : usd(share),
+      const monthly = subscriptions[k], share = monthly === undefined ? null : monthly * Math.min(days, covered) / 30;
+      return [k, when(a.first), num(a.calls), num(a.i), num(a.o), cost(a), share === null ? "—" : usd(share),
         share === null || a.priced === 0 ? "—" : chip(a.cost >= share ? `${(a.cost / (share || 1)).toFixed(1)}× the subscription` : `${Math.round(100 * a.cost / share)}% of the subscription`, a.cost >= share ? "ok" : "")];
     });
     const total = rows.reduce((s, r) => s + (r.cost ?? 0), 0);
     return [
       el("div", { class: "row" }, el("label", {}, "Show the ", range), el("span", {}, `At list price: ${usd(total)}`)),
-      el("h2", {}, "By subscription"), table(["Provider", "#Calls", "#Input tokens", "#Output tokens", "#At list price", "#Subscription, same days", ""], bySubscription, "No calls in this range."),
-      el("h2", {}, "By model"), table(["Model", "#Calls", "#Input tokens", "#Of which cached", "#Output tokens", "#At list price"], sum((r) => r.model).map(([k, a]) => [k, num(a.calls), num(a.i), num(a.c), num(a.o), cost(a)]), "No calls in this range."),
-      el("h2", {}, "By key"), table(["Caller", "#Calls", "#Input tokens", "#Output tokens", "#At list price"], sum((r) => r.caller ?? "(not identified)").map(([k, a]) => [k, num(a.calls), num(a.i), num(a.o), cost(a)]), "No calls in this range."),
-      el("p", {}, `Nobody is charged these amounts: they are what the same calls would have cost through each vendor's API, at the list prices in the configuration${pricesVerified ? ` (read on ${pricesVerified})` : ""}. `
+      el("p", {}, rows.length === 0 ? "" : `Calls from ${when(first)} to ${when(last)}${covered < days ? `: ${covered} of the ${days} days asked for, since nothing was recorded before` : ""}.`),
+      el("h2", {}, "By subscription"), table(["Provider", "First call", "#Calls", "#Input tokens", "#Output tokens", "#At list price", "#Subscription, same days", ""], bySubscription, "No calls in this range."),
+      el("h2", {}, "By model"), table(["Model", "First call", "Last call", "#Calls", "#Input tokens", "#Of which cached", "#Output tokens", "#At list price"], sum((r) => r.model).map(([k, a]) => [k, when(a.first), when(a.last), num(a.calls), num(a.i), num(a.c), num(a.o), cost(a)]), "No calls in this range."),
+      el("h2", {}, "By key"), table(["Caller", "First call", "Last call", "#Calls", "#Input tokens", "#Output tokens", "#At list price"], sum((r) => r.caller ?? "(not identified)").map(([k, a]) => [k, when(a.first), when(a.last), num(a.calls), num(a.i), num(a.o), cost(a)]), "No calls in this range."),
+      el("p", {}, `Nobody is charged these amounts: they are what the same calls would have cost through each vendor's API, at the list prices in the configuration${pricesVerified ? ` (read on ${pricesVerified})` : ""}; where a CLI reports the cost of a call itself, that figure is used instead. `
         + "The input includes what each CLI adds around the question, so it is more than the same question would send through an API. "
         + "Cached input is priced at its lower rate only for calls recorded since the gateway started keeping it; older calls are priced whole, so the figure errs upwards. "
         + "A subscription is also used outside the gateway, so its figure here is the least it was worth, not all of it."),

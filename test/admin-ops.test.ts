@@ -63,16 +63,22 @@ describe("the operator's routes under /v1/admin", () => {
     usage.record({ ...row, model: "a-1", inputTokens: 1_000_000, cachedInputTokens: 400_000, outputTokens: 100_000 });
     usage.record({ ...row, model: "a-1", inputTokens: 1_000_000, outputTokens: 0, outcome: "timeout" });
     usage.record({ ...row, model: "a-2", inputTokens: 500, outputTokens: 500 });
+    // What the CLI reported is taken as it is, price or no price; beside calls it did not report, it is added to the list's figure.
+    usage.record({ ...row, model: "a-9", inputTokens: 500, outputTokens: 500, costUsd: 0.5 });
+    usage.record({ ...row, model: "a-1", inputTokens: 123, outputTokens: 45, costUsd: 0.25, caller: "app-two" });
+    usage.record({ ...row, model: "a-1", inputTokens: 1_000_000, outputTokens: 0, caller: "app-two" });
     usage.record({ ...row, model: "a-image", kind: "image", inputTokens: 0, outputTokens: 0, caller: "app-two" });
     usage.record({ ...row, model: "a-1", inputTokens: 9, outputTokens: 9, source: "health" });
     const r = await get("/costs?days=30");
     expect(r.body).toMatchObject({ days: 30, pricesVerified: "2026-10-04", subscriptions: { a: 30 } });
-    const cost = Object.fromEntries(r.body.rows.map((x: { model: string; cost: number | null }) => [x.model, x.cost]));
+    const cost = Object.fromEntries(r.body.rows.map((x: { model: string; caller: string; cost: number | null }) => [x.caller === "app-two" && x.model === "a-1" ? "a-1 (app-two)" : x.model, x.cost]));
+    expect(cost["a-9"]).toBeCloseTo(0.5, 6);
+    expect(cost["a-1 (app-two)"]).toBeCloseTo(0.25 + 10, 6);
     // 600k fresh at $10, 400k cached at $1, 100k out at $50, and a failed call's million of input at $10.
     expect(cost["a-1"]).toBeCloseTo(6 + 0.4 + 5 + 10, 6);
     expect(cost["a-2"]).toBeNull();
     expect(cost["a-image"]).toBeCloseTo(0.04, 6);
-    expect(r.body.rows.find((x: { model: string }) => x.model === "a-1")).toMatchObject({ caller: "app-one", provider: "a", calls: 2, ok: 1, inputTokens: 2_000_000, cachedInputTokens: 400_000, outputTokens: 100_000 });
+    expect(r.body.rows.find((x: { model: string }) => x.model === "a-1")).toMatchObject({ caller: "app-one", provider: "a", firstAt: t, lastAt: t, calls: 2, ok: 1, inputTokens: 2_000_000, cachedInputTokens: 400_000, outputTokens: 100_000 });
     expect((await get("/costs?days=91")).status).toBe(400);
   });
 

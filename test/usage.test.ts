@@ -253,9 +253,12 @@ describe("UsageStore", () => {
 
       const s = new UsageStore(path);
       s.record({ provider: "claude", model: "claude-opus", inputTokens: 30, cachedInputTokens: 20, outputTokens: 1, durationMs: 5, outcome: "timeout", source: "http", caller: "app-one", ts: now });
+      s.record({ provider: "claude", model: "claude-opus", inputTokens: 7, outputTokens: 1, costUsd: 0.25, durationMs: 5, outcome: "ok", source: "http", caller: "app-one", ts: now });
       s.record({ provider: "claude", model: "claude-opus", inputTokens: 99, outputTokens: 9, durationMs: 5, outcome: "ok", source: "health", ts: now });
       expect(s.spend(H5, now + 1)).toEqual([
-        { caller: "app-one", provider: "claude", model: "claude-opus", kind: "text", calls: 2, ok: 1, inputTokens: 40, cachedInputTokens: 20, outputTokens: 3 },
+        { caller: "app-one", provider: "claude", model: "claude-opus", kind: "text", calls: 3, ok: 2, inputTokens: 47, cachedInputTokens: 20, outputTokens: 4,
+          // The call whose cost the CLI reported is counted apart from the two a price list has to cost.
+          reportedCalls: 1, reportedCost: 0.25, firstAt: now - 1000, lastAt: now, unreported: { ok: 1, inputTokens: 40, cachedInputTokens: 20, outputTokens: 3 } },
       ]);
       s.close();
     } finally {
