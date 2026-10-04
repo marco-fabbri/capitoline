@@ -26,6 +26,16 @@ function el(tag, props = {}, ...children) {
 }
 const chip = (text, kind = "") => el("span", { class: `chip ${kind}` }, text);
 const num = (n) => Number(n ?? 0).toLocaleString();
+// An amount typed by hand, with a comma or a point for the decimals, whichever
+// the person is used to: the last of the two is the decimal mark and the other
+// one only groups thousands. NaN when it is not a number.
+function decimal(text) {
+  const t = text.trim().replace(/\s/g, ""), mark = Math.max(t.lastIndexOf(","), t.lastIndexOf("."));
+  if (!/^\d[\d.,]*$|^[.,]\d+$/.test(t)) return NaN;
+  return Number(mark < 0 ? t : `${t.slice(0, mark).replace(/[.,]/g, "")}.${t.slice(mark + 1)}`);
+}
+// The same amount as the browser's language writes it, to show in a field.
+const typed = (n) => (n === undefined ? "" : Number(n).toLocaleString(undefined, { useGrouping: false, maximumFractionDigits: 6 }));
 const when = (ms) => (ms ? new Date(ms).toLocaleString() : "—");
 function until(ms) {
   const left = ms - Date.now();
@@ -227,13 +237,15 @@ const VIEWS = {
     // A month of each subscription, in the currency it is paid in, and what one
     // unit of that currency is worth in USD: the operator's own figures.
     const currency = el("input", { class: "short", value: subscriptions.currency, size: 4, maxlength: 3, "aria-label": "Currency", spellcheck: "false", autocapitalize: "characters" });
-    const rate = el("input", { class: "short", type: "number", min: "0", step: "any", value: subscriptions.usdPerUnit, "aria-label": "USD for one unit of the currency" });
-    const amounts = providers.map((id) => [id, el("input", { class: "short", type: "number", min: "0", step: "any", value: subscriptions.monthly[id] ?? "", placeholder: "none", "aria-label": `${id}, a month` })]);
+    const rate = el("input", { class: "short", inputmode: "decimal", value: typed(subscriptions.usdPerUnit), "aria-label": "USD for one unit of the currency" });
+    const amounts = providers.map((id) => [id, el("input", { class: "short", inputmode: "decimal", value: typed(subscriptions.monthly[id]), placeholder: "none", "aria-label": `${id}, a month` })]);
     const subscriptionForm = el("form", { class: "row", on: { submit: (e) => {
       e.preventDefault();
       run(async () => {
-        const monthly = Object.fromEntries(amounts.filter(([, input]) => input.value !== "").map(([id, input]) => [id, Number(input.value)]));
-        await api("/v1/admin/subscriptions", { method: "PUT", body: { currency: currency.value.trim().toUpperCase(), usdPerUnit: Number(rate.value), monthly } });
+        const monthly = Object.fromEntries(amounts.filter(([, input]) => input.value.trim() !== "").map(([id, input]) => [id, decimal(input.value)]));
+        const wrong = [...Object.entries(monthly), ["the rate", decimal(rate.value)]].find(([, n]) => Number.isNaN(n));
+        if (wrong) throw new Error(`${wrong[0]}: not a number. Write it like 19,99 or 19.99.`);
+        await api("/v1/admin/subscriptions", { method: "PUT", body: { currency: currency.value.trim().toUpperCase(), usdPerUnit: decimal(rate.value), monthly } });
         return "Subscriptions saved.";
       });
     } } },
