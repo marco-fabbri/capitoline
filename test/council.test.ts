@@ -497,6 +497,8 @@ describe("Council", () => {
     expect(first.deliberationId).toMatch(/^[0-9a-f-]{36}$/);
     // §12.7: the cost of one question, summed across the six models that served it.
     expect(p.store.deliberationTotals(first.deliberationId)).toEqual({ calls: 9, inputTokens: 90, outputTokens: 18 });
+    // And under the council's own name, which the real models' rows would not say.
+    expect(p.store.deliberations(5).find((d) => d.id === first.deliberationId)).toMatchObject({ council: "capitoline", calls: 9, ok: 9 });
     const second = detailOf(await run(p.council.deliberate(QUESTION, { source: "http" })));
     expect(second.deliberationId).not.toBe(first.deliberationId);
     expect(p.store.deliberationTotals(first.deliberationId).calls).toBe(9);

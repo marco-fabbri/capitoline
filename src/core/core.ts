@@ -117,7 +117,7 @@ interface Entry { provider: Provider; model: ModelSpec }
 // client made directly. It is what ties the nine rows of one question
 // together in the usage table (spec 12.7); the rows stay under the real
 // models that served them, because quotas belong to those models.
-export interface Context { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null; deliberation?: string }
+export interface Context { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null; deliberation?: string; /** The council a deliberation's call belongs to, by name. */ council?: string }
 
 /**
  * A virtual model's work: a question in, the council's own events out. The
@@ -743,7 +743,7 @@ export class Core {
       const aborted = !sawTerminal && phase !== "threw" && (phase === "running" || ctx.signal?.aborted === true);
       this.usage.record({ provider: id, model: modelName, kind, inputTokens: usage.input, outputTokens: usage.output,
         durationMs: this.now() - started, outcome: aborted ? "aborted" : outcome, source: ctx.source, caller: ctx.caller ?? null,
-        deliberation: ctx.deliberation ?? null, cliModelId: cliModelId ?? null, ts: this.now() });
+        deliberation: ctx.deliberation ?? null, council: ctx.council ?? null, cliModelId: cliModelId ?? null, ts: this.now() });
     }
   }
 

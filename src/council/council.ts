@@ -66,7 +66,7 @@ export interface CouncilContext {
 export interface CouncilCore {
   /** `provider` is what the judge's crash rule compares: a step down onto the same CLI would crash the same way. */
   listModels(): { name: string; available: boolean; reason?: string; provider?: string }[];
-  execute(req: InternalRequest, ctx: { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null; deliberation?: string }): AsyncIterable<ProviderEvent>;
+  execute(req: InternalRequest, ctx: { signal?: AbortSignal; source: "http" | "mcp"; caller?: string | null; deliberation?: string; council?: string }): AsyncIterable<ProviderEvent>;
 }
 
 /**
@@ -579,7 +579,7 @@ export class Council {
     let terminal = false;
     try {
       const req: InternalRequest = { model, messages: [{ role: "user", text: prompt }], stream: streamed };
-      for await (const ev of this.core.execute(req, { signal: controller.signal, source: ctx.source, caller: ctx.caller, deliberation: run.id })) {
+      for await (const ev of this.core.execute(req, { signal: controller.signal, source: ctx.source, caller: ctx.caller, deliberation: run.id, council: this.name })) {
         if (ev.type === "text") { text += ev.delta; if (streamed) yield ev.delta; }
         else if (ev.type === "done") { terminal = true; usage.input += ev.usage?.input ?? 0; usage.output += ev.usage?.output ?? 0; }
         // `retryAfterS` is the provider's own figure, kept so that a council

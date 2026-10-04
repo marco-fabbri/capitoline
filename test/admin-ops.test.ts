@@ -111,10 +111,10 @@ describe("the operator's routes under /v1/admin", () => {
   });
 
   it("lists deliberations and one's calls, and returns the configuration it was given", async () => {
-    usage.record({ provider: "a", model: "a-1", inputTokens: 5, outputTokens: 1, durationMs: 10, outcome: "ok", source: "http", ts: t, caller: "app-one", deliberation: "d-1" });
-    usage.record({ provider: "a", model: "a-2", inputTokens: 7, outputTokens: 2, durationMs: 12, outcome: "timeout", source: "http", ts: t + 5, caller: "app-one", deliberation: "d-1" });
+    usage.record({ provider: "a", model: "a-1", inputTokens: 5, outputTokens: 1, durationMs: 10, outcome: "ok", source: "http", ts: t, caller: "app-one", deliberation: "d-1", council: "capitoline-fast" });
+    usage.record({ provider: "a", model: "a-2", inputTokens: 7, outputTokens: 2, durationMs: 12, outcome: "timeout", source: "http", ts: t + 5, caller: "app-one", deliberation: "d-1", council: "capitoline-fast" });
     const list = await get("/deliberations");
-    expect(list.body.deliberations).toEqual([{ id: "d-1", startedAt: t, endedAt: t + 5, calls: 2, ok: 1, inputTokens: 12, outputTokens: 3, caller: "app-one" }]);
+    expect(list.body.deliberations).toEqual([{ id: "d-1", council: "capitoline-fast", startedAt: t, endedAt: t + 5, calls: 2, ok: 1, inputTokens: 12, outputTokens: 3, caller: "app-one" }]);
     const one = await get("/deliberations/d-1");
     expect(one.body.calls.map((c: { model: string; outcome: string }) => [c.model, c.outcome])).toEqual([["a-1", "ok"], ["a-2", "timeout"]]);
     expect((await get("/deliberations/none")).status).toBe(404);

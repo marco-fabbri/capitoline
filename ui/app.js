@@ -241,10 +241,16 @@ const VIEWS = {
   }],
 
   deliberations: ["Deliberations", async () => {
+    // Rows written before the council's name was kept have none. Their call
+    // count still tells the shape: answers, rankings and a synthesis for the
+    // full one, answers and a synthesis for the short one. It is the shape and
+    // not the name (a council asked with low effort runs the short shape under
+    // its own name), so it is shown as a guess.
+    const shapeGuess = (d) => chip(d.calls >= 8 ? "full shape, by its calls" : d.calls >= 3 ? "short shape, by its calls" : "unknown");
     const { deliberations } = await api("/v1/admin/deliberations?limit=30");
     const detail = el("div");
     const rows = deliberations.map((d) => [
-      when(d.startedAt), d.caller ?? "", `${d.ok} / ${d.calls}`, `${Math.round((d.endedAt - d.startedAt) / 1000)} s`, num(d.inputTokens), num(d.outputTokens),
+      when(d.startedAt), d.council ? el("span", { class: "mono" }, d.council) : shapeGuess(d), d.caller ?? "", `${d.ok} / ${d.calls}`, `${Math.round((d.endedAt - d.startedAt) / 1000)} s`, num(d.inputTokens), num(d.outputTokens),
       el("button", { type: "button", on: { click: async () => {
         try {
           const one = await api(`/v1/admin/deliberations/${encodeURIComponent(d.id)}`);
@@ -254,7 +260,7 @@ const VIEWS = {
         } catch (e) { notice(e.message, true); }
       } } }, "Calls"),
     ]);
-    return [table(["Started", "Caller", "Calls ok", "Span", "#Input tokens", "#Output tokens", ""], rows, "No council has deliberated yet."), detail];
+    return [table(["Started", "Council", "Caller", "Calls ok", "Span", "#Input tokens", "#Output tokens", ""], rows, "No council has deliberated yet."), detail];
   }],
 
   config: ["Configuration", async () => {

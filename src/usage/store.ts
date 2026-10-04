@@ -20,6 +20,8 @@ export interface CallRecord {
    * a guess over a time window.
    */
   deliberation?: string | null;
+  /** The council that deliberated (`capitoline`, `capitoline-fast`), beside its id: which one a question was put to. */
+  council?: string | null;
   /**
    * The dated id of the model that actually answered — `claude-opus-5-5-…`
    * for a row whose `model` is `claude-opus`. Null when the CLI said nothing,
@@ -33,7 +35,7 @@ export interface Totals { calls: number; inputTokens: number; outputTokens: numb
 /** What one caller spent in a window. `caller` is null for the calls nothing identified. */
 export interface CallerUsage { caller: string | null; calls: number; inputTokens: number; outputTokens: number }
 export interface UsageDayRow { day: string; caller: string | null; provider: string; model: string; outcome: string; calls: number; inputTokens: number; outputTokens: number }
-export interface DeliberationSummary { id: string; startedAt: number; endedAt: number; calls: number; ok: number; inputTokens: number; outputTokens: number; caller: string | null }
+export interface DeliberationSummary { id: string; council: string | null; startedAt: number; endedAt: number; calls: number; ok: number; inputTokens: number; outputTokens: number; caller: string | null }
 export interface DeliberationCall { ts: number; provider: string; model: string; cliModelId: string | null; outcome: string; durationMs: number; inputTokens: number; outputTokens: number }
 /**
  * Which real model served a gateway name, and when. More than one row for the
@@ -161,6 +163,9 @@ export class UsageStore {
     // council existed, and every direct request after it, belongs to no
     // deliberation, and NULL is that state's name.
     if (!columns.has("deliberation")) this.db.exec(`ALTER TABLE calls ADD COLUMN deliberation TEXT`);
+    // And the council's name, added 2026-10-04: the id says which calls are one
+    // question, not which council it was put to. NULL for the rows before.
+    if (!columns.has("council")) this.db.exec(`ALTER TABLE calls ADD COLUMN council TEXT`);
     // And the dated model id, added 2026-09-23 when `opus` moved from Opus 5
     // to Opus 5.5 with nothing in the history saying which one any measurement
     // had used. Nullable with no default, for the same reason `caller` is:
@@ -174,7 +179,7 @@ export class UsageStore {
     if (!pauseColumns.has("announced_at")) this.db.exec(`ALTER TABLE pauses ADD COLUMN announced_at INTEGER`);
 
     this.stmts = {
-      record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind, caller, deliberation, cli_model_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      record: this.db.prepare(`INSERT INTO calls (ts, provider, model, input_tokens, output_tokens, duration_ms, outcome, source, kind, caller, deliberation, cli_model_id, council) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
       imageWindow: this.db.prepare(`SELECT COUNT(*) AS used, MIN(ts) AS started FROM calls WHERE provider = ? AND kind = 'image' AND outcome = 'ok' AND ts > ?`),
       totals: this.db.prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o FROM calls WHERE provider = ? AND ts > ?`),
       setWindow: this.db.prepare(`INSERT INTO rate_windows (provider, window, utilization, resets_at, updated_at) VALUES (?, ?, ?, ?, ?)
@@ -191,7 +196,7 @@ export class UsageStore {
         COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o
         FROM calls WHERE ts > ? AND source <> 'health' GROUP BY day, caller, provider, model, outcome ORDER BY day DESC, calls DESC`),
       deliberations: this.db.prepare(`SELECT deliberation AS id, MIN(ts) AS started, MAX(ts) AS ended, COUNT(*) AS calls,
-        SUM(outcome = 'ok') AS ok, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o, MAX(caller) AS caller
+        SUM(outcome = 'ok') AS ok, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o, MAX(caller) AS caller, MAX(council) AS council
         FROM calls WHERE deliberation IS NOT NULL GROUP BY deliberation ORDER BY started DESC LIMIT ?`),
       deliberationCalls: this.db.prepare(`SELECT ts, provider, model, cli_model_id, outcome, duration_ms, input_tokens, output_tokens
         FROM calls WHERE deliberation = ? ORDER BY ts, id`),
@@ -243,7 +248,7 @@ export class UsageStore {
     };
   }
   record(c: CallRecord): void {
-    this.stmts.record.run(c.ts ?? Date.now(), c.provider, c.model, c.inputTokens, c.outputTokens, c.durationMs, c.outcome, c.source, c.kind ?? "text", c.caller ?? null, c.deliberation ?? null, c.cliModelId ?? null);
+    this.stmts.record.run(c.ts ?? Date.now(), c.provider, c.model, c.inputTokens, c.outputTokens, c.durationMs, c.outcome, c.source, c.kind ?? "text", c.caller ?? null, c.deliberation ?? null, c.cliModelId ?? null, c.council ?? null);
   }
 
   // What one deliberation spent, across every model that served it: the other
@@ -269,8 +274,8 @@ export class UsageStore {
 
   /** The latest deliberations by id, newest first, each summed over its calls. */
   deliberations(limit: number): DeliberationSummary[] {
-    const rows = this.stmts.deliberations.all(limit) as { id: string; started: number; ended: number; calls: number; ok: number; i: number; o: number; caller: string | null }[];
-    return rows.map((r) => ({ id: r.id, startedAt: Number(r.started), endedAt: Number(r.ended), calls: Number(r.calls), ok: Number(r.ok), inputTokens: Number(r.i), outputTokens: Number(r.o), caller: r.caller }));
+    const rows = this.stmts.deliberations.all(limit) as { id: string; started: number; ended: number; calls: number; ok: number; i: number; o: number; caller: string | null; council: string | null }[];
+    return rows.map((r) => ({ id: r.id, council: r.council, startedAt: Number(r.started), endedAt: Number(r.ended), calls: Number(r.calls), ok: Number(r.ok), inputTokens: Number(r.i), outputTokens: Number(r.o), caller: r.caller }));
   }
 
   /** One deliberation's calls, in order. Empty for an id nothing was recorded under. */
