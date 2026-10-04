@@ -9,6 +9,7 @@ let key = null;
 try { key = sessionStorage.getItem(STORE); } catch { /* a browser without storage still signs in, for this page load */ }
 let tab = "overview";
 let usageDays = 7;
+let hideRevoked = true;   // a gateway gathers revoked keys (every CLI update makes and revokes one); they are history, not the working list
 
 // ---- small helpers -------------------------------------------------------
 
@@ -190,12 +191,15 @@ const VIEWS = {
     // The list is redrawn by itself, so a key just created stays on screen
     // above it: that is the only time the key is shown.
     const drawList = async () => {
-      const { keys } = await api("/v1/admin/keys");
-      list.replaceChildren(table(["Name", "Created", "By", "Last used", "State", ""], keys.map((k) => [
+      const { keys: all } = await api("/v1/admin/keys");
+      const revoked = all.filter((k) => k.revoked_at).length;
+      const keys = hideRevoked ? all.filter((k) => !k.revoked_at) : all;
+      const toggle = el("input", { type: "checkbox", id: "hide-revoked", checked: hideRevoked, on: { change: (e) => { hideRevoked = e.target.checked; drawList(); } } });
+      list.replaceChildren(el("div", { class: "row" }, toggle, el("label", { for: "hide-revoked" }, `Hide revoked (${revoked})`)), table(["Name", "Created", "By", "Last used", "State", ""], keys.map((k) => [
         el("span", { class: "mono" }, k.name), when(k.created_at), k.created_by ?? "", k.last_used_at ? when(k.last_used_at) : "never",
         k.revoked_at ? chip(`revoked ${when(k.revoked_at)}`) : chip("live", "ok"),
         k.revoked_at ? "" : confirmButton("Revoke", async () => { await api(`/v1/admin/keys/${encodeURIComponent(k.name)}`, { method: "DELETE" }); return `Key "${k.name}" revoked, with every OAuth token it stood behind.`; }),
-      ]), "No keys yet."));
+      ]), all.length ? "No live key." : "No keys yet."));
     };
     const create = el("button", { type: "button", class: "primary", on: { click: async () => {
       try {
