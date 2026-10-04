@@ -55,6 +55,8 @@ prices:
     claude-sonnet:     { input: 2,    cached_input: 0.20,  output: 10 }
     claude-sonnet-1m:  { input: 2,    cached_input: 0.20,  output: 10 }
     claude-haiku:      { input: 1,    cached_input: 0.10,  output: 5 }
+    # Prompts up to 272k tokens, standard tier; the long-context and the other
+    # tiers (batch, flex, fast) have their own prices and are not modelled.
     codex-gpt-6-astra:   { input: 10,   cached_input: 1,     output: 50 }
     codex-gpt-6.1-sol:   { input: 2,    cached_input: 0.10,  output: 10 }
     codex-gpt-6-sol:     { input: 2,    cached_input: 0.20,  output: 10 }
@@ -66,6 +68,8 @@ prices:
     antigravity-gemini-pro:      { input: 2, cached_input: 0.20, output: 12 }
     antigravity-gemini-pro-high: { input: 2, cached_input: 0.20, output: 12 }
     antigravity-gemini-pro-low:  { input: 2, cached_input: 0.20, output: 12 }
+    # The Flash prices hold through 2026-12-31 and double on 2027-01-01
+    # (input 1.50, cached 0.15, output 7.50): reread them then.
     antigravity-gemini-flash:        { input: 0.75, cached_input: 0.075, output: 3.75 }
     antigravity-gemini-flash-high:   { input: 0.75, cached_input: 0.075, output: 3.75 }
     antigravity-gemini-flash-medium: { input: 0.75, cached_input: 0.075, output: 3.75 }
