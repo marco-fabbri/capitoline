@@ -44,6 +44,7 @@ procedure below, which a person runs.
 | Codex CLI (`codex`) | 0.160.0 | 2026-10-03 | updated from 0.159.3 with scripts/update-cli.sh; smoke test with an image passed, no new feature, the tool probe took no step; `codex debug models` unchanged |
 | Antigravity CLI (`agy`) | 1.2.16 | 2026-10-03 | updated from 1.2.14 with `scripts/update-cli.sh` while the image quota was used up: smoke test passed, image not verified; a command request is still refused. The script then died reading the newest of 472 logs (`ls \| head` under pipefail, fixed the same day), so the self-update switch was read by hand (still off) and no previous binary was kept; image verified 2026-10-03 with `scripts/update-cli.sh antigravity image`, once the quota was back |
 | Antigravity CLI (`agy`) | 1.2.17 | 2026-10-05 | updated from 1.2.16 with `scripts/update-cli.sh`; smoke test passed, image not verified (the image quota ran out during the check, and the update was kept); a command request is still refused, `agy models` unchanged |
+| Codex CLI (`codex`) | 0.160.1 | 2026-10-05 | updated from 0.160.0 with scripts/update-cli.sh; smoke test with three images passed, no new feature, the tool probe took no step; `codex debug models` unchanged |
 
 Add a row for every update, newest last.
 
