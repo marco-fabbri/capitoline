@@ -268,6 +268,10 @@ export class CliProvider implements Provider {
     // a run.
     const waiting = new Set(this.cfg.image.wait_tools);
     let begun = false;
+    // The step the run was stopped at once an allowed step had finished: the
+    // agent is stopped all the same, but what it had already made is looked
+    // for before the request is refused.
+    let stoppedAt: string | undefined;
     // Tools that reached a terminal phase: a later call is a second invocation,
     // which the prompt forbids and which would spend quota on an image the
     // helper never collects (it returns one file).
@@ -292,6 +296,11 @@ export class CliProvider implements Provider {
           if (ev.phase === "call" && !allowed.has(ev.name)) {
             this.log.warn({ model: model.name, tool: ev.name }, "unexpected tool call: run aborted");
             run.ac.abort();
+            // After the allowed step has finished the image may already be
+            // there: with the picture saved, the agent went on to look at it
+            // (view_file, measured 2026-10-05, 41 s into the run). Stopping
+            // it is the same; throwing the picture away with it is not needed.
+            if ([...allowed].some((name) => finished.has(name))) { stoppedAt = ev.name; break; }
             yield { type: "error", kind: "bad_output", detail: `unexpected tool call: ${ev.name}` };
             return;
           }
@@ -326,19 +335,25 @@ export class CliProvider implements Provider {
         }
         // rate_limit and image events are not produced by this path; nothing to forward.
       }
-      if (!terminal) {
+      if (stoppedAt !== undefined) {
+        // Already aborted: the process is gone before anything is collected.
+        await run.handle.result;
+      } else if (!terminal) {
         const ended = await this.endedEarly(run, model, timeoutS);
         if (ended) yield ended;
         return;
+      } else {
+        // The collect helper removes the conversation directory: the CLI must be
+        // done with it, so the process is let go (with its grace) before collecting.
+        run.windDown();
+        await run.handle.result;
       }
-      // The collect helper removes the conversation directory: the CLI must be
-      // done with it, so the process is let go (with its grace) before collecting.
-      run.windDown();
-      await run.handle.result;
+      const refused: ProviderEvent | undefined = stoppedAt === undefined ? undefined : { type: "error", kind: "bad_output", detail: `unexpected tool call: ${stoppedAt}` };
 
       const proseHit = detectQuotaExhausted(prose, this.opts.now());
       if (!conversationId || !CONVERSATION_ID.test(conversationId)) {
         if (proseHit) { yield this.quotaError(model, proseHit); return; }
+        if (refused) { yield refused; return; }
         this.log.warn({ model: model.name, conversationId }, "image run reported no usable conversation id");
         yield { type: "error", kind: "bad_output", detail: "no conversation id in the CLI output" };
         return;
@@ -349,6 +364,8 @@ export class CliProvider implements Provider {
         // conversation, so an image that came out disproves it, and the prose
         // is prompt-driven text that may merely echo "rate limit" or "429".
         if (proseHit) { yield this.quotaError(model, proseHit); return; }
+        // Stopped at a step it was not allowed, and nothing had been made yet.
+        if (refused) { yield refused; return; }
         this.log.warn({ model: model.name, conversationId, prose: prose.slice(-500) }, "image run produced no image");
         yield { type: "error", kind: "bad_output", detail: "no image produced" };
         return;
@@ -363,6 +380,8 @@ export class CliProvider implements Provider {
         return;
       }
       const verdict = inspectImage(collected.stdout, { minBytes: this.cfg.image.min_bytes });
+      // A file cut short by the stop is no picture: the refusal stands.
+      if (!verdict.ok && refused) { yield refused; return; }
       if (!verdict.ok) {
         this.log.warn({ model: model.name, conversationId, bytes: collected.stdout.length, reason: verdict.reason }, "collected file is not a usable image");
         yield { type: "error", kind: "bad_output", detail: `collected file rejected: ${verdict.reason}` };

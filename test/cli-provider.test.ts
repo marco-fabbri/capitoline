@@ -289,10 +289,26 @@ describe("CliProvider.generateImage", () => {
       const manage = (Action: string, index: number) => ({ event: "step_update", step_update: { conversation_id: CID, step_index: index, state: "ACTIVE", step_type: "tool", tool_name: "manage_subagents", tool_info: { name: "manage_subagents", parameters: { Action } } } });
       const run = async (lines: Record<string, unknown>[]) => generate(imageProvider(synthetic(lines), today, runner, {}, "replay-linger"), undefined, 5);
       // Acting on a subagent is not looking at it.
-      expect(await run([init, sub, manage("kill", 3), result])).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: manage_subagents:kill" }]);
+      expect(await withCollect("none", () => run([init, sub, manage("kill", 3), result]))).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: manage_subagents:kill" }]);
       // A waiting step cannot open the run: there is nothing to wait for yet.
       expect(await run([init, toolStep("schedule", "ACTIVE"), result])).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: schedule" }]);
       expect(await run([init, manage("list", 1), result])).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: manage_subagents:list" }]);
+    });
+    // With the picture saved the agent went on to look at it (view_file). It is
+    // stopped there as anywhere else; the picture it had already made is kept.
+    it("stops the agent at a step it is not allowed after the hand-off, and keeps the image if one was made", async () => {
+      const sub = { event: "step_update", step_update: { conversation_id: CID, step_index: 2, state: "DONE", step_type: "subagent", tool_name: "invoke_subagent", subagent_info: { subagents: [{ type_name: "image-generator" }] } } };
+      const lines = synthetic([init, sub, toolStep("view_file", "ACTIVE", 4), result]);
+      const made = await generate(imageProvider(lines, today, runner, {}, "replay-linger"), undefined, 5);
+      expect(made.map((e) => e.type)).toEqual(["image", "done"]);
+      const nothing = await withCollect("none", () => generate(imageProvider(lines, today, runner, {}, "replay-linger"), undefined, 5));
+      expect(nothing).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: view_file" }]);
+      const cut = await withCollect("tiny", () => generate(imageProvider(lines, today, runner, {}, "replay-linger"), undefined, 5));
+      expect(cut).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: view_file" }]);
+      // Before the hand-off has finished there is nothing to keep: refused at once.
+      const early = { ...sub, step_update: { ...sub.step_update, state: "ACTIVE" } };
+      expect(await generate(imageProvider(synthetic([init, early, toolStep("view_file", "ACTIVE", 4), result]), today, runner, {}, "replay-linger"), undefined, 5))
+        .toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: view_file" }]);
     });
     it("reports the quota the subagent ran into, which reaches the run only as the agent's words", async () => {
       const ev = await withCollect("none", () => generate(imageProvider(join(process.cwd(), "test/fixtures/antigravity/image-subagent-429.jsonl"), today)));
