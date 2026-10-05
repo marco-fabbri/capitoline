@@ -139,7 +139,12 @@ On the host, as root, from the clone:
    verified (quota used up)", and it keeps what a later rollback needs under
    `/var/lib/capitoline/update-cli` (the previous version's number, and for
    Antigravity, whose installer cannot install an older version, the previous
-   binary). An image quota can stay used up for days, and none of the checks
+   binary). The same happens when the quota was not known to be used up and
+   runs out during the check itself: the gateway learns of a quota from the
+   refusal, and an image asked for just before one can hang to its timeout
+   instead of being refused, so an image failure followed by a quota refusal
+   in the same series is "not verified" and not a reason to roll back.
+   An image quota can stay used up for days, and none of the checks
    that guard what the CLI may do depends on it. When the quota is back, run
    the image check alone:
 

@@ -175,7 +175,12 @@ if [[ "$target" == image ]]; then
     exit 3
   fi
   echo "update-cli: image check of $cli $(version_of)"
-  if smoke; then
+  rc=0; smoke || rc=$?
+  if [[ "$rc" == 3 ]]; then
+    echo "update-cli: the image quota ran out during the check. Nothing was verified; run this again later." >&2
+    exit 3
+  fi
+  if [[ "$rc" == 0 ]]; then
     rm -f "$PREV_VERSION_FILE" "$PREV_BINARY_FILE"
     echo "update-cli: $cli $(version_of) draws an image. Add \"image verified $(date -u +%F)\" to its row in docs/update-clis.md."
     exit 0
@@ -229,7 +234,16 @@ if [[ "$cli" == codex ]]; then
 fi
 
 echo "update-cli: smoke test of $cli $after"
-smoke || rollback "smoke test"
+rc=0; smoke || rc=$?
+if [[ "$rc" == 3 ]]; then
+  # The quota was not known to be out before the update and ran out during the
+  # check (the gateway learns of it from the refusal): the same case as a
+  # quota known to be out, found later. The update stays, the image is owed.
+  image_skip=1
+  echo "update-cli: the image quota ran out during the check: keeping $cli $after, the image check is still owed." >&2
+elif [[ "$rc" != 0 ]]; then
+  rollback "smoke test"
+fi
 
 if [[ "$cli" == codex ]]; then
   # What the new version lets the model do, read from the stream rather than

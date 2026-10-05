@@ -54,6 +54,13 @@ done
 # three; a quota refusal ends the series without failing it.
 COUNT="${SMOKE_IMAGE_COUNT:-1}"
 [[ "$COUNT" =~ ^[1-9][0-9]?$ ]] || COUNT=1
+# An image that fails just before the quota refuses the next one says nothing
+# about the gateway either: a run against a quota about to end can hang to its
+# timeout instead of being refused (Antigravity, 2026-10-05, where its subagent
+# kept trying). So image failures are counted apart, and when the series meets a
+# quota refusal they are reported as "not verified", exit code 3, which the
+# update script reads as a check to run again later and not as a regression.
+imgfail=0; imgquota=0
 IMG="${SMOKE_IMAGE_MODEL:-}"
 [[ -n "${IMG// /}" ]] || IMG=$(jq -r '[.models[] | select(.kind == "image") | .name][0] // empty' <<<"$HEALTH" 2>/dev/null || true)
 [[ -n "${IMG// /}" ]] || IMG=$(yq -r '.providers[].models | to_entries[] | select(.value.kind == "image") | .key' "$CFG" 2>/dev/null | head -1 || true)
@@ -79,10 +86,16 @@ elif [[ -n "${IMG// /}" ]]; then
     printf '%-22s %s  %-40s bytes=%s\n' "$IMG" "$resp" "$(jq -r '"\(.capitoline.mime) \(.capitoline.width)x\(.capitoline.height)"' "$TMP")" "$bytes"
   elif [[ "$resp" == "429" && "$code" == "rate_limited" ]]; then
     printf '%-22s %s  %s\n' "$IMG" "$resp" "image quota exhausted, not a regression$(jq -r 'if .capitoline.quota.resetAt then " (reopens \(.capitoline.quota.resetAt))" else "" end' "$TMP" 2>/dev/null || true)"
+    imgquota=1
     break
   else
-    printf '%-22s %s  %s\n' "$IMG" "$resp" "$(jq -r '.error.message // empty' "$TMP" 2>/dev/null) [bytes=$bytes min_bytes=$MIN; see docs/deploy.md §7.1]"; fail=1
+    printf '%-22s %s  %s\n' "$IMG" "$resp" "$(jq -r '.error.message // empty' "$TMP" 2>/dev/null) [bytes=$bytes min_bytes=$MIN; see docs/deploy.md §7.1]"; imgfail=1
   fi
  done
 fi
-exit $fail
+[[ "$fail" == 0 ]] || exit 1
+if [[ "$imgfail" == 1 && "$imgquota" == 1 ]]; then
+  printf '%-22s %s\n' "$IMG" "not verified: the image quota ran out during the check, so the failure above proves nothing"
+  exit 3
+fi
+exit $imgfail
