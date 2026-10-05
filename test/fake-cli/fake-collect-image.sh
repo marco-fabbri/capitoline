@@ -30,5 +30,9 @@ case "${FAKE_COLLECT:-sample}" in
   image-run)
     [[ "$cid" == "$recorded" ]] || { echo "no image produced for conversation $cid" >&2; exit 4; }
     cat "$sample" ;;
+  # The image only under the subagent's conversation of fixtures/antigravity/image-subagent.jsonl.
+  subagent)
+    [[ "$cid" == "d42fca3a-f043-4234-a505-30dd1099c02a" ]] || { echo "no image produced for conversation $cid" >&2; exit 4; }
+    cat "$sample" ;;
   *)    cat "$sample" ;;
 esac

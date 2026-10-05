@@ -373,8 +373,23 @@ export class CliProvider implements Provider {
         yield { type: "error", kind: "bad_output", detail: "no conversation id in the CLI output" };
         return;
       }
-      const collected = await this.collect(conversationId);
-      if (collected.exitCode === COLLECT_NO_IMAGE || (collected.exitCode === 0 && collected.stdout.length === 0)) {
+      let collected = await this.collect(conversationId);
+      const empty = (r: typeof collected) => r.exitCode === COLLECT_NO_IMAGE || (r.exitCode === 0 && r.stdout.length === 0);
+      // The image is saved "to the conversation's artifacts", and when a
+      // subagent made it that is not always the run's own conversation: a run
+      // that ended with the agent's "done" left nothing there (2026-10-05).
+      // So the conversations the run opened are looked in too, before the
+      // request is told there is no image.
+      for (const id of opened) {
+        if (!empty(collected)) break;
+        if (!CONVERSATION_ID.test(id)) continue;
+        const elsewhere = await this.collect(id);
+        if (!empty(elsewhere)) {
+          this.log.info({ model: model.name, conversationId, subagentConversation: id }, "image collected from the subagent's conversation");
+          collected = elsewhere;
+        }
+      }
+      if (empty(collected)) {
         // Only now does the prose count: a quota hit leaves nothing in the
         // conversation, so an image that came out disproves it, and the prose
         // is prompt-driven text that may merely echo "rate limit" or "429".

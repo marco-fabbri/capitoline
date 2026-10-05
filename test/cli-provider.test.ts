@@ -269,6 +269,12 @@ describe("CliProvider.generateImage", () => {
       await vi.waitFor(() => expect(spy.captures).toHaveLength(3));
       expect(spy.captures.map((c) => c.args)).toEqual([[PARENT], ["forget", PARENT], ["forget", CHILD]]);
     });
+    it("looks for the image in the subagent's conversation when the run's own holds none", async () => {
+      const spy = spyRunner();
+      const ev = await withCollect("subagent", () => generate(imageProvider(SUBAGENT_RUN, today, spy)));
+      expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
+      expect(spy.captures.map((c) => c.args)).toEqual([[PARENT], [CHILD]]);
+    });
     it("no longer admits the tool the agent used to call itself, nor a second hand-off, nor another subagent", async () => {
       const sub = (type: string, state: string, index = 2) => ({ event: "step_update", step_update: { conversation_id: CID, step_index: index, state, step_type: "subagent", tool_name: "invoke_subagent", subagent_info: { subagents: [{ type_name: type }] } } });
       const run = async (lines: Record<string, unknown>[]) => generate(imageProvider(synthetic(lines), today, runner, {}, "replay-linger"), undefined, 5);
