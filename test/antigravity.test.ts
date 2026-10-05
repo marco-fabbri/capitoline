@@ -98,8 +98,7 @@ describe("antigravity adapter", () => {
     expect(msg.message.content).toBe(IMAGE_PROMPT("a red bicycle"));
     expect(IMAGE_PROMPT("a red bicycle")).toBe(
       'Create exactly one image, named "image": a red bicycle\n' +
-      "Hand the request to the image-generator subagent, once, and wait for it to finish. " +
-      "Do not create, read, copy or modify any file yourself, do not run commands, do not open a browser. When the image is saved, reply only with the single word: done",
+      "Do not create, read, copy or modify any other file, do not run commands, do not open a browser. When the image is saved, reply only with the single word: done",
     );
     expect(c.stdin.endsWith("\n")).toBe(true);
   });

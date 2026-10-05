@@ -124,7 +124,7 @@ describe("the fake antigravity CLI picks its recording from the prompt", () => {
   const userEvent = (content: string) => JSON.stringify({ event: "user", message: { role: "user", content } }) + "\n";
   const run = (stdin: string) => spawnSync(AGY, ["--output-format", "stream-json"], { input: stdin, encoding: "utf8" });
 
-  it("replays the recorded image run when the prompt hands the image to the subagent", () => {
+  it("replays the recorded image run when the prompt is the image prompt", () => {
     // The production prompt itself, so that rewording it breaks this test
     // instead of silently sending the image route back to the chat recording.
     const r = run(userEvent(IMAGE_PROMPT("a lighthouse")));

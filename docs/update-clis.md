@@ -53,7 +53,8 @@ days after the update). The agent that receives the prompt no longer holds the
 name, and one image request in two ended in `bad_output`: the agent either
 said the tool was not available or reached for another one, which the guard
 stops. The update's own image check had passed, on the one request in two that
-worked. Since then the prompt names the subagent, `image.allowed_tools` admits
+worked. Since then the prompt asks for the image and no longer says how to make it
+(left to choose, the agent hands it to the subagent by itself), `image.allowed_tools` admits
 that hand-off and nothing else, `image.wait_tools` admits the two steps the
 agent waits for it with (a timer, and listing its subagents), and the
 conversation the subagent keeps is forgotten with the run's. When an update touches images, read `agy changelog`

@@ -4,22 +4,22 @@ import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.
 import { withPreamble, cliId, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ListedModel, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
-// The CLI is an agent: the prompt names the one way it may make the image and
-// forbids everything else. The provider still guards the steps it reports.
+// The CLI is an agent: the prompt asks for one image and forbids everything
+// else. The provider still guards the steps it reports, and that guard is the
+// protection; the prompt only keeps the agent from walking into it.
 //
-// Since 1.2.16 the agent that receives the prompt no longer holds the
-// generate_image tool: the CLI hands image requests to a built-in
-// `image-generator` subagent. Asked for the tool by name, as this prompt did
-// until 2026-10-05, the agent either said the tool was not available or reached
-// for whatever else it had (schedule, manage_subagents, manage_task), and one
-// request in two ended there. Naming the subagent is what it follows
-// (test/fixtures/antigravity/image-subagent.jsonl against
-// image-tool-unavailable.jsonl, the same request under the two prompts).
-export const IMAGE_SUBAGENT = "image-generator";
+// It says what is wanted and not how to make it. Until 2026-10-05 it named the
+// generate_image tool, and Antigravity 1.2.16 moved that tool from the agent
+// to a built-in `image-generator` subagent: asked for a tool it no longer
+// held, the agent said so or reached for another one, and one request in two
+// ended there (test/fixtures/antigravity/image-tool-unavailable.jsonl). Left
+// to choose, it hands the image to the subagent by itself, three runs in
+// three on the day this was written, and a later change of the same kind
+// will not need this text rewritten. The name "image" is what the collect
+// helper looks for.
 export const IMAGE_PROMPT = (prompt: string): string =>
   `Create exactly one image, named "image": ${prompt}\n` +
-  `Hand the request to the ${IMAGE_SUBAGENT} subagent, once, and wait for it to finish. ` +
-  "Do not create, read, copy or modify any file yourself, do not run commands, do not open a browser. When the image is saved, reply only with the single word: done";
+  "Do not create, read, copy or modify any other file, do not run commands, do not open a browser. When the image is saved, reply only with the single word: done";
 
 // An id as `agy models` prints it: lower case, digits, dots and dashes, the
 // effort already inside it (`gemini-3.8-flash-high`).
