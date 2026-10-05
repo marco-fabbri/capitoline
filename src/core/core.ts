@@ -98,6 +98,14 @@ export const REFUSING_NOTICE_MS = 3600_000;
 // this long, and that verdict stands. A real sign-out fails twice. The same
 // holds when it is a request, and not the probe, that gets the answer.
 export const AUTH_RECHECK_MS = 60_000;
+// The verdicts of one probe that a healthy provider is not marked out for
+// until a second probe, a minute later, says the same. A lost login was the
+// first (one failed token refresh is not a lost login); a probe that got no
+// answer in time, or whose CLI ended badly or said nothing usable, is the same
+// kind of doubt: on 2026-10-05 one slow answer made a provider unavailable for
+// the 45 minutes until somebody probed it again, while it was answering.
+// A rate limit is not here: it has its own pause, with its own end.
+const DOUBTED_ONCE: ReadonlySet<string> = new Set(["auth_expired", "timeout", "cli_crashed", "bad_output"]);
 
 const D7 = 7 * 24 * 3600_000;
 /** The window of the per-caller breakdown /health serves. */
@@ -1064,9 +1072,9 @@ export class Core {
       // Not at startup and not for a provider already out (s.health?.ok): there
       // the verdict is taken at once, so the port is never held for it.
       const id = s.provider.id;
-      if (!status.ok && status.kind === "auth_expired" && this.deferAuthVerdict(s)) {
-        this.usage.record({ provider: id, model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: "auth_expired", source: "health", ts: this.now() });
-        this.opts.log.warn({ provider: id, detail: status.detail, recheckS: Math.round((this.opts.authRecheckMs ?? AUTH_RECHECK_MS) / 1000) }, "health check: auth_expired from a healthy provider, probing again before believing it");
+      if (!status.ok && status.kind !== undefined && DOUBTED_ONCE.has(status.kind) && this.deferAuthVerdict(s)) {
+        this.usage.record({ provider: id, model: "health", inputTokens: 0, outputTokens: 0, durationMs: 0, outcome: status.kind, source: "health", ts: this.now() });
+        this.opts.log.warn({ provider: id, kind: status.kind, detail: status.detail, recheckS: Math.round((this.opts.authRecheckMs ?? AUTH_RECHECK_MS) / 1000) }, `health check: ${status.kind} from a healthy provider, probing again before believing it`);
         return;
       }
       // A rate limit the CLI attributed to the probe's own model is about that

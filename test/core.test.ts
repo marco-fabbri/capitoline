@@ -1084,6 +1084,33 @@ describe("a healthy provider's first auth_expired probe", () => {
     expect(told).toEqual([]);
   });
 
+  // The same doubt for a probe that got no answer in time or whose CLI ended
+  // badly: one slow answer must not take a provider that is answering out.
+  it("holds for a slow or crashed probe too, and for nothing that has its own handling", async () => {
+    for (const kind of ["timeout", "cli_crashed", "bad_output"] as const) {
+      const { a, core, told } = makeRecheck();
+      await core.checkHealth("a");
+      a.healthResult = { ok: false, kind, checkedAt: 0 };
+      await core.checkHealth("a");
+      expect(available(core), kind).toBe(true);
+      a.healthResult = { ok: true, checkedAt: 0 };
+      await wait(80);
+      await core.idle();
+      expect(a.healthCalls, kind).toBe(3);
+      expect(available(core), kind).toBe(true);
+      expect(told, kind).toEqual([]);
+    }
+    // Said twice, it is believed.
+    const { a, core } = makeRecheck();
+    await core.checkHealth("a");
+    a.healthResult = { ok: false, kind: "timeout", checkedAt: 0 };
+    await core.checkHealth("a");
+    await wait(80);
+    await core.idle();
+    expect(a.healthCalls).toBe(3);
+    expect(available(core)).toBe(false);
+  });
+
   it("is believed when the second probe says the same, once", async () => {
     const { a, core, told } = makeRecheck();
     await core.checkHealth("a");

@@ -472,8 +472,11 @@ export class CliProvider implements Provider {
       clearTimeout(timer);
       if (!status) ac.abort(); // deadline or exception: stop the probe's process now
     }
-    if (status) return status;
+    if (status?.ok) return status;
+    // Before the error the stopped CLI reports on its way out ("interrupted",
+    // read as a crash): the deadline is what ended the probe, and says so.
     if (deadlineHit) return { ok: false, kind: "timeout", detail: `no answer within ${this.opts.healthDeadlineMs / 1000}s`, checkedAt: Date.now() };
+    if (status) return status;
     return { ok: false, kind: "bad_output", detail: "no terminal event", checkedAt: Date.now() };
   }
 }

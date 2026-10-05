@@ -784,6 +784,13 @@ and nothing else. The same holds when it is a request, and not the hourly
 probe, that gets the answer: that request fails, but the provider stays in
 until the confirming probe has spoken.
 
+The hourly probe gives the same second look to a probe that got no answer
+within its minute, or whose CLI ended badly or said nothing usable: a provider
+that was healthy is probed again a minute later before it is marked out. One
+slow answer once made a provider unavailable for the 45 minutes until somebody
+probed it by hand, while it was answering. A rate limit is not doubted this
+way: it has its own pause.
+
 That check is one real call per provider on its `health_model`, once an hour,
 24 a day. On a plan with a small allowance (a free tier, a weekly quota) that
 is a share worth saving: `server.health_interval_s` in the overlay sets the
