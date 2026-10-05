@@ -54,8 +54,9 @@ name, and one image request in two ended in `bad_output`: the agent either
 said the tool was not available or reached for another one, which the guard
 stops. The update's own image check had passed, on the one request in two that
 worked. Since then the prompt names the subagent, `image.allowed_tools` admits
-that hand-off and nothing else, and the conversation the subagent keeps is
-forgotten with the run's. When an update touches images, read `agy changelog`
+that hand-off and nothing else, `image.wait_tools` admits the two steps the
+agent waits for it with (a timer, and listing its subagents), and the
+conversation the subagent keeps is forgotten with the run's. When an update touches images, read `agy changelog`
 before trusting one passing image.
 
 ## The model lists

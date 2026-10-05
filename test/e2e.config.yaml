@@ -377,6 +377,10 @@ providers:
       min_bytes: 200000
       quota_per_window: 12    # images per 5-hour window, reported in /health and /v1/models
       allowed_tools: ["subagent:image-generator"]
+      # How the agent waits for that subagent: a timer the subagent's report
+      # cancels, and a look at whether it is still running. Any other action of
+      # manage_subagents (it can also stop or message one) is not admitted.
+      wait_tools: [schedule, "manage_subagents:list"]
 
 # The council. A virtual model, asked for in `model` like any other, which
 # answers by seating one member per family, having them rank each other's

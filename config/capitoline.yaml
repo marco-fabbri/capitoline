@@ -415,6 +415,10 @@ providers:
       # through its built-in image-generator subagent, so that hand-off is what
       # is admitted, once; any other tool or subagent still aborts the run.
       allowed_tools: ["subagent:image-generator"]
+      # How the agent waits for that subagent: a timer the subagent's report
+      # cancels, and a look at whether it is still running. Any other action of
+      # manage_subagents (it can also stop or message one) is not admitted.
+      wait_tools: [schedule, "manage_subagents:list"]
 
 # The council. A virtual model, asked for in `model` like any other, which
 # answers by seating one member per family, having them rank each other's

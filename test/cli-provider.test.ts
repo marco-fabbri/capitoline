@@ -277,9 +277,27 @@ describe("CliProvider.generateImage", () => {
       expect(await run([init, sub("image-generator", "ACTIVE"), sub("image-generator", "DONE"), sub("image-generator", "ACTIVE", 4), result]))
         .toEqual([{ type: "error", kind: "bad_output", detail: "tool called more than once: subagent:image-generator" }]);
       // What the agent reached for under the old prompt, one request in two.
-      for (const tool of ["schedule", "manage_subagents", "manage_task", "invoke_subagent"]) {
+      for (const tool of ["schedule", "manage_task", "invoke_subagent"]) {
         expect(await run([init, toolStep(tool, "ACTIVE"), result]), tool).toEqual([{ type: "error", kind: "bad_output", detail: `unexpected tool call: ${tool}` }]);
       }
+    });
+    it("lets the agent wait for the subagent with a timer and a look at its list, and with nothing else", async () => {
+      const spy = spyRunner();
+      const ev = await generate(imageProvider(join(process.cwd(), "test/fixtures/antigravity/image-subagent-waiting.jsonl"), { ...today, forget: FORGET_OK }, spy));
+      expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
+      const sub = { event: "step_update", step_update: { conversation_id: CID, step_index: 2, state: "DONE", step_type: "subagent", tool_name: "invoke_subagent", subagent_info: { subagents: [{ type_name: "image-generator" }] } } };
+      const manage = (Action: string, index: number) => ({ event: "step_update", step_update: { conversation_id: CID, step_index: index, state: "ACTIVE", step_type: "tool", tool_name: "manage_subagents", tool_info: { name: "manage_subagents", parameters: { Action } } } });
+      const run = async (lines: Record<string, unknown>[]) => generate(imageProvider(synthetic(lines), today, runner, {}, "replay-linger"), undefined, 5);
+      // Acting on a subagent is not looking at it.
+      expect(await run([init, sub, manage("kill", 3), result])).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: manage_subagents:kill" }]);
+      // A waiting step cannot open the run: there is nothing to wait for yet.
+      expect(await run([init, toolStep("schedule", "ACTIVE"), result])).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: schedule" }]);
+      expect(await run([init, manage("list", 1), result])).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: manage_subagents:list" }]);
+    });
+    it("reports the quota the subagent ran into, which reaches the run only as the agent's words", async () => {
+      const ev = await withCollect("none", () => generate(imageProvider(join(process.cwd(), "test/fixtures/antigravity/image-subagent-429.jsonl"), today)));
+      expect(ev).toHaveLength(1);
+      expect(ev[0]).toMatchObject({ type: "error", kind: "rate_limited" });
     });
     it("reports bad_output, not a picture, when the agent only says the tool is not available", async () => {
       const ev = await withCollect("none", () => generate(imageProvider(join(process.cwd(), "test/fixtures/antigravity/image-tool-unavailable.jsonl"), today)));

@@ -60,6 +60,18 @@ describe("antigravity adapter", () => {
     expect(ev.find((e) => e.type === "meta")).toEqual({ type: "meta", conversationId: "e0405ad8-9fe1-45e8-9eea-b05629b4c775" });
     expect(ev.at(-1)).toMatchObject({ type: "done" });
   });
+  // The same request, a run where the agent waited: a timer the subagent's
+  // report cancelled, and two looks at the list of its subagents.
+  it("names manage_subagents with its action, so looking can be told from acting", async () => {
+    const ev = await events(linesOf("test/fixtures/antigravity/image-subagent-waiting.jsonl"));
+    const calls = ev.filter((e) => e.type === "tool" && e.phase === "call").map((e) => (e as { name: string }).name);
+    expect(calls).toEqual(["subagent:image-generator", "manage_subagents:list", "manage_subagents:list"]);
+    const step = (parameters: unknown) => JSON.stringify({ event: "step_update", step_update: { step_index: 3, state: "ACTIVE", step_type: "tool", tool_name: "manage_subagents", tool_info: { name: "manage_subagents", parameters } } });
+    const name = async (parameters: unknown) => ((await events((async function* () { yield step(parameters); })())).find((e) => e.type === "tool") as { name: string }).name;
+    expect(await name({ Action: "Kill" })).toBe("manage_subagents:kill");
+    expect(await name({})).toBe("manage_subagents:");
+    expect(await name(undefined)).toBe("manage_subagents:");
+  });
   it("names every subagent of a step, and none when the step says none, so neither passes for the one allowed", async () => {
     const step = (subagents: unknown) => JSON.stringify({ event: "step_update", step_update: { step_index: 2, state: "ACTIVE", step_type: "subagent", tool_name: "invoke_subagent", subagent_info: { subagents } } });
     const names = async (subagents: unknown) => (await events((async function* () { yield step(subagents); })())).filter((e) => e.type === "tool").map((e) => (e as { name: string }).name);

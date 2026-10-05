@@ -43,6 +43,11 @@ const ImageSchema = z
   .object({
     args: z.array(z.string()).default([]),
     allowed_tools: z.array(z.string()).default(["generate_image"]),
+    // Steps the agent may take any number of times while it waits for an
+    // allowed one to finish, and never before it: a timer, a look at whether
+    // the subagent it handed the image to is done. Nothing here makes or
+    // touches anything, which is the only reason a name belongs in it.
+    wait_tools: z.array(z.string()).default([]),
     collect: z.array(z.string()).min(1).optional(),
     min_bytes: z.number().int().min(0).default(200_000),
     // How many images the short quota window allows, for reporting only: the

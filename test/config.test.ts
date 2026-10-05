@@ -91,8 +91,10 @@ describe("config", () => {
     expect(agy.image.quota_per_window).toBe(12);
     // The hand-off to the CLI's own image subagent, and nothing else (Antigravity 1.2.16).
     expect(agy.image.allowed_tools).toEqual(["subagent:image-generator"]);
+    // How the agent waits for it, and only that: looking at its subagents, never acting on them.
+    expect(agy.image.wait_tools).toEqual(["schedule", "manage_subagents:list"]);
     expect(agy.image.args).toEqual([]);
-    expect(cfg.providers.claude.image).toEqual({ args: [], allowed_tools: ["generate_image"], collect: undefined, min_bytes: 200000 });
+    expect(cfg.providers.claude.image).toEqual({ args: [], allowed_tools: ["generate_image"], wait_tools: [], collect: undefined, min_bytes: 200000 });
   });
   it("requires every provider to name the model, effort and system-prompt flags", () => {
     // No defaults on purpose: a file written before these keys existed — the
@@ -173,7 +175,7 @@ describe("config", () => {
     })).providers.x;
     expect(p.models.img).toEqual({ cli_model: "i", effort_suffix: false, kind: "image", timeout_s: 240 });
     expect(p.models.a.kind).toBe("text");
-    expect(p.image).toEqual({ collect: ["/usr/local/bin/collect", "--flag"], min_bytes: 10, args: ["--x"], allowed_tools: ["generate_image", "other"] });
+    expect(p.image).toEqual({ collect: ["/usr/local/bin/collect", "--flag"], min_bytes: 10, args: ["--x"], wait_tools: [], allowed_tools: ["generate_image", "other"] });
   });
   it("rejects an unknown model kind and a non-positive timeout", () => {
     const base = (models: string) => config({ models: `{ ${models} }`, image: "{ collect: [c] }" });

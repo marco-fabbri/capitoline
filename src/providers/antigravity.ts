@@ -106,7 +106,7 @@ export const antigravityAdapter: Adapter = {
         const id = o.conversation_id ?? init.conversation_id;
         if (isConversationId(id) && !conversationId) { conversationId = id; yield { type: "meta", conversationId }; }
       } else if (event === "step_update") {
-        const su = o.step_update as { step_type?: string; text_delta?: string; state?: string; step_index?: unknown; tool_name?: unknown; tool_info?: { name?: unknown };
+        const su = o.step_update as { step_type?: string; text_delta?: string; state?: string; step_index?: unknown; tool_name?: unknown; tool_info?: { name?: unknown; parameters?: { Action?: unknown } };
           subagent_info?: { subagents?: { type_name?: unknown; conversation_id?: unknown }[] } } | undefined;
         const deltaChars = typeof su?.text_delta === "string" ? su.text_delta.length : 0;
         if (shape.length < SHAPE_CAP) shape.push({ event, step_type: su?.step_type, step_index: su?.step_index, state: su?.state, deltaChars });
@@ -130,7 +130,12 @@ export const antigravityAdapter: Adapter = {
           // can admit one kind of subagent and no other. The conversation each
           // one keeps is named by the step once it is under way.
           const subagents = su.step_type === "subagent" ? (Array.isArray(su.subagent_info?.subagents) ? su.subagent_info.subagents : []) : undefined;
-          const name = subagents ? `subagent:${subagents.map((s) => String(s.type_name ?? "")).join(",")}` : String(su.tool_name ?? su.tool_info?.name ?? "");
+          // manage_subagents is one tool for looking at subagents and for
+          // acting on them, told apart only by its Action: the name carries
+          // it (`manage_subagents:list`), so looking can be admitted alone.
+          const plain = String(su.tool_name ?? su.tool_info?.name ?? "");
+          const action = plain === "manage_subagents" ? `:${typeof su.tool_info?.parameters?.Action === "string" ? su.tool_info.parameters.Action.toLowerCase() : ""}` : "";
+          const name = subagents ? `subagent:${subagents.map((s) => String(s.type_name ?? "")).join(",")}` : plain + action;
           const conversations = (subagents ?? []).map((s) => s.conversation_id).filter(isConversationId);
           const opened = conversations.length ? { conversations } : {};
           const raw = JSON.stringify(su);

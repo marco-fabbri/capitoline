@@ -263,6 +263,11 @@ export class CliProvider implements Provider {
     const timeoutS = model.timeoutS ?? this.cfg.timeout_s;
     const run = await this.start(args, stdin, timeoutS * 1000, signal);
     const allowed = new Set(this.cfg.image.allowed_tools);
+    // How the agent waits for an allowed step: admitted as often as it likes,
+    // but only once an allowed step has been called, so none of them can open
+    // a run.
+    const waiting = new Set(this.cfg.image.wait_tools);
+    let begun = false;
     // Tools that reached a terminal phase: a later call is a second invocation,
     // which the prompt forbids and which would spend quota on an image the
     // helper never collects (it returns one file).
@@ -282,6 +287,8 @@ export class CliProvider implements Provider {
           conversationId = ev.conversationId;
         } else if (ev.type === "tool") {
           for (const id of ev.conversations ?? []) opened.add(id);
+          if (waiting.has(ev.name) && begun) continue;
+          if (ev.phase === "call" && allowed.has(ev.name)) begun = true;
           if (ev.phase === "call" && !allowed.has(ev.name)) {
             this.log.warn({ model: model.name, tool: ev.name }, "unexpected tool call: run aborted");
             run.ac.abort();
