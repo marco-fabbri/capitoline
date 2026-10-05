@@ -2,7 +2,7 @@ import { EffortSchema, type Effort } from "../config.js";
 import { checkAttachments } from "./attachments.js";
 import type { CouncilEvent } from "../council/council.js";
 import type { Logger } from "../log.js";
-import type { CatalogChange, HealthStatus, ModelKind, ModelSpec, Provider } from "../providers/adapter.js";
+import type { CatalogChange, HealthStatus, ModelKind, ModelSpec, Provider, QuotaBucket } from "../providers/adapter.js";
 import { H5, type CallerUsage, type ModelIdentity, type UsageStore } from "../usage/store.js";
 import { flatten, splitSystem } from "./prompt.js";
 import { Semaphore } from "./semaphore.js";
@@ -38,6 +38,8 @@ export interface ProviderState {
   id: string; health: HealthStatus | null; pausedUntil: number | null; strikes: number; overBudget: boolean;
   windows: ReturnType<UsageStore["windows"]>; active: number; waiting: number; imageQuota: ImageQuota | null;
   catalog: CatalogState | null;
+  /** What the CLI last reported of the subscription's quota; null for a provider with no report. `ok` false keeps the last buckets read. */
+  quota: { checkedAt: number; ok: boolean; buckets: QuotaBucket[] } | null;
 }
 export interface CoreOptions {
   maxWaitMs: number; budgets: Record<string, { window5h: number; window7d: number }>; log: Logger; now?: () => number;
@@ -49,6 +51,8 @@ export interface CoreOptions {
   onAvailability?: (event: AvailabilityEvent) => void;
   /** How long after a healthy provider's first auth_expired probe the confirming one runs (AUTH_RECHECK_MS). Tests shorten it. */
   authRecheckMs?: number;
+  /** Per provider: the share of a weekly quota bucket under which it is announced (config quota.notify_below). */
+  quotaNotifyBelow?: Record<string, number>;
 }
 
 /**
@@ -67,7 +71,10 @@ export type AvailabilityEvent =
   | { kind: "resumed"; provider: string; scope: string | null; pausedMs: number }
   | { kind: "refusing"; provider: string; scope: string | null; refusedMs: number; weeklyResetAt?: number }
   | { kind: "signed_out"; provider: string }
-  | { kind: "signed_in"; provider: string };
+  | { kind: "signed_in"; provider: string }
+  // A weekly bucket of the provider's own quota report under the configured
+  // share: once per window, so the operator hears of it before the refusals.
+  | { kind: "quota_low"; provider: string; group: string; remaining: number; resetsAt: number | null };
 
 /** A pause as the operator sees it: `scope` null for the whole provider, else a model's scope, with the names it holds back. */
 export interface PauseInfo { provider: string; scope: string | null; until: number; strikes: number; models: string[] }
@@ -107,6 +114,8 @@ interface State {
   hasImageModels: boolean;
   /** The last listing attempt, for a provider that lists its models; null until the first. */
   catalog: { checkedAt: number; ok: boolean } | null;
+  /** The last quota report, for a provider whose CLI has one; null until the first. */
+  quota: { checkedAt: number; ok: boolean; buckets: QuotaBucket[] } | null;
 }
 /** A model paused on its own, by a refusal that named it. Mirrors the provider's pause and strikes. */
 interface ModelPause { pausedUntil: number; strikes: number; /** When the run of refusals this pause belongs to began. */ since?: number }
@@ -205,6 +214,7 @@ export class Core {
         provider: p, sem: new Semaphore(p.concurrencyLimit), health: null, pausedUntil: null, strikes: 0,
         imageLimit: opts.imageQuotas?.[p.id] ?? null, imageResetAt: null, refusedSince: null, hasImageModels: models.some((m) => m.kind === "image"),
         catalog: null,
+        quota: null,
       });
       this.reindex(p);
     }
@@ -572,6 +582,7 @@ export class Core {
       catalog: s.provider.discovers
         ? { checkedAt: s.catalog?.checkedAt ?? null, ok: s.catalog?.ok ?? null, ...(s.provider.catalogNames?.() ?? { discovered: [], retired: [] }), healthModel: s.provider.healthModel ?? null }
         : null,
+      quota: s.quota,
     }));
   }
 
@@ -1126,6 +1137,56 @@ export class Core {
       try { this.opts.onCatalogChange?.(p.id, change); }
       catch (e) { this.opts.log.warn({ provider: p.id, err: String(e) }, "catalog change listener threw"); }
     }));
+  }
+
+  /** Asks every provider whose CLI reports its quota for a fresh report. No model is called. Tracked like a health check. */
+  checkQuota(): Promise<void> {
+    const run = this.runQuota();
+    const tracked = run.then(() => {}, () => {});
+    this.inFlight.add(tracked);
+    void tracked.finally(() => this.inFlight.delete(tracked));
+    return run;
+  }
+
+  private async runQuota(): Promise<void> {
+    const targets = [...this.states].filter(([, s]) => s.provider.reportsQuota && s.provider.quota);
+    await Promise.all(targets.map(async ([id, s]) => {
+      let buckets: QuotaBucket[];
+      try {
+        buckets = await s.provider.quota!();
+      } catch (e) {
+        // The last figures stay, marked as not fresh: a failed read is not an empty quota.
+        s.quota = { checkedAt: this.now(), ok: false, buckets: s.quota?.buckets ?? [] };
+        this.opts.log.warn({ provider: id, err: e instanceof Error ? e.message : String(e) }, "quota report failed; last figures kept");
+        return;
+      }
+      s.quota = { checkedAt: this.now(), ok: true, buckets };
+      this.noteQuota(id, buckets);
+    }));
+  }
+
+  // A weekly bucket under the configured share is announced once per window.
+  // What was announced is kept in the store, by the instant the window
+  // refills, so a restart does not say it again and the next window can.
+  private noteQuota(id: string, buckets: QuotaBucket[]): void {
+    const below = this.opts.quotaNotifyBelow?.[id] ?? 0.2;
+    for (const b of buckets) {
+      if (b.window !== "weekly" || b.remaining >= below) continue;
+      const key = `quota_low:${id}:${b.id}`, mark = b.resetsAt ?? 0, told = this.usage.setting(key);
+      // The reset instant wobbles by seconds between two reports of one window.
+      if (typeof told === "number" && Math.abs(told - mark) < 3600_000) continue;
+      this.usage.setSetting(key, mark, this.now());
+      this.opts.log.info({ provider: id, bucket: b.id, remaining: b.remaining, resetsAt: b.resetsAt }, "weekly quota is low");
+      this.tell({ kind: "quota_low", provider: id, group: b.group, remaining: b.remaining, resetsAt: b.resetsAt });
+    }
+  }
+
+  startQuotaLoop(intervalMs: number): () => void {
+    const timer = setInterval(() => {
+      this.checkQuota().catch((err: unknown) => this.opts.log.error({ err }, "quota check failed"));
+    }, intervalMs);
+    timer.unref();
+    return () => clearInterval(timer);
   }
 
   startCatalogLoop(intervalMs: number): () => void {

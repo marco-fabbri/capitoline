@@ -312,6 +312,11 @@ providers:
     # `agy models` lists every id the CLI serves, the level inside the id: one
     # no entry below reaches is served as antigravity-<id> (docs/deploy.md §7.2).
     discover: { args: [models], prefix: antigravity- }
+    # The CLI's own report of what is left of the subscription: two groups of
+    # models, each with a weekly and a five-hour bucket (docs/deploy.md §7.2).
+    # No model is called. Images have no bucket of their own: they draw on the
+    # group of the model that makes them.
+    quota: { args: [--output-format, json, -p, /usage] }
     models:
       # effort is part of the model id: <base>-<effort>
       antigravity-gemini-flash:     { cli_model: gemini-3.8-flash, effort_suffix: true }

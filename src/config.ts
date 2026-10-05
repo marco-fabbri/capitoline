@@ -90,6 +90,14 @@ const ProviderSchema = z.object({
   // heading for on 2026-10-14.
   health_fallback: z.array(z.string().min(1)).default([]),
   discover: DiscoverSchema.optional(),
+  // The CLI's own report of what is left of the subscription's quota, for a
+  // CLI that has one: read without a model call, shown in /health, and
+  // announced when a weekly bucket falls under `notify_below` (a share from 0
+  // to 1). The weekly one is the limit that stops a host for days.
+  quota: z.object({
+    args: z.array(z.string().min(1)).min(1),
+    notify_below: z.number().min(0).max(1).default(0.2),
+  }).strict().optional(),
   // Where to read the installed version and the latest published one, for the
   // daily "a new version exists" notice (src/versions.ts). Optional: without it
   // the provider is never checked. Installing stays a person's decision

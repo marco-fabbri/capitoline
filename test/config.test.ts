@@ -90,6 +90,9 @@ describe("config", () => {
     expect(agy.image.min_bytes).toBe(200000);
     expect(agy.image.quota_per_window).toBe(12);
     // The hand-off to the CLI's own image subagent, and nothing else (Antigravity 1.2.16).
+    // The CLI's own quota report, and the share of a weekly bucket under which it is announced.
+    expect(agy.quota).toEqual({ args: ["--output-format", "json", "-p", "/usage"], notify_below: 0.2 });
+    expect(cfg.providers.claude.quota).toBeUndefined();
     expect(agy.image.allowed_tools).toEqual(["subagent:image-generator"]);
     // How the agent waits for it, and only that: looking at its subagents, never acting on them.
     expect(agy.image.wait_tools).toEqual(["schedule", "manage_subagents:list"]);

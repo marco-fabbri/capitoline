@@ -29,6 +29,7 @@ export interface AdminOps {
     holdBack(provider: string, model: string | undefined, forMs: number): PauseInfo;
     checkHealth(provider?: string): Promise<void>;
     checkCatalog(): Promise<void>;
+    checkQuota(): Promise<void>;
     providerStates(): ProviderState[];
     listModels(): ModelInfo[];
   };
@@ -231,9 +232,9 @@ export function createAdminRouter(store: AdminStore, admins: string[], names: ()
 
     router.post("/catalog-check", async (_req: Request, res: Response) => {
       try {
-        await ops.core.checkCatalog();
+        await Promise.all([ops.core.checkCatalog(), ops.core.checkQuota()]);
         log.info({ admin: res.locals.admin }, "admin: catalog check run");
-        res.json({ providers: ops.core.providerStates().map((p) => ({ id: p.id, catalog: p.catalog })) });
+        res.json({ providers: ops.core.providerStates().map((p) => ({ id: p.id, catalog: p.catalog, quota: p.quota })) });
       } catch (e) { fail(res, e); }
     });
 

@@ -13,6 +13,8 @@ dir="$(cd "$(dirname "$0")" && pwd)"
 # `agy models` is answered from argv, before stdin is read, with the real
 # listing captured on the host.
 if [[ "${1:-}" == models ]]; then exec cat "$dir/../fixtures/antigravity/models.txt"; fi
+# The quota report is a slash command given as the prompt: no stdin, no model.
+for arg in "$@"; do if [[ "$arg" == /usage ]]; then exec cat "$dir/../fixtures/antigravity/usage-command.json"; fi; done
 stdin="$(cat)"
 # The council's ranking stage is chosen the same way (see fake-claude.sh): this
 # CLI seats two of the four members of the panels and all three rungs of the

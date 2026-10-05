@@ -3,7 +3,7 @@ import type { Logger } from "../log.js";
 import type { ImageRequest, InternalRequest, ProviderEvent, Usage } from "../core/types.js";
 import type { Runner, RunHandle } from "../runner/runner.js";
 import { attachmentFiles } from "../core/attachments.js";
-import { cliId as resolveCliId, modelSpecs, reachableIds, type Adapter, type CatalogChange, type HealthStatus, type ListedModel, type ModelSpec, type Provider } from "./adapter.js";
+import { cliId as resolveCliId, modelSpecs, reachableIds, type Adapter, type CatalogChange, type HealthStatus, type ListedModel, type ModelSpec, type Provider, type QuotaBucket } from "./adapter.js";
 import { classifyError, detectQuotaExhausted, type QuotaHit } from "./errors.js";
 import { inspectImage } from "./image-check.js";
 
@@ -112,6 +112,21 @@ export class CliProvider implements Provider {
    * recognise its own model id (2026-09-29); a listing that fails the same way
    * must retire nothing.
    */
+  get reportsQuota(): boolean { return this.cfg.quota !== undefined && this.adapter.readQuota !== undefined; }
+
+  /** Runs the CLI's own quota report as the runner user: no model is called, nothing is spent. */
+  async quota(): Promise<QuotaBucket[]> {
+    const quota = this.cfg.quota;
+    const read = this.adapter.readQuota;
+    if (!quota || !read) throw new Error(`provider ${this.id} has no quota report`);
+    const r = await this.runner.capture({ binary: this.cfg.binary, args: quota.args, timeoutMs: LIST_TIMEOUT_MS, maxBytes: LIST_MAX_BYTES });
+    if (r.timedOut) throw new Error(`quota report timed out after ${LIST_TIMEOUT_MS / 1000}s`);
+    if (r.exitCode !== 0) throw new Error(`quota report exited with ${r.exitCode}: ${r.stderr.slice(0, 300)}`);
+    const buckets = read(r.stdout.toString("utf8"));
+    if (buckets.length === 0) throw new Error("quota report holds no bucket");
+    return buckets;
+  }
+
   async listModels(): Promise<ListedModel[]> {
     const discover = this.cfg.discover;
     const read = this.adapter.listModels;

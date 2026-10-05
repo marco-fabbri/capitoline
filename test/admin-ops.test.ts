@@ -142,6 +142,48 @@ describe("the operator's routes under /v1/admin", () => {
     expect(notified[0]).toMatch(/test notification, asked for by operator/);
   });
 
+  it("reads what a CLI says is left of its quota, keeps the last figures when a read fails, and announces a low weekly bucket once per window", async () => {
+    const told: unknown[] = [];
+    const p = new FakeProvider("q", ["q-1"], OK);
+    const store = new UsageStore(":memory:");
+    const quotaCore = new Core([p, new FakeProvider("plain", ["p-1"], OK)], store, { maxWaitMs: 1_000, budgets: {}, log: createLogger("t"), now: () => t, quotaNotifyBelow: { q: 0.25 }, onAvailability: (e) => told.push(e) });
+    const resetsAt = t + 2 * 86_400_000;
+    const weekly = (remaining: number, at = resetsAt) => ({ id: "g-weekly", group: "Group", window: "weekly", remaining, resetsAt: at });
+    const short = { id: "g-5h", group: "Group", window: "5h", remaining: 0.01, resetsAt: t + 3600_000 };
+    const state = () => quotaCore.providerStates().find((s) => s.id === "q")!.quota;
+
+    expect(state()).toBeNull();
+    expect(quotaCore.providerStates().find((s) => s.id === "plain")!.quota).toBeNull();
+    p.quotaReport = [weekly(0.6), short];
+    await quotaCore.checkQuota();
+    expect(state()).toEqual({ checkedAt: t, ok: true, buckets: [weekly(0.6), short] });
+    // Above the share, and a short bucket however low: nothing is said.
+    expect(told).toEqual([]);
+
+    p.quotaReport = [weekly(0.2), short];
+    await quotaCore.checkQuota();
+    expect(told).toEqual([{ kind: "quota_low", provider: "q", group: "Group", remaining: 0.2, resetsAt }]);
+    // Lower still in the same window, its reset instant a few seconds off: said once.
+    p.quotaReport = [weekly(0.1, resetsAt + 4_000), short];
+    await quotaCore.checkQuota();
+    expect(told).toHaveLength(1);
+    // Nor after a restart: what was announced is in the store.
+    const again: unknown[] = [];
+    const restarted = new Core([p], store, { maxWaitMs: 1_000, budgets: {}, log: createLogger("t"), now: () => t, quotaNotifyBelow: { q: 0.25 }, onAvailability: (e) => again.push(e) });
+    await restarted.checkQuota();
+    expect(again).toEqual([]);
+
+    // A failed read keeps the last figures and says they are not fresh.
+    p.quotaReport = new Error("boom");
+    await quotaCore.checkQuota();
+    expect(state()).toMatchObject({ ok: false, buckets: [weekly(0.1, resetsAt + 4_000), short] });
+
+    // The next window, low again: said again.
+    p.quotaReport = [weekly(0.15, resetsAt + 7 * 86_400_000), short];
+    await quotaCore.checkQuota();
+    expect(told).toHaveLength(2);
+  });
+
   it("counts kept conversations per owner without their text, and deletes an owner's", async () => {
     conversations.save({ id: "resp_1", previousId: null, owner: "app-one", model: "a-1", input: [{ role: "user", text: "a secret" }], output: "kept" });
     conversations.save({ id: "resp_2", previousId: "resp_1", owner: "app-one", model: "a-1", input: [{ role: "user", text: "more" }], output: "kept" });

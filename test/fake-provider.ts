@@ -1,4 +1,4 @@
-import type { HealthStatus, ModelKind, ModelSpec, Provider } from "../src/providers/adapter.js";
+import type { HealthStatus, ModelKind, ModelSpec, Provider, QuotaBucket } from "../src/providers/adapter.js";
 import type { ImageRequest, InternalRequest, ProviderEvent } from "../src/core/types.js";
 
 export type Script = ProviderEvent[] | ((req: InternalRequest) => ProviderEvent[]);
@@ -13,6 +13,13 @@ export class FakeProvider implements Provider {
   acceptsAttachments = true;
   /** How many times the probe actually ran: 0 is how a skipped check is observed. */
   healthCalls = 0;
+  /** Set by a test to give the fake a quota report, as a CLI that has one; a thrown error is a failed read. */
+  quotaReport?: QuotaBucket[] | Error;
+  get reportsQuota(): boolean { return this.quotaReport !== undefined; }
+  async quota(): Promise<QuotaBucket[]> {
+    if (this.quotaReport instanceof Error) throw this.quotaReport;
+    return this.quotaReport ?? [];
+  }
   /** The model the probe runs, as a CLI provider reads it from health_model. */
   healthModel?: string;
   /** What that model resolves to, so Core can key the probe's pause as it does a request's. */

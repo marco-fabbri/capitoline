@@ -92,6 +92,10 @@ describe("notifications", () => {
 describe("the availability messages", () => {
   const at = Date.UTC(2026, 9, 3, 18, 49);
   it("says what paused, until when, and whose quota", () => {
+    expect(describeAvailability(cfg, { kind: "quota_low", provider: "antigravity", group: "Gemini Models", remaining: 0.236, resetsAt: null }))
+      .toBe("antigravity: 24% of the weekly quota of Gemini Models is left.");
+    expect(describeAvailability(cfg, { kind: "quota_low", provider: "antigravity", group: "Gemini Models", remaining: 0.05, resetsAt: at }))
+      .toMatch(/^antigravity: 5% of the weekly quota of Gemini Models is left, and it refills /);
     expect(describeAvailability(cfg, { kind: "paused", provider: "claude", scope: null, until: at }))
       .toBe("claude paused until 2026-10-03 18:49 UTC: the subscription's quota is used up.");
     expect(describeAvailability(cfg, { kind: "paused", provider: "codex", scope: "text:gpt-6.1-sol", until: at }))

@@ -672,7 +672,17 @@ command that installs it, and these:
   after that. A restart in between starts the hour again;
 - **signed out**, when a health check finds a CLI's login gone twice a minute
   apart (§8), with what to do, and **signed in again** when a check finds it
-  back.
+  back;
+- **a weekly quota running low**, for a CLI that reports its own quota
+  (`providers.<id>.quota`, Antigravity today). The gateway runs the CLI's
+  quota report at start and every hour; no model is called and nothing is
+  spent. `/health` carries what it said under `providers[].quota` (each group
+  of models, its weekly and its five-hour bucket, the share left and when it
+  refills) and the operator's page shows it on the provider's card. A weekly
+  bucket under `quota.notify_below` (0.2, a fifth, by default) is announced
+  once per window: it is the limit that stops a host for days, and a
+  five-hour one refills by itself. Images have no bucket of their own there:
+  they draw on the group of the model that makes them.
 
 Each is sent once: a restart does not repeat a pause already announced.
 Nothing else is ever sent. A POST that fails on the network or on the

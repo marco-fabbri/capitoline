@@ -114,5 +114,6 @@ export function describeAvailability(cfg: Config, e: AvailabilityEvent): string 
     case "refusing": return `${scopeName(cfg, e.provider, e.scope)} has been refused for ${span(e.refusedMs)}, and the provider gives no reset time.${e.weeklyResetAt !== undefined ? ` The subscription's weekly window resets ${when(e.weeklyResetAt)}, which may be when it returns.` : ""}`;
     case "signed_out": return `${e.provider} is signed out: log in again as runner (docs/deploy.md §6), then restart the service.`;
     case "signed_in": return `${e.provider} is signed in again.`;
+    case "quota_low": return `${e.provider}: ${Math.round(e.remaining * 100)}% of the weekly quota of ${e.group} is left${e.resetsAt !== null ? `, and it refills ${when(e.resetsAt)}` : ""}.`;
   }
 }

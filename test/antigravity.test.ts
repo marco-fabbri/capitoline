@@ -79,6 +79,20 @@ describe("antigravity adapter", () => {
     expect(await names([])).toEqual(["subagent:"]);
     expect(await names(undefined)).toEqual(["subagent:"]);
   });
+  // The CLI's own quota report, captured on 2026-10-05: no model is called.
+  it("reads the quota report into its buckets, and refuses what is not one", () => {
+    const buckets = antigravityAdapter.readQuota!(readFileSync("test/fixtures/antigravity/usage-command.json", "utf8"));
+    expect(buckets.map((b) => `${b.id}|${b.group}|${b.window}`)).toEqual([
+      "gemini-weekly|Gemini Models|weekly", "gemini-5h|Gemini Models|5h", "3p-weekly|Claude and GPT models|weekly", "3p-5h|Claude and GPT models|5h",
+    ]);
+    expect(buckets[0].remaining).toBeCloseTo(0.2357, 3);
+    expect(buckets[0].resetsAt).toBe(Date.parse("2026-10-07T10:26:34Z"));
+    expect(() => antigravityAdapter.readQuota!("not json")).toThrow();
+    expect(() => antigravityAdapter.readQuota!(JSON.stringify({ status: "SUCCESS" }))).toThrow(/no quota groups/);
+    // A bucket that cannot be read is left out, never guessed.
+    const odd = { command: { data: { groups: [{ name: "G", buckets: [{ id: "a", window: "weekly", remaining_fraction: 1.4 }, { id: "b", window: "weekly", remaining_fraction: 0.5, reset_time: "soon" }] }] } } };
+    expect(antigravityAdapter.readQuota!(JSON.stringify(odd))).toEqual([{ id: "b", group: "G", window: "weekly", remaining: 0.5, resetsAt: null }]);
+  });
   it("never puts the preamble on an image run, whose one job is to call a tool", () => {
     const image = models.find((m) => m.name === "antigravity-image")!;
     const c = antigravityAdapter.buildImageCommand!(repoCfg, image, { model: "antigravity-image", prompt: "a red bicycle" });

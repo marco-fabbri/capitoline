@@ -40,7 +40,20 @@ export interface Adapter {
    * a catalog must never be replaced by a misread one.
    */
   listModels?(stdout: string, cfg: ProviderConfig): ListedModel[];
+  /**
+   * Reads the output of the CLI's own quota report (`quota.args`). Present
+   * only for CLIs that have one. Throws when the output is not a report.
+   */
+  readQuota?(stdout: string): QuotaBucket[];
 }
+
+/**
+ * One bucket of a subscription's quota, as the CLI itself reports it: which
+ * models share it (`group`), over what window, the share still unspent (0 to
+ * 1) and when it refills. Not something the gateway counts: the provider's
+ * own figure, read without a model call.
+ */
+export interface QuotaBucket { id: string; group: string; window: string; remaining: number; resetsAt: number | null }
 
 // The verdict of one probe. `scope` and `model` carry the same attribution the
 // error events do: a refusal the CLI blamed on the model the probe happened to
@@ -97,6 +110,10 @@ export interface Provider {
   isRetired?(model: ModelSpec): boolean;
   /** The names discovery added, and the declared names it retired, as they stand. */
   catalogNames?(): { discovered: string[]; retired: string[] };
+  /** True for a provider whose configuration declares `quota` and whose adapter can read the report. */
+  readonly reportsQuota?: boolean;
+  /** Runs the CLI's quota report. Throws on any failure, including a report with no bucket. */
+  quota?(): Promise<QuotaBucket[]>;
 }
 
 /**

@@ -1,7 +1,7 @@
 import type { ProviderConfig } from "../config.js";
 import { flatten, splitSystem } from "../core/prompt.js";
 import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.js";
-import { withPreamble, cliId, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ListedModel, type ModelSpec } from "./adapter.js";
+import { withPreamble, cliId, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ListedModel, type ModelSpec, type QuotaBucket } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
 // The CLI is an agent: the prompt asks for one image and forbids everything
@@ -38,8 +38,33 @@ function listAntigravityModels(stdout: string): ListedModel[] {
   });
 }
 
+/**
+ * `agy --output-format json -p /usage`: no model is called, and the report is
+ * under `command.data.groups`, each group the models that share a quota and
+ * its buckets (a weekly one and a five-hour one, test/fixtures/antigravity/usage-command.json).
+ * There is no bucket for images: they draw on the group of the model that
+ * makes them. A bucket that cannot be read is left out; a report with none
+ * left is not a report.
+ */
+function readAntigravityQuota(stdout: string): QuotaBucket[] {
+  const report = JSON.parse(stdout) as { command?: { data?: { groups?: unknown } } };
+  const groups = report.command?.data?.groups;
+  if (!Array.isArray(groups)) throw new Error("no quota groups in the usage report");
+  const out: QuotaBucket[] = [];
+  for (const g of groups as { name?: unknown; buckets?: unknown }[]) {
+    if (typeof g?.name !== "string" || !Array.isArray(g.buckets)) continue;
+    for (const b of g.buckets as { id?: unknown; window?: unknown; remaining_fraction?: unknown; reset_time?: unknown }[]) {
+      if (typeof b?.id !== "string" || typeof b.window !== "string" || typeof b.remaining_fraction !== "number" || !(b.remaining_fraction >= 0 && b.remaining_fraction <= 1)) continue;
+      const at = typeof b.reset_time === "string" ? Date.parse(b.reset_time) : NaN;
+      out.push({ id: b.id, group: g.name, window: b.window, remaining: b.remaining_fraction, resetsAt: Number.isFinite(at) ? at : null });
+    }
+  }
+  return out;
+}
+
 export const antigravityAdapter: Adapter = {
   listModels: listAntigravityModels,
+  readQuota: readAntigravityQuota,
 
   buildCommand(cfg: ProviderConfig, model: ModelSpec, req: InternalRequest): Command {
     const { system: sent, rest } = splitSystem(req.messages);

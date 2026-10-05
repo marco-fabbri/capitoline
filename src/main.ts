@@ -104,6 +104,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
     maxWaitMs: cfg.server.queue.max_wait_s * 1000, budgets, imageQuotas, log: log.child({ mod: "core" }),
     onCatalogChange: notify ? (provider, change) => notify(describeCatalogChange(cfg, provider, change)) : undefined,
     onAvailability: notify ? (event) => notify(describeAvailability(cfg, event)) : undefined,
+    quotaNotifyBelow: Object.fromEntries(Object.entries(cfg.providers).flatMap(([id, p]) => (p.quota ? [[id, p.quota.notify_below]] : []))),
   });
 
   // One Council per configured council, registered as a virtual model: a client
@@ -238,6 +239,10 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // discovery_interval_h (docs/deploy.md §7.2).
   core.checkCatalog().catch((err: unknown) => log.error({ err }, "model catalog check failed"));
   const stopCatalog = core.startCatalogLoop(cfg.server.discovery_interval_h * 3600_000);
+  // What each CLI says is left of its quota: no model is called, so it is
+  // read now and then every hour.
+  core.checkQuota().catch((err: unknown) => log.error({ err }, "quota check failed"));
+  const stopQuota = core.startQuotaLoop(3600_000);
   // The versions on the same rhythm: a new CLI version is news once a day.
   void versions.check();
   const stopVersions = versions.startLoop(cfg.server.discovery_interval_h * 3600_000);
@@ -252,6 +257,7 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const close = () => (closing ??= (async () => {
     stopHealth();
     stopCatalog();
+    stopQuota();
     stopVersions();
     stopPauseSweep();
     core.cancelAuthRechecks();
