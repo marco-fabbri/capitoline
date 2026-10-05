@@ -58,7 +58,8 @@ worked. Since then the prompt asks for the image and no longer says how to make 
 that hand-off and nothing else, `image.wait_tools` admits the two steps the
 agent waits for it with (a timer, and listing its subagents), and the
 conversation the subagent keeps is forgotten with the run's. When an update touches images, read `agy changelog`
-before trusting one passing image.
+before trusting a passing image; the update script now asks for three in a
+row, since one passes half the time when the agent goes wrong one run in two.
 
 ## The model lists
 
@@ -123,7 +124,7 @@ On the host, as root, from the clone:
    It records the installed version (and, for Antigravity, whose installer
    only installs the latest, a copy of the binary), installs as `runner`,
    checks Codex's new features and tool behaviour (the section above), runs
-   the smoke test below with one image from the CLI's own image model through
+   the smoke test below with three images from the CLI's own image model through
    a temporary gateway key it revokes afterwards, checks that Antigravity still
    refuses to run a command (`docs/deploy.md` §6.4) and still has its
    self-update switched off (§6.3c), and **puts the previous version back if
@@ -146,7 +147,7 @@ On the host, as root, from the clone:
    cd /var/lib/capitoline/app && scripts/update-cli.sh antigravity image    # or codex
    ```
 
-   It draws one image with the installed version. If that works it says so
+   It draws three images with the installed version. If that works it says so
    and clears what was kept; if it fails it puts the previous version back,
    as the update itself would have. Until then a broken image path would show
    as a failed image request, never as a wrong one.

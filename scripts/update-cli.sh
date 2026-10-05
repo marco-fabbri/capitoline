@@ -17,7 +17,7 @@
 # 2. Install, as runner: npm for Claude Code and Codex (a version may be given),
 #    the official installer for Antigravity (it verifies the SHA-512 itself).
 # 3. Check: Codex must enable no feature it did not enable before; then the
-#    smoke test, with one image from this CLI's own image model if it has one,
+#    smoke test, with three images from this CLI's own image model if it has one,
 #    through a temporary gateway key created and revoked here; then, for Codex,
 #    a request to run a command must produce no step (codex-tool-probe.mjs);
 #    for Antigravity, the same request must not run (docs/deploy.md §6.4), and
@@ -136,7 +136,9 @@ smoke() {
   fi
   local image=0
   [[ -n "$image_model" && "$image_skip" != 1 ]] && image=1
-  CAPITOLINE_API_KEY="$KEY" SMOKE_IMAGE="$image" SMOKE_IMAGE_MODEL="$image_model" bash scripts/smoke.sh "$BASE"
+  # Three images, not one: an agent that takes the right path one run in two
+  # passes a single image half the time (Antigravity 1.2.16, 2026-10-03).
+  CAPITOLINE_API_KEY="$KEY" SMOKE_IMAGE="$image" SMOKE_IMAGE_COUNT=3 SMOKE_IMAGE_MODEL="$image_model" bash scripts/smoke.sh "$BASE"
 }
 
 # Whether the image model's quota is used up, and until when if /health says.

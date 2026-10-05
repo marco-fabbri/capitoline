@@ -47,6 +47,13 @@ done
 # about whether an update broke the gateway, which is what this script is for.
 # SMOKE_IMAGE_MODEL names the image model to try (scripts/update-cli.sh sets
 # it to the updated CLI's own); otherwise the first one the configuration declares.
+# SMOKE_IMAGE_COUNT asks for that many images in a row, one by default. One
+# passing image proves little about an agent: Antigravity 1.2.16 passed its
+# update check and then failed one image request in two, because the agent
+# took a different path from one run to the next. The update script asks for
+# three; a quota refusal ends the series without failing it.
+COUNT="${SMOKE_IMAGE_COUNT:-1}"
+[[ "$COUNT" =~ ^[1-9][0-9]?$ ]] || COUNT=1
 IMG="${SMOKE_IMAGE_MODEL:-}"
 [[ -n "${IMG// /}" ]] || IMG=$(jq -r '[.models[] | select(.kind == "image") | .name][0] // empty' <<<"$HEALTH" 2>/dev/null || true)
 [[ -n "${IMG// /}" ]] || IMG=$(yq -r '.providers[].models | to_entries[] | select(.value.kind == "image") | .key' "$CFG" 2>/dev/null | head -1 || true)
@@ -59,6 +66,7 @@ MIN=$(yq -r '[.providers[].image.min_bytes] | map(select(. != null)) | .[0] // "
 if [[ -n "${IMG// /}" && "${SMOKE_IMAGE:-0}" != "1" ]]; then
   printf '%-22s %s\n' "$IMG" "skipped (SMOKE_IMAGE=1 to spend one image of the quota)"
 elif [[ -n "${IMG// /}" ]]; then
+ for ((shot = 1; shot <= COUNT; shot++)); do
   : > "$TMP"
   resp=$(curl -sS --max-time 300 ${HDR[@]+"${HDR[@]}"} -o "$TMP" -w '%{http_code}' -H 'content-type: application/json' \
     -d "{\"model\":\"$IMG\",\"prompt\":\"a red fox in the snow, 16:9\"}" \
@@ -71,8 +79,10 @@ elif [[ -n "${IMG// /}" ]]; then
     printf '%-22s %s  %-40s bytes=%s\n' "$IMG" "$resp" "$(jq -r '"\(.capitoline.mime) \(.capitoline.width)x\(.capitoline.height)"' "$TMP")" "$bytes"
   elif [[ "$resp" == "429" && "$code" == "rate_limited" ]]; then
     printf '%-22s %s  %s\n' "$IMG" "$resp" "image quota exhausted, not a regression$(jq -r 'if .capitoline.quota.resetAt then " (reopens \(.capitoline.quota.resetAt))" else "" end' "$TMP" 2>/dev/null || true)"
+    break
   else
     printf '%-22s %s  %s\n' "$IMG" "$resp" "$(jq -r '.error.message // empty' "$TMP" 2>/dev/null) [bytes=$bytes min_bytes=$MIN; see docs/deploy.md §7.1]"; fail=1
   fi
+ done
 fi
 exit $fail
