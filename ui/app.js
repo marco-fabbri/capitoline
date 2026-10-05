@@ -133,7 +133,7 @@ const VIEWS = {
           p.catalog ? [el("dt", {}, "Catalog"), el("dd", {}, p.catalog.checkedAt ? `read ${when(p.catalog.checkedAt)}` : "not read yet",
             p.catalog.discovered.length ? `, ${p.catalog.discovered.length} discovered` : "", p.catalog.retired.length ? `, ${p.catalog.retired.length} retired` : "")] : null,
           // What the CLI itself says is left of the subscription's quota.
-          (p.quota?.buckets ?? []).map((b) => [el("dt", {}, `${b.group}, ${b.window}`),
+          (p.quota?.buckets ?? []).flatMap((b) => [el("dt", {}, `${b.group}, ${b.window}`),
             el("dd", {}, chip(`${Math.round(b.remaining * 100)}% left`, b.remaining < 0.2 ? "bad" : b.remaining < 0.5 ? "warn" : "ok"), b.resetsAt ? ` refills ${when(b.resetsAt)}` : "", p.quota.ok ? "" : " (last read failed)")])),
         el("button", { type: "button", on: { click: () => run(async () => { notice(`Checking ${p.id}… this is a real call and can take a minute.`); await api("/v1/admin/health-check", { method: "POST", body: { provider: p.id } }); return `${p.id} checked.`; }) } }, "Check now"));
     });
