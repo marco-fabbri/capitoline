@@ -2,10 +2,22 @@
 # capitoline-collect-image <conversation-uuid>           Antigravity
 # capitoline-collect-image codex <thread-uuid>           Codex
 # capitoline-collect-image forget <conversation-uuid>    Antigravity, any run
+# capitoline-collect-image sweep <minutes>               Antigravity, what no run forgot
 # Prints the newest image of that conversation to stdout, then removes the
 # conversation's image directory. Run as `runner` through sudo; the sudoers rule
 # allows any arguments to this path, so this script is what bounds them: an
-# optional literal `codex` or `forget` and one UUID, nothing else.
+# optional literal `codex` or `forget` and one UUID, or `sweep` and a number of
+# minutes, nothing else.
+#
+# `sweep` forgets every Antigravity conversation untouched for that many
+# minutes, and prints how many there were. A subagent keeps a conversation of
+# its own, and a run cut short may never have named it: this is what removes
+# those. The minutes must be longer than any run can last, so that nothing a
+# run is still using is taken; under ten is refused.
+#
+# When a conversation holds no image the names of the files it does hold go to
+# stderr with the refusal: names only, for the journal, to tell a run that made
+# nothing from one that saved its image somewhere unexpected.
 #
 # `forget` removes what an Antigravity run leaves in the runner's home once it
 # has ended, since the CLI has no option not to keep it (Claude Code and Codex
@@ -26,6 +38,21 @@
 # any PNG in it is the one, whatever the CLI calls it next.
 set -euo pipefail
 uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+if [[ "${1:-}" == "sweep" ]]; then
+  minutes="${2:-}"; [[ $# -eq 2 ]] || { echo "usage: $0 sweep <minutes>" >&2; exit 2; }
+  [[ "$minutes" =~ ^[0-9]{2,5}$ && "$minutes" -ge 10 ]] || { echo "bad minutes: a whole number, ten or more" >&2; exit 2; }
+  brain="$HOME/.gemini/antigravity-cli/brain"
+  n=0
+  if [ -d "$brain" ]; then
+    while IFS= read -r dir; do
+      cid="$(basename "$dir")"
+      [[ "$cid" =~ $uuid ]] || continue
+      "$0" forget "$cid" && n=$((n + 1))
+    done < <(find "$brain" -mindepth 1 -maxdepth 1 -type d -mmin "+$minutes" 2>/dev/null)
+  fi
+  echo "$n"
+  exit 0
+fi
 if [[ "${1:-}" == "forget" ]]; then
   cid="${2:-}"; [[ $# -eq 2 ]] || { echo "usage: $0 forget <conversation-uuid>" >&2; exit 2; }
   [[ "$cid" =~ $uuid ]] || { echo "bad conversation id" >&2; exit 2; }
@@ -58,6 +85,11 @@ fi
 [ -d "$dir" ] || { echo "no such conversation" >&2; exit 3; }
 # shellcheck disable=SC2086  # the pattern is ours, and globbing it is the point
 img=$(ls -t "$dir"/$pattern 2>/dev/null | head -1 || true)
-[ -n "$img" ] || { rm -rf "$dir"; echo "no image produced" >&2; exit 4; }
+if [ -z "$img" ]; then
+  held=$(cd "$dir" && find . -maxdepth 3 -type f 2>/dev/null | sed 's|^\./||' | head -30 | tr '\n' ' ' || true)
+  rm -rf "$dir"
+  echo "no image produced; the conversation held: ${held:-nothing}" >&2
+  exit 4
+fi
 cat "$img"
 rm -rf "$dir"

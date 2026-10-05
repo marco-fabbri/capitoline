@@ -436,6 +436,7 @@ though they are not host-specific, all under `providers.antigravity.image`:
 | `quota_per_window` | `12` — the short image quota, 12 generations per 5 hours (the window length is fixed in the code, `H5`), reported only: the gateway never blocks on it. `/health` (`providers[].imageQuota`) and `/v1/models` (`capitoline.quota`) show `used` against it, and `used` is a lower bound rather than an exact count: it counts the successful generations served by the images endpoint, while a text run that invokes `generate_image` spends quota without being counted, and so does a generation the client abandons. Leave the key out and the count is still reported, with `limit: null`. The second, much longer quota of the same model (days) cannot be counted: it appears only as the `resetAt` of a quota hit, in `/health` and in the MCP `list_models` tool — never in `/v1/models`, which by then no longer lists the paused model |
 | `allowed_tools` | the one step an image run may take, once: `[generate_image]` by default, `["subagent:image-generator"]` for Antigravity, which since 1.2.16 makes images through that built-in subagent (a subagent step is named `subagent:<type>`). Do not extend: any other tool or subagent aborts the run, which is what keeps an image request from turning into an agent session. When that happens after the allowed step has finished, the agent is stopped all the same and an image it had already made is still returned |
 | `wait_tools` | steps admitted any number of times, and only after an allowed one: how the agent waits for it. Empty by default; for Antigravity `[schedule, "manage_subagents:list"]`, a timer and a look at whether the subagent is still running (a `manage_subagents` step is named with its action) |
+| `attempts` | how many times a request is run before it is told no image came out, 1 by default and 2 for Antigravity. Only a run that made nothing is run again (stopped at a step it is not allowed, or ended with no image): never after a quota refusal, a timeout or a rejected file, where a second run would spend the same refusal or another image |
 
 **The council block.** `council:` is in the repository file too, and it is the
 one block that changes what a request costs. It holds two councils, each a
@@ -576,6 +577,18 @@ gateway runs `capitoline-collect-image forget <conversation-id>`
 its row in `conversation_summaries.db` (hence `sqlite3` in §1). It runs in the
 background and a failure is only logged: the answer never waits on it. No
 sudoers change: the rule of §5 already allows the path with any arguments.
+
+A conversation no run forgot is swept instead. Since Antigravity 1.2.16 an
+image is made by a subagent that keeps a conversation of its own; the gateway
+forgets it with the run's when the stream names it, and a run cut short may
+never have. At start and every hour the gateway runs
+`capitoline-collect-image sweep 60` (`providers.antigravity.sweep`), which
+forgets every conversation untouched for an hour, six times the longest run,
+and says in the journal how many there were. **The helper in `/usr/local/bin`
+is a copy: install it again after an upgrade that changes it** (the command of
+§7.1 above, or `deploy/ansible/site.yml`), or the sweep is refused as a bad
+argument and only logged.
+
 What stays is not tied to a conversation: `agy`'s logs, which carry no prompt,
 and a 267-byte opaque file per working directory under `implicit/`.
 

@@ -96,8 +96,11 @@ describe("config", () => {
     expect(agy.image.allowed_tools).toEqual(["subagent:image-generator"]);
     // How the agent waits for it, and only that: looking at its subagents, never acting on them.
     expect(agy.image.wait_tools).toEqual(["schedule", "manage_subagents:list"]);
+    // A run that made nothing is run once more; what no run forgot is swept, an hour old at least.
+    expect(agy.image.attempts).toBe(2);
+    expect(agy.sweep).toEqual(["/usr/local/bin/capitoline-collect-image", "sweep", "60"]);
     expect(agy.image.args).toEqual([]);
-    expect(cfg.providers.claude.image).toEqual({ args: [], allowed_tools: ["generate_image"], wait_tools: [], collect: undefined, min_bytes: 200000 });
+    expect(cfg.providers.claude.image).toEqual({ args: [], allowed_tools: ["generate_image"], wait_tools: [], attempts: 1, collect: undefined, min_bytes: 200000 });
   });
   it("requires every provider to name the model, effort and system-prompt flags", () => {
     // No defaults on purpose: a file written before these keys existed — the
@@ -178,7 +181,7 @@ describe("config", () => {
     })).providers.x;
     expect(p.models.img).toEqual({ cli_model: "i", effort_suffix: false, kind: "image", timeout_s: 240 });
     expect(p.models.a.kind).toBe("text");
-    expect(p.image).toEqual({ collect: ["/usr/local/bin/collect", "--flag"], min_bytes: 10, args: ["--x"], wait_tools: [], allowed_tools: ["generate_image", "other"] });
+    expect(p.image).toEqual({ collect: ["/usr/local/bin/collect", "--flag"], min_bytes: 10, args: ["--x"], wait_tools: [], attempts: 1, allowed_tools: ["generate_image", "other"] });
   });
   it("rejects an unknown model kind and a non-positive timeout", () => {
     const base = (models: string) => config({ models: `{ ${models} }`, image: "{ collect: [c] }" });
@@ -789,6 +792,7 @@ describe("the end-to-end configuration tracks the repository one", () => {
     "providers.antigravity.binary",              // the fake CLIs replay fixtures
     "providers.antigravity.forget",              // no CLI home to clean behind a fake
     "providers.antigravity.image.collect",       //   and so does the collect helper
+    "providers.antigravity.sweep",               // no CLI home to sweep behind a fake
     "providers.antigravity.timeout_s",           // seconds, not minutes, so a hung fake fails fast
     "providers.antigravity.version",             // no version check: the suite never reaches the network
     "providers.claude.binary",

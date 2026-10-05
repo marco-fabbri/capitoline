@@ -242,6 +242,8 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // What each CLI says is left of its quota: no model is called, so it is
   // read now and then every hour.
   core.checkQuota().catch((err: unknown) => log.error({ err }, "quota check failed"));
+  // And, on the same rhythm, the conversations a CLI kept that no run forgot.
+  void core.sweepLeftovers();
   const stopQuota = core.startQuotaLoop(3600_000);
   // The versions on the same rhythm: a new CLI version is news once a day.
   void versions.check();

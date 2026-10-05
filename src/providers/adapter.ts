@@ -110,6 +110,10 @@ export interface Provider {
   isRetired?(model: ModelSpec): boolean;
   /** The names discovery added, and the declared names it retired, as they stand. */
   catalogNames?(): { discovered: string[]; retired: string[] };
+  /** True for a provider whose configuration declares `sweep`. */
+  readonly sweeps?: boolean;
+  /** Removes the conversations the CLI left that no run forgot. Never throws. */
+  sweep?(): Promise<void>;
   /** True for a provider whose configuration declares `quota` and whose adapter can read the report. */
   readonly reportsQuota?: boolean;
   /** Runs the CLI's quota report. Throws on any failure, including a report with no bucket. */

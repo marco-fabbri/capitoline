@@ -206,7 +206,7 @@ describe("CliProvider.generateImage", () => {
     // called generate_image itself: they still exercise the guard, the quota
     // detection and the collect, with the tool they were recorded with. The
     // subagent hand-off of today's configuration has its own tests below.
-    const cfg = { ...agy, binary: FAKE, args: ["--mode", mode, "--file", fixture], timeout_s: 1, image: { ...agy.image, allowed_tools: ["generate_image"], collect: [COLLECT] }, forget: undefined, ...extra };
+    const cfg = { ...agy, binary: FAKE, args: ["--mode", mode, "--file", fixture], timeout_s: 1, image: { ...agy.image, allowed_tools: ["generate_image"], attempts: 1, collect: [COLLECT] }, forget: undefined, sweep: undefined, ...extra };
     return new CliProvider("antigravity", cfg, adapter, r, createLogger("t"), { now: () => NOW, ...opts });
   }
   async function generate(p: CliProvider, signal?: AbortSignal, timeoutS?: number) {
@@ -260,7 +260,8 @@ describe("CliProvider.generateImage", () => {
     const SUBAGENT_RUN = join(process.cwd(), "test/fixtures/antigravity/image-subagent.jsonl");
     const PARENT = "e0405ad8-9fe1-45e8-9eea-b05629b4c775", CHILD = "d42fca3a-f043-4234-a505-30dd1099c02a";
     // The repository's own allow-list, not the block's: this is what is deployed.
-    const today = { image: { ...agy.image, collect: [COLLECT] } };
+    const today = { image: { ...agy.image, attempts: 1, collect: [COLLECT] } };
+    const twice = { image: { ...agy.image, attempts: 2, collect: [COLLECT] } };
 
     it("admits the hand-off, collects the image from the run's conversation and forgets the subagent's too", async () => {
       const spy = spyRunner();
@@ -268,6 +269,29 @@ describe("CliProvider.generateImage", () => {
       expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
       await vi.waitFor(() => expect(spy.captures).toHaveLength(3));
       expect(spy.captures.map((c) => c.args)).toEqual([[PARENT], ["forget", PARENT], ["forget", CHILD]]);
+    });
+    it("runs a request again, once, when the run made nothing, and never after a quota refusal", async () => {
+      // Each attempt is its own CLI process: the spy counts them by their collect calls.
+      const count = (spy: ReturnType<typeof spyRunner>) => spy.captures.filter((c) => c.args[0] !== "forget").length;
+      const stopped = synthetic([init, toolStep("run_command", "ACTIVE"), result]);
+      let spy = spyRunner();
+      expect(await generate(imageProvider(stopped, twice, spy, {}, "replay-linger"), undefined, 5)).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: run_command" }]);
+      expect(count(spy)).toBe(0); // stopped before anything could be collected, both times
+
+      // Ended with no image: collected twice, refused once.
+      spy = spyRunner();
+      const none = await withCollect("none", () => generate(imageProvider(join(process.cwd(), "test/fixtures/antigravity/image-tool-unavailable.jsonl"), twice, spy)));
+      expect(none).toEqual([{ type: "error", kind: "bad_output", detail: "no image produced" }]);
+      expect(count(spy)).toBe(2);
+      spy = spyRunner();
+      await withCollect("none", () => generate(imageProvider(join(process.cwd(), "test/fixtures/antigravity/image-tool-unavailable.jsonl"), today, spy)));
+      expect(count(spy)).toBe(1);
+
+      // A quota refusal is not run again: it would spend the same refusal.
+      spy = spyRunner();
+      const quota = await withCollect("none", () => generate(imageProvider(join(process.cwd(), "test/fixtures/antigravity/image-subagent-429.jsonl"), twice, spy)));
+      expect(quota[0]).toMatchObject({ type: "error", kind: "rate_limited" });
+      expect(count(spy)).toBe(2); // the run's own conversation and the subagent's, one attempt
     });
     it("looks for the image in the subagent's conversation when the run's own holds none", async () => {
       const spy = spyRunner();

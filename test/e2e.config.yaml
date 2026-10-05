@@ -386,6 +386,11 @@ providers:
       # cancels, and a look at whether it is still running. Any other action of
       # manage_subagents (it can also stop or message one) is not admitted.
       wait_tools: [schedule, "manage_subagents:list"]
+      # An agent takes a different path from one run to the next: a run that
+      # made nothing (stopped at a step it is not allowed, or ended with no
+      # image) is run once more before the request is refused. Never after a
+      # quota refusal or a timeout.
+      attempts: 2
 
 # The council. A virtual model, asked for in `model` like any other, which
 # answers by seating one member per family, having them rank each other's

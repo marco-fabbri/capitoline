@@ -50,6 +50,14 @@ interface Run {
   windDown(): void;
 }
 
+// A failed image run that drew nothing and is worth one more: the agent was
+// stopped at a step it is not allowed, or ended without an image. Never a
+// quota refusal, a timeout or a collected file that was rejected: a second
+// run would spend the same refusal, or another image.
+function madeNothing(e: Extract<ProviderEvent, { type: "error" }>): boolean {
+  return e.kind === "bad_output" && (e.detail.startsWith("unexpected tool call:") || e.detail === "no image produced");
+}
+
 export class CliProvider implements Provider {
   readonly id: string;
   readonly concurrencyLimit: number;
@@ -112,6 +120,22 @@ export class CliProvider implements Provider {
    * recognise its own model id (2026-09-29); a listing that fails the same way
    * must retire nothing.
    */
+  get sweeps(): boolean { return this.cfg.sweep !== undefined; }
+
+  /** Runs the configured sweep of what no run forgot. Never throws: a sweep that fails is tried again at the next round. */
+  async sweep(): Promise<void> {
+    if (!this.cfg.sweep) return;
+    const [binary, ...args] = this.cfg.sweep;
+    try {
+      const r = await this.runner.capture({ binary, args, timeoutMs: LIST_TIMEOUT_MS, maxBytes: LIST_MAX_BYTES });
+      const swept = r.stdout.toString("utf8").trim();
+      if (r.exitCode !== 0) this.log.warn({ provider: this.id, exitCode: r.exitCode, timedOut: r.timedOut, stderr: r.stderr.slice(-500) }, "sweep of left conversations failed");
+      else if (swept !== "" && swept !== "0") this.log.info({ provider: this.id, removed: swept }, "conversations no run forgot were removed");
+    } catch (e) {
+      this.log.warn({ provider: this.id, err: String(e) }, "sweep of left conversations failed");
+    }
+  }
+
   get reportsQuota(): boolean { return this.cfg.quota !== undefined && this.adapter.readQuota !== undefined; }
 
   /** Runs the CLI's own quota report as the runner user: no model is called, nothing is spent. */
@@ -274,6 +298,23 @@ export class CliProvider implements Provider {
       yield { type: "error", kind: "bad_output", detail: `provider "${this.id}" cannot generate images` };
       return;
     }
+    // A run yields nothing until it ends, so its events can be held and the
+    // run made again before the caller has seen anything.
+    for (let attempt = 1; ; attempt++) {
+      const events: ProviderEvent[] = [];
+      for await (const ev of this.imageRun(req, model, signal)) events.push(ev);
+      const failed = events.length === 1 && events[0].type === "error" ? events[0] : undefined;
+      if (failed && attempt < this.cfg.image.attempts && !signal?.aborted && madeNothing(failed)) {
+        this.log.warn({ model: model.name, attempt, detail: failed.detail }, "image run made nothing: running it again");
+        continue;
+      }
+      yield* events;
+      return;
+    }
+  }
+
+  private async *imageRun(req: ImageRequest, model: ModelSpec, signal?: AbortSignal): AsyncIterable<ProviderEvent> {
+    if (!this.adapter.buildImageCommand) return;
     const { args, stdin } = this.adapter.buildImageCommand(this.cfg, model, req);
     const timeoutS = model.timeoutS ?? this.cfg.timeout_s;
     const run = await this.start(args, stdin, timeoutS * 1000, signal);

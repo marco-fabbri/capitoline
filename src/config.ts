@@ -48,6 +48,11 @@ const ImageSchema = z
     // the subagent it handed the image to is done. Nothing here makes or
     // touches anything, which is the only reason a name belongs in it.
     wait_tools: z.array(z.string()).default([]),
+    // How many times a request is run before it is told no image came out.
+    // Only a run that made nothing is run again: stopped at a step it was not
+    // allowed, or ended with no image. An agent takes a different path from
+    // one run to the next, and a second run is what a caller would do anyway.
+    attempts: z.number().int().min(1).max(3).default(1),
     collect: z.array(z.string()).min(1).optional(),
     min_bytes: z.number().int().min(0).default(200_000),
     // How many images the short quota window allows, for reporting only: the
@@ -193,6 +198,11 @@ const ProviderSchema = z.object({
   // with the conversation id as its last argument, that removes what the run
   // left. Absent for a CLI told by flag not to keep anything.
   forget: z.array(z.string().min(1)).min(1).optional(),
+  // Removes the conversations a CLI left in the runner's home that no run of
+  // the gateway forgot: a subagent's, whose id never reached the stream, or a
+  // run cut short. Run at start and every hour; the command decides what is
+  // old enough to be nobody's any more.
+  sweep: z.array(z.string().min(1)).min(1).optional(),
   // How the CLI is handed the images a request carries. `flag`: one flag per
   // image, naming the file the runner wrote into the sandbox (Codex's
   // --image). `stdin_args`: the arguments that switch the prompt to a

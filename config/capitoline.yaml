@@ -406,6 +406,11 @@ providers:
     # do. The same helper as the images removes them after each run
     # (docs/deploy.md §7.1); the sudoers rule already allows it.
     forget: [/usr/local/bin/capitoline-collect-image, forget]
+    # What no run forgot: a subagent keeps a conversation of its own, and its
+    # id does not always reach the stream before a run is cut short. At start
+    # and every hour, whatever is older than the minutes given is removed; an
+    # hour is six times the longest run.
+    sweep: [/usr/local/bin/capitoline-collect-image, sweep, "60"]
     image:
       # Image models: the CLI writes the file into its own home, never into the
       # sandbox. `collect` receives the conversation id as its last argument and
@@ -424,6 +429,11 @@ providers:
       # cancels, and a look at whether it is still running. Any other action of
       # manage_subagents (it can also stop or message one) is not admitted.
       wait_tools: [schedule, "manage_subagents:list"]
+      # An agent takes a different path from one run to the next: a run that
+      # made nothing (stopped at a step it is not allowed, or ended with no
+      # image) is run once more before the request is refused. Never after a
+      # quota refusal or a timeout.
+      attempts: 2
 
 # The council. A virtual model, asked for in `model` like any other, which
 # answers by seating one member per family, having them rank each other's

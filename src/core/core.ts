@@ -1147,6 +1147,15 @@ export class Core {
     }));
   }
 
+  /** Has every provider that keeps conversations behind remove the ones no run forgot. Tracked like a health check. */
+  sweepLeftovers(): Promise<void> {
+    const run = Promise.all([...this.states.values()].filter((s) => s.provider.sweeps && s.provider.sweep).map((s) => s.provider.sweep!())).then(() => {});
+    const tracked = run.then(() => {}, () => {});
+    this.inFlight.add(tracked);
+    void tracked.finally(() => this.inFlight.delete(tracked));
+    return run;
+  }
+
   /** Asks every provider whose CLI reports its quota for a fresh report. No model is called. Tracked like a health check. */
   checkQuota(): Promise<void> {
     const run = this.runQuota();
@@ -1191,6 +1200,7 @@ export class Core {
 
   startQuotaLoop(intervalMs: number): () => void {
     const timer = setInterval(() => {
+      void this.sweepLeftovers();
       this.checkQuota().catch((err: unknown) => this.opts.log.error({ err }, "quota check failed"));
     }, intervalMs);
     timer.unref();

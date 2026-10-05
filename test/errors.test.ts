@@ -265,8 +265,19 @@ describe("detectQuotaExhausted", () => {
       ["Rate limited (429). Resets in 30m", 1800],
       ["Your quota resets in 45s", 45],
       ["Quota reset in 1h 5m 3s", 3903],
+      // An agent reporting its subagent's refusal in its own words (2026-10-05).
+      ["a quota exhaustion error (429 RESOURCE_EXHAUSTED: capacity on the model is exhausted, resetting in ~24 minutes) and was unable to save the image.", 1440],
+      ["429 RESOURCE_EXHAUSTED: model capacity exhausted, reset in ~24 minutes", 1440],
+      ["quota limit error (429 RESOURCE_EXHAUSTED: capacity exhausted on this model, reset after ~23 minutes). Per the instructions", 1380],
+      ["quota exhausted, resets in about 2 hours", 7200],
+      ["Rate limited: resets in 1 hour and 30 minutes.", 5400],
     ])("%j -> %d s", (text, seconds) => {
       expect(detectQuotaExhausted(text)!.retryAfterS).toBe(seconds);
+    });
+
+    it("does not take a word that merely starts with a unit's letter for a duration", () => {
+      expect(detectQuotaExhausted("quota exceeded; it resets in 5 more tries")!.retryAfterS).toBeUndefined();
+      expect(detectQuotaExhausted("429: the limit resets in summer")!.retryAfterS).toBeUndefined();
     });
 
     it("reports a hit without a wait when the prose gives none", () => {

@@ -76,8 +76,11 @@ export interface QuotaHit {
 // Failure context is required: the bare noun "quota" also appears in
 // legitimate prompts the agent echoes ("the fishing quota chart").
 const PROSE_MARKER = /\b429\b|too many requests|RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED|quota\s+(?:\w+\s+)?(?:exhaust|exceed|limit|reset)|exhausted your (?:capacity|quota)|rate.?limit/i;
-// "quota will reset after 4h14m59s", "resets in 2h", "reset in 1h 5m 3s".
-const PROSE_RESET = /reset(?:s)?\s+(?:after|in)\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/i;
+// "quota will reset after 4h14m59s", "resets in 2h", "reset in 1h 5m 3s", and
+// what an agent makes of it when it reports a subagent's refusal in its own
+// words: "resetting in ~24 minutes", "reset after about 2 hours".
+const PROSE_RESET = /reset(?:s|ting)?\s+(?:after|in)\s+(?:about\s+|around\s+|approximately\s+|~\s*)?((?:\d+\s*(?:hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])[\s,]*(?:and\s+)?)+)/i;
+const PROSE_PART = /(\d+)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])/gi;
 // "122h50m8.592940533s" or "442208.592940533s" (google.rpc duration strings).
 const DURATION = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/;
 const LOOSE_MARKERS: RegExp[] = [/"code"\s*:\s*"?429\b/, /RESOURCE_EXHAUSTED/, /QUOTA_EXHAUSTED/];
@@ -221,8 +224,13 @@ function fromProse(text: string): QuotaHit | null {
 
 function proseDelay(text: string): number | undefined {
   const m = PROSE_RESET.exec(text);
-  if (!m || (m[1] === undefined && m[2] === undefined && m[3] === undefined)) return undefined;
-  return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
+  if (!m) return undefined;
+  let seconds = 0;
+  for (const part of m[1].matchAll(PROSE_PART)) {
+    const unit = part[2].toLowerCase()[0];
+    seconds += Number(part[1]) * (unit === "h" ? 3600 : unit === "m" ? 60 : 1);
+  }
+  return seconds > 0 ? seconds : undefined;
 }
 
 function parseDuration(s: string | undefined): number | undefined {

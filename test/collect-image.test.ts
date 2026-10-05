@@ -107,3 +107,74 @@ describe("capitoline-collect-image forget", () => {
     expect(traces(agy, MINE)).toHaveLength(4);
   });
 });
+
+// What no run forgot: a subagent's conversation whose id never reached the
+// stream, or a run cut short. Old enough to be nobody's, it goes; anything a
+// run may still be using stays.
+describe("capitoline-collect-image sweep", () => {
+  const OLD = "11111111-2222-4333-8444-555555555555", FRESH = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  function home() {
+    const h = mkdtempSync(join(tmpdir(), "collect-"));
+    const agy = join(h, ".gemini/antigravity-cli");
+    for (const id of [OLD, FRESH]) {
+      mkdirSync(join(agy, "brain", id), { recursive: true });
+      writeFileSync(join(agy, "brain", id, "transcript.jsonl"), "{}");
+    }
+    mkdirSync(join(agy, "brain", "not-a-conversation"), { recursive: true });
+    mkdirSync(join(agy, "conversations"), { recursive: true });
+    writeFileSync(join(agy, "conversations", `${OLD}.db`), "x");
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600_000);
+    utimesSync(join(agy, "brain", OLD), twoHoursAgo, twoHoursAgo);
+    utimesSync(join(agy, "brain", "not-a-conversation"), twoHoursAgo, twoHoursAgo);
+    return { h, agy };
+  }
+
+  it("forgets the conversations untouched for that long, says how many, and leaves the rest", () => {
+    const { h, agy } = home();
+    const r = collect(h, "sweep", "60");
+    expect(r.status).toBe(0);
+    expect(r.stdout.toString().trim()).toBe("1");
+    expect(existsSync(join(agy, "brain", OLD))).toBe(false);
+    expect(existsSync(join(agy, "conversations", `${OLD}.db`))).toBe(false);
+    expect(existsSync(join(agy, "brain", FRESH))).toBe(true);
+    // Not a conversation id: not this script's to remove.
+    expect(existsSync(join(agy, "brain", "not-a-conversation"))).toBe(true);
+    expect(collect(h, "sweep", "60").stdout.toString().trim()).toBe("0");
+  });
+
+  it("refuses a span short enough to take what a run is using, and anything that is not a number", () => {
+    const { h, agy } = home();
+    for (const bad of [["sweep"], ["sweep", "5"], ["sweep", "0"], ["sweep", "-60"], ["sweep", "60; rm -rf /"], ["sweep", "60", "extra"]]) {
+      expect(collect(h, ...bad).status, bad.join(" ")).toBe(2);
+    }
+    expect(existsSync(join(agy, "brain", OLD))).toBe(true);
+  });
+
+  it("succeeds with nothing to sweep", () => {
+    const r = collect(mkdtempSync(join(tmpdir(), "collect-")), "sweep", "60");
+    expect(r.status).toBe(0);
+    expect(r.stdout.toString().trim()).toBe("0");
+  });
+});
+
+describe("capitoline-collect-image, a conversation with no image", () => {
+  it("says what the conversation held, by name only, before removing it", () => {
+    const h = mkdtempSync(join(tmpdir(), "collect-"));
+    const id = "11111111-2222-4333-8444-555555555555";
+    const dir = join(h, ".gemini/antigravity-cli/brain", id);
+    mkdirSync(join(dir, ".system_generated/logs"), { recursive: true });
+    writeFileSync(join(dir, ".system_generated/logs/transcript.jsonl"), "the prompt, which must not travel");
+    writeFileSync(join(dir, "notes.md"), "nor this");
+    const r = collect(h, id);
+    expect(r.status).toBe(4);
+    const said = r.stderr.toString();
+    expect(said).toMatch(/^no image produced; the conversation held: /);
+    expect(said).toContain("notes.md");
+    expect(said).toContain(".system_generated/logs/transcript.jsonl");
+    expect(said).not.toContain("must not travel");
+    expect(existsSync(dir)).toBe(false);
+    // An empty one says so.
+    mkdirSync(dir, { recursive: true });
+    expect(collect(h, id).stderr.toString().trim()).toBe("no image produced; the conversation held: nothing");
+  });
+});
