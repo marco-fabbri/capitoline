@@ -60,7 +60,12 @@ COUNT="${SMOKE_IMAGE_COUNT:-1}"
 # kept trying). So image failures are counted apart, and when the series meets a
 # quota refusal they are reported as "not verified", exit code 3, which the
 # update script reads as a check to run again later and not as a regression.
-imgfail=0; imgquota=0
+#
+# SMOKE_IMAGE_STRICT=1 is for a caller that needs to know an image was really
+# drawn (the update script): a series the quota refused before any image came
+# out also ends with exit code 3. By hand that case stays what it always was,
+# a line saying so and exit code 0.
+imgfail=0; imgquota=0; imgok=0
 IMG="${SMOKE_IMAGE_MODEL:-}"
 [[ -n "${IMG// /}" ]] || IMG=$(jq -r '[.models[] | select(.kind == "image") | .name][0] // empty' <<<"$HEALTH" 2>/dev/null || true)
 [[ -n "${IMG// /}" ]] || IMG=$(yq -r '.providers[].models | to_entries[] | select(.value.kind == "image") | .key' "$CFG" 2>/dev/null | head -1 || true)
@@ -83,6 +88,7 @@ elif [[ -n "${IMG// /}" ]]; then
   [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
   code=$(jq -r '.error.code // empty' "$TMP" 2>/dev/null || true)
   if [[ "$resp" == "200" && "$bytes" -gt "$MIN" ]]; then
+    imgok=$((imgok + 1))
     printf '%-22s %s  %-40s bytes=%s\n' "$IMG" "$resp" "$(jq -r '"\(.capitoline.mime) \(.capitoline.width)x\(.capitoline.height)"' "$TMP")" "$bytes"
   elif [[ "$resp" == "429" && "$code" == "rate_limited" ]]; then
     printf '%-22s %s  %s\n' "$IMG" "$resp" "image quota exhausted, not a regression$(jq -r 'if .capitoline.quota.resetAt then " (reopens \(.capitoline.quota.resetAt))" else "" end' "$TMP" 2>/dev/null || true)"
@@ -96,6 +102,10 @@ fi
 [[ "$fail" == 0 ]] || exit 1
 if [[ "$imgfail" == 1 && "$imgquota" == 1 ]]; then
   printf '%-22s %s\n' "$IMG" "not verified: the image quota ran out during the check, so the failure above proves nothing"
+  exit 3
+fi
+if [[ "${SMOKE_IMAGE_STRICT:-0}" == 1 && "$imgquota" == 1 && "$imgok" == 0 ]]; then
+  printf '%-22s %s\n' "$IMG" "not verified: the quota refused before any image was drawn"
   exit 3
 fi
 exit $imgfail

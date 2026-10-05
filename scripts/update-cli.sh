@@ -138,7 +138,11 @@ smoke() {
   [[ -n "$image_model" && "$image_skip" != 1 ]] && image=1
   # Three images, not one: an agent that takes the right path one run in two
   # passes a single image half the time (Antigravity 1.2.16, 2026-10-03).
-  CAPITOLINE_API_KEY="$KEY" SMOKE_IMAGE="$image" SMOKE_IMAGE_COUNT=3 SMOKE_IMAGE_MODEL="$image_model" bash scripts/smoke.sh "$BASE"
+  # Strict: a series the quota refused before any image came out is not a
+  # verified image either. On 2026-10-05 the image check alone met a 429 at
+  # once, this script said the version "draws an image" and threw away what a
+  # rollback needed, with nothing drawn.
+  CAPITOLINE_API_KEY="$KEY" SMOKE_IMAGE="$image" SMOKE_IMAGE_STRICT=1 SMOKE_IMAGE_COUNT=3 SMOKE_IMAGE_MODEL="$image_model" bash scripts/smoke.sh "$BASE"
 }
 
 # Whether the image model's quota is used up, and until when if /health says.

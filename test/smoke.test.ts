@@ -16,7 +16,7 @@ type Shot = "ok" | "failed" | "quota";
 let server: Server | undefined;
 afterEach(() => { server?.close(); server = undefined; });
 
-async function smoke(shots: Shot[], count: number): Promise<{ status: number | null; stdout: string }> {
+async function smoke(shots: Shot[], count: number, strict = false): Promise<{ status: number | null; stdout: string }> {
   const queue = [...shots];
   server = createServer((req, res) => {
     const json = (status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
@@ -35,7 +35,7 @@ async function smoke(shots: Shot[], count: number): Promise<{ status: number | n
   // Not spawnSync: the stub runs in this process and would never answer.
   return new Promise((resolve) => {
     const child = spawn("bash", ["scripts/smoke.sh", `http://127.0.0.1:${port}`], {
-      env: { ...process.env, CF_ACCESS_CLIENT_ID: "", CF_ACCESS_CLIENT_SECRET: "", CAPITOLINE_API_KEY: "", SMOKE_IMAGE: "1", SMOKE_IMAGE_COUNT: String(count), SMOKE_IMAGE_MODEL: "antigravity-image" },
+      env: { ...process.env, CF_ACCESS_CLIENT_ID: "", CF_ACCESS_CLIENT_SECRET: "", CAPITOLINE_API_KEY: "", SMOKE_IMAGE: "1", SMOKE_IMAGE_STRICT: strict ? "1" : "0", SMOKE_IMAGE_COUNT: String(count), SMOKE_IMAGE_MODEL: "antigravity-image" },
     });
     let stdout = "";
     child.stdout.on("data", (d) => { stdout += d; });
@@ -58,6 +58,15 @@ describe.skipIf(!have("jq") || !have("curl"))("scripts/smoke.sh, the verdict of 
     const r = await smoke(["failed", "quota"], 3);
     expect(r.status, r.stdout).toBe(3);
     expect(r.stdout).toMatch(/not verified: the image quota ran out during the check/);
+  });
+  // The update script must know an image was really drawn: refused at once, nothing was.
+  it("says not verified to a strict caller when the quota refuses before any image, and stays a pass by hand", async () => {
+    const strict = await smoke(["quota"], 3, true);
+    expect(strict.status, strict.stdout).toBe(3);
+    expect(strict.stdout).toMatch(/not verified: the quota refused before any image was drawn/);
+    expect((await smoke(["quota"], 3)).status).toBe(0);
+    // One image drawn before the quota ends the series is a drawn image.
+    expect((await smoke(["ok", "quota"], 3, true)).status).toBe(0);
   });
   it("fails when an image fails and no quota refusal explains it", async () => {
     expect((await smoke(["ok", "failed", "ok"], 3)).status).toBe(1);
