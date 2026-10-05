@@ -159,7 +159,9 @@ const VIEWS = {
     const rows = health.models.map((m) => [
       m.name, m.provider, m.kind,
       m.available ? chip("available", "ok") : chip(m.reason ?? "unavailable", m.reason === "retired" ? "" : "bad"),
-      m.quota ? `${m.quota.used}${m.quota.limit ? ` / ${m.quota.limit}` : ""}${m.quota.resetAt ? `, back ${until(m.quota.resetAt)}` : ""}` : "",
+      // Counted by the gateway, from what it served: images made around it are
+      // not in it, so the provider can refuse below the figure beside it.
+      m.quota ? `${m.quota.used} drawn${m.quota.limit ? `, refused at about ${m.quota.limit}` : ""}${m.quota.resetAt ? `, back ${until(m.quota.resetAt)}` : ""}` : "",
       m.kind === "council" || !m.available ? "" : confirmButton("Hold back", async () => {
         await api("/v1/admin/pauses", { method: "POST", body: { provider: m.provider, model: m.name, minutes: Number(minutes.value) } });
         return `${m.name} is held back. Lift it from Overview.`;
@@ -167,7 +169,7 @@ const VIEWS = {
     ]);
     return [
       el("div", { class: "row" }, el("label", {}, "Hold a model back for ", minutes), el("span", { class: "chip" }, "a pause like any other: it ends by itself, or you lift it")),
-      table(["Model", "Provider", "Kind", "State", "Image quota", ""], rows),
+      table(["Model", "Provider", "Kind", "State", "Images, last 5 h", ""], rows),
     ];
   }],
 

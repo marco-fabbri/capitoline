@@ -666,7 +666,7 @@ URL — for example "codex models changed. new: codex-gpt-7-nova; no longer
 served: codex-gpt-6-luna (used by health_model, council capitoline).". A
 model the configuration still uses is named with where it is used, because
 that is the change worth reading. The same channel carries one message per
-new CLI version the daily check finds (`docs/update-clis.md`), with the
+new CLI version the hourly check finds (`docs/update-clis.md`), with the
 command that installs it, and these:
 
 - **a quota used up**, when a provider or one of its models is refused with
@@ -688,8 +688,8 @@ command that installs it, and these:
   back;
 - **a weekly quota running low**, for a CLI that reports its own quota
   (`providers.<id>.quota`, Antigravity today). The gateway runs the CLI's
-  quota report at start and every hour; no model is called and nothing is
-  spent. `/health` carries what it said under `providers[].quota` (each group
+  quota report at start, every hour and right after a refusal for a rate
+  limit; no model is called and nothing is spent. `/health` carries what it said under `providers[].quota` (each group
   of models, its weekly and its five-hour bucket, the share left and when it
   refills) and the operator's page shows it on the provider's card. A weekly
   bucket under `quota.notify_below` (0.2, a fifth, by default) is announced

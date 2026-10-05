@@ -245,9 +245,11 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   // And, on the same rhythm, the conversations a CLI kept that no run forgot.
   void core.sweepLeftovers();
   const stopQuota = core.startQuotaLoop(3600_000);
-  // The versions on the same rhythm: a new CLI version is news once a day.
+  // The versions every hour: reading them is one `--version` and one small
+  // request per CLI, and an update made by hand should show without a
+  // restart. A new version is still announced once, whatever the rhythm.
   void versions.check();
-  const stopVersions = versions.startLoop(cfg.server.discovery_interval_h * 3600_000);
+  const stopVersions = versions.startLoop(3600_000);
   // The end of a quota pause is nothing happening, so something has to look:
   // once a minute, in memory, and only at pauses that were announced.
   const stopPauseSweep = core.startPauseSweep(60_000);

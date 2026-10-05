@@ -16,7 +16,10 @@ export class FakeProvider implements Provider {
   /** Set by a test to give the fake a quota report, as a CLI that has one; a thrown error is a failed read. */
   quotaReport?: QuotaBucket[] | Error;
   get reportsQuota(): boolean { return this.quotaReport !== undefined; }
+  /** How many times the report was asked for. */
+  quotaReads = 0;
   async quota(): Promise<QuotaBucket[]> {
+    this.quotaReads++;
     if (this.quotaReport instanceof Error) throw this.quotaReport;
     return this.quotaReport ?? [];
   }

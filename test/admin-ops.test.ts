@@ -178,6 +178,16 @@ describe("the operator's routes under /v1/admin", () => {
     await quotaCore.checkQuota();
     expect(state()).toMatchObject({ ok: false, buckets: [weekly(0.1, resetsAt + 4_000), short] });
 
+    // A refusal makes the gateway read the report again at once, a minute apart at most.
+    const reads = () => (p as unknown as { quotaReads: number }).quotaReads;
+    p.quotaReport = [weekly(0.1, resetsAt + 4_000), short];
+    p.script = [{ type: "error", kind: "rate_limited", detail: "429" }];
+    const before = reads();
+    await drain(quotaCore.execute({ model: "q-1", messages: [{ role: "user", text: "q" }], stream: false }, { source: "http" })).catch(() => undefined);
+    await quotaCore.idle();
+    expect(reads()).toBe(before + 1);
+    p.script = OK;
+
     // The next window, low again: said again.
     p.quotaReport = [weekly(0.15, resetsAt + 7 * 86_400_000), short];
     await quotaCore.checkQuota();

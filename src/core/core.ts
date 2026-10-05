@@ -212,6 +212,8 @@ export class Core {
   // Providers waiting for their confirming probe (AUTH_RECHECK_MS), and the ones it is running for.
   private readonly authRechecks = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly confirming = new Set<string>();
+  /** When a provider's quota report was last read because of a refusal. */
+  private readonly quotaReadAfterRefusal = new Map<string, number>();
   private readonly now: () => number;
 
   constructor(providers: Provider[], private readonly usage: UsageStore, private readonly opts: CoreOptions) {
@@ -826,6 +828,12 @@ export class Core {
   private onError(id: string, s: State, key: string, scope: string, ev: Extract<ProviderEvent, { type: "error" }>, modelKind: ModelKind = "text") {
     const { kind, retryAfterS } = ev;
     if (kind === "rate_limited") {
+      // The provider's own quota report says why, where it has one: read
+      // again now rather than at the next hourly round, a minute apart at most.
+      if (s.provider.reportsQuota && this.now() - (this.quotaReadAfterRefusal.get(id) ?? 0) >= 60_000) {
+        this.quotaReadAfterRefusal.set(id, this.now());
+        this.checkQuota().catch((err: unknown) => this.opts.log.error({ err }, "quota check failed"));
+      }
       // Only an image run says anything about the image quota, and only the
       // reset it reported: the exhausted window is the one the client asks
       // about, so the bare instant is kept without the pause's slack. Like the
