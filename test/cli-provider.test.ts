@@ -202,7 +202,11 @@ describe("CliProvider.generateImage", () => {
   function imageProvider(fixture: string, extra: Partial<typeof agy> = {}, r: Runner = runner, opts = {}, mode = "replay", adapter: Adapter = antigravityAdapter) {
     // No forget unless a test asks for it: it runs after the process, at a
     // moment the tests counting the collect's captures cannot pin down.
-    const cfg = { ...agy, binary: FAKE, args: ["--mode", mode, "--file", fixture], timeout_s: 1, image: { ...agy.image, collect: [COLLECT] }, forget: undefined, ...extra };
+    // The recordings of this block are from before 1.2.16, when the agent
+    // called generate_image itself: they still exercise the guard, the quota
+    // detection and the collect, with the tool they were recorded with. The
+    // subagent hand-off of today's configuration has its own tests below.
+    const cfg = { ...agy, binary: FAKE, args: ["--mode", mode, "--file", fixture], timeout_s: 1, image: { ...agy.image, allowed_tools: ["generate_image"], collect: [COLLECT] }, forget: undefined, ...extra };
     return new CliProvider("antigravity", cfg, adapter, r, createLogger("t"), { now: () => NOW, ...opts });
   }
   async function generate(p: CliProvider, signal?: AbortSignal, timeoutS?: number) {
@@ -252,6 +256,37 @@ describe("CliProvider.generateImage", () => {
     await vi.waitFor(() => expect(spy.captures).toHaveLength(1));
     expect(spy.captures[0]).toMatchObject({ binary: "/usr/bin/true", args: ["forget", "fdc15146-e14d-4592-a062-8bebca386077"] });
   });
+  describe("through the image-generator subagent (Antigravity 1.2.16)", () => {
+    const SUBAGENT_RUN = join(process.cwd(), "test/fixtures/antigravity/image-subagent.jsonl");
+    const PARENT = "e0405ad8-9fe1-45e8-9eea-b05629b4c775", CHILD = "d42fca3a-f043-4234-a505-30dd1099c02a";
+    // The repository's own allow-list, not the block's: this is what is deployed.
+    const today = { image: { ...agy.image, collect: [COLLECT] } };
+
+    it("admits the hand-off, collects the image from the run's conversation and forgets the subagent's too", async () => {
+      const spy = spyRunner();
+      const ev = await generate(imageProvider(SUBAGENT_RUN, { ...today, forget: FORGET_OK }, spy));
+      expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
+      await vi.waitFor(() => expect(spy.captures).toHaveLength(3));
+      expect(spy.captures.map((c) => c.args)).toEqual([[PARENT], ["forget", PARENT], ["forget", CHILD]]);
+    });
+    it("no longer admits the tool the agent used to call itself, nor a second hand-off, nor another subagent", async () => {
+      const sub = (type: string, state: string, index = 2) => ({ event: "step_update", step_update: { conversation_id: CID, step_index: index, state, step_type: "subagent", tool_name: "invoke_subagent", subagent_info: { subagents: [{ type_name: type }] } } });
+      const run = async (lines: Record<string, unknown>[]) => generate(imageProvider(synthetic(lines), today, runner, {}, "replay-linger"), undefined, 5);
+      expect(await run([init, toolStep("generate_image", "ACTIVE"), result])).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: generate_image" }]);
+      expect(await run([init, sub("browser", "ACTIVE"), result])).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: subagent:browser" }]);
+      expect(await run([init, sub("image-generator", "ACTIVE"), sub("image-generator", "DONE"), sub("image-generator", "ACTIVE", 4), result]))
+        .toEqual([{ type: "error", kind: "bad_output", detail: "tool called more than once: subagent:image-generator" }]);
+      // What the agent reached for under the old prompt, one request in two.
+      for (const tool of ["schedule", "manage_subagents", "manage_task", "invoke_subagent"]) {
+        expect(await run([init, toolStep(tool, "ACTIVE"), result]), tool).toEqual([{ type: "error", kind: "bad_output", detail: `unexpected tool call: ${tool}` }]);
+      }
+    });
+    it("reports bad_output, not a picture, when the agent only says the tool is not available", async () => {
+      const ev = await withCollect("none", () => generate(imageProvider(join(process.cwd(), "test/fixtures/antigravity/image-tool-unavailable.jsonl"), today)));
+      expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: "no image produced" }]);
+    });
+  });
+
   it("forgets an image run's conversation after collecting the image, never before", async () => {
     const spy = spyRunner();
     const ev = await generate(imageProvider(IMAGE_RUN, { forget: FORGET_OK }, spy));
@@ -380,14 +415,14 @@ describe("CliProvider.generateImage", () => {
     expect(spy.captures).toHaveLength(0);
   });
   it("names the timeout when the collect helper does not finish in time", async () => {
-    const slow = { ...agy.image, collect: ["/bin/sh", "-c", "sleep 5"] };
+    const slow = { ...agy.image, allowed_tools: ["generate_image"], collect: ["/bin/sh", "-c", "sleep 5"] };
     const t0 = Date.now();
     const ev = await generate(imageProvider(IMAGE_RUN, { image: slow }, runner, { collectTimeoutMs: 200 }));
     expect(ev).toEqual([{ type: "error", kind: "bad_output", detail: "image collection timed out after 0.2s" }]);
     expect(Date.now() - t0).toBeLessThan(3000);
   });
   it("keeps the collect helper's stderr out of the error detail", async () => {
-    const failing = { ...agy.image, collect: ["/bin/sh", "-c", "echo /home/runner/secret >&2; exit 3"] };
+    const failing = { ...agy.image, allowed_tools: ["generate_image"], collect: ["/bin/sh", "-c", "echo /home/runner/secret >&2; exit 3"] };
     const ev = await generate(imageProvider(IMAGE_RUN, { image: failing }));
     expect(ev).toHaveLength(1);
     expect(ev[0]).toMatchObject({ type: "error", kind: "bad_output" });

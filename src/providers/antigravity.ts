@@ -4,11 +4,22 @@ import type { AdapterEvent, ImageRequest, InternalRequest } from "../core/types.
 import { withPreamble, cliId, effortArgs, effortValue, jsonLines, systemPromptArgs, type Adapter, type Command, type ImageCommand, type ListedModel, type ModelSpec } from "./adapter.js";
 import { classifyError } from "./errors.js";
 
-// The CLI is an agent: the prompt names the one tool it may use and forbids
-// everything else. The provider still guards the tool calls it reports.
+// The CLI is an agent: the prompt names the one way it may make the image and
+// forbids everything else. The provider still guards the steps it reports.
+//
+// Since 1.2.16 the agent that receives the prompt no longer holds the
+// generate_image tool: the CLI hands image requests to a built-in
+// `image-generator` subagent. Asked for the tool by name, as this prompt did
+// until 2026-10-05, the agent either said the tool was not available or reached
+// for whatever else it had (schedule, manage_subagents, manage_task), and one
+// request in two ended there. Naming the subagent is what it follows
+// (test/fixtures/antigravity/image-subagent.jsonl against
+// image-tool-unavailable.jsonl, the same request under the two prompts).
+export const IMAGE_SUBAGENT = "image-generator";
 export const IMAGE_PROMPT = (prompt: string): string =>
-  `Use the generate_image tool exactly once, with ImageName "image", to create this image: ${prompt}\n` +
-  "Do not create, read, copy or modify any file, do not run commands, do not open a browser. When the tool has finished, reply only with the single word: done";
+  `Create exactly one image, named "image": ${prompt}\n` +
+  `Hand the request to the ${IMAGE_SUBAGENT} subagent, once, and wait for it to finish. ` +
+  "Do not create, read, copy or modify any file yourself, do not run commands, do not open a browser. When the image is saved, reply only with the single word: done";
 
 // An id as `agy models` prints it: lower case, digits, dots and dashes, the
 // effort already inside it (`gemini-3.8-flash-high`).
@@ -95,7 +106,8 @@ export const antigravityAdapter: Adapter = {
         const id = o.conversation_id ?? init.conversation_id;
         if (isConversationId(id) && !conversationId) { conversationId = id; yield { type: "meta", conversationId }; }
       } else if (event === "step_update") {
-        const su = o.step_update as { step_type?: string; text_delta?: string; state?: string; step_index?: unknown; tool_name?: unknown; tool_info?: { name?: unknown } } | undefined;
+        const su = o.step_update as { step_type?: string; text_delta?: string; state?: string; step_index?: unknown; tool_name?: unknown; tool_info?: { name?: unknown };
+          subagent_info?: { subagents?: { type_name?: unknown; conversation_id?: unknown }[] } } | undefined;
         const deltaChars = typeof su?.text_delta === "string" ? su.text_delta.length : 0;
         if (shape.length < SHAPE_CAP) shape.push({ event, step_type: su?.step_type, step_index: su?.step_index, state: su?.state, deltaChars });
         if (su?.step_type === "agent_response") {
@@ -107,20 +119,28 @@ export const antigravityAdapter: Adapter = {
           if (su.state === "DONE") doneSteps.add(step);
         }
         if (su?.step_type === "agent_response" && typeof su.text_delta === "string" && su.text_delta.length) yield { type: "text", delta: su.text_delta };
-        else if (su?.step_type === "tool") {
+        else if (su?.step_type === "tool" || su?.step_type === "subagent") {
           // The tool's result text is not in the stream; on ERROR the step
           // carries tool_info.error (the 429 body lives there), so raw is the
           // whole step. A step without an index cannot be correlated and is
           // reported as a new call every time (fail closed).
-          const name = String(su.tool_name ?? su.tool_info?.name ?? "");
+          // A subagent step is a tool call like any other and reaches the same
+          // guard, under the name of what it starts: `subagent:<type>`, every
+          // type of the step when it starts more than one, so an allow-list
+          // can admit one kind of subagent and no other. The conversation each
+          // one keeps is named by the step once it is under way.
+          const subagents = su.step_type === "subagent" ? (Array.isArray(su.subagent_info?.subagents) ? su.subagent_info.subagents : []) : undefined;
+          const name = subagents ? `subagent:${subagents.map((s) => String(s.type_name ?? "")).join(",")}` : String(su.tool_name ?? su.tool_info?.name ?? "");
+          const conversations = (subagents ?? []).map((s) => s.conversation_id).filter(isConversationId);
+          const opened = conversations.length ? { conversations } : {};
           const raw = JSON.stringify(su);
           const first = typeof su.step_index !== "number" || !seen.has(su.step_index);
           if (typeof su.step_index === "number") seen.add(su.step_index);
           const terminal = su.state === "DONE" ? "done" : su.state === "ERROR" ? "error" : undefined;
           // Every other state (ACTIVE, CANCELLED, absent) is a call, so an
           // unknown shape never bypasses the guard.
-          if (first || !terminal) yield { type: "tool", phase: "call", name, raw };
-          if (terminal) yield { type: "tool", phase: terminal, name, raw };
+          if (first || !terminal) yield { type: "tool", phase: "call", name, raw, ...opened };
+          if (terminal) yield { type: "tool", phase: terminal, name, raw, ...opened };
         }
       } else if (event === "result") {
         const texted = [...textByStep.values()].filter((n) => n > 0).length;

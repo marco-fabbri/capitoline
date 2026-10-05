@@ -206,13 +206,15 @@ export class CliProvider implements Provider {
     // once here, so both paths agree and no client has to check for it.
     let sawText = false;
     let conversationId: string | undefined;
+    // Conversations a step opened beside the run's own (a subagent's).
+    const opened = new Set<string>();
     try {
       for await (const ev of this.adapter.parse(run.handle.lines)) {
         // Adapter-internal events stay here: a text run has no use for them and
         // the Provider contract (AsyncIterable<ProviderEvent>) forbids forwarding them.
         if (ev.type === "diagnostic") { this.log.warn({ model: model.name, ...ev.data }, ev.message); continue; }
         if (ev.type === "meta") { conversationId ??= ev.conversationId; continue; }
-        if (ev.type === "tool") continue;
+        if (ev.type === "tool") { for (const id of ev.conversations ?? []) opened.add(id); continue; }
         if (ev.type === "text" && ev.delta.trim() !== "") sawText = true;
         if (ev.type === "done" && !sawText) {
           terminal = true;
@@ -232,7 +234,7 @@ export class CliProvider implements Provider {
       // Runs on normal completion, on the early return above and when the
       // consumer stops iterating: the process must never outlive its consumer.
       if (terminal) run.windDown(); else run.ac.abort(); // abort is a no-op when the process has already ended
-      this.forgetAfter(run, model, conversationId);
+      for (const id of [conversationId, ...opened]) this.forgetAfter(run, model, id);
     }
   }
 
@@ -265,6 +267,9 @@ export class CliProvider implements Provider {
     // which the prompt forbids and which would spend quota on an image the
     // helper never collects (it returns one file).
     const finished = new Set<string>();
+    // Conversations a step opened beside the run's own: a subagent keeps its
+    // own, with the prompt in it, and the collect helper removes only the run's.
+    const opened = new Set<string>();
     let conversationId: string | undefined;
     let prose = "";
     let usage: Usage | undefined;
@@ -276,6 +281,7 @@ export class CliProvider implements Provider {
         } else if (ev.type === "meta") {
           conversationId = ev.conversationId;
         } else if (ev.type === "tool") {
+          for (const id of ev.conversations ?? []) opened.add(id);
           if (ev.phase === "call" && !allowed.has(ev.name)) {
             this.log.warn({ model: model.name, tool: ev.name }, "unexpected tool call: run aborted");
             run.ac.abort();
@@ -361,7 +367,7 @@ export class CliProvider implements Provider {
       if (terminal) run.windDown(); else run.ac.abort();
       // After the collect, which ran in the body: forgetting first would take
       // the image with the rest.
-      this.forgetAfter(run, model, conversationId);
+      for (const id of [conversationId, ...opened]) this.forgetAfter(run, model, id);
     }
   }
 

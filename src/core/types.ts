@@ -71,7 +71,9 @@ export type ProviderEvent =
 export type AdapterEvent =
   | ProviderEvent
   | { type: "meta"; conversationId: string }
-  | { type: "tool"; phase: "call" | "done" | "error"; name: string; raw: string }
+  // conversations: the conversations the step opened on the CLI's side (a
+  // subagent keeps one of its own), to be forgotten with the run's.
+  | { type: "tool"; phase: "call" | "done" | "error"; name: string; raw: string; conversations?: string[] }
   // Something the adapter saw that is worth a log line and changes nothing:
   // the provider logs it and never forwards it.
   | { type: "diagnostic"; message: string; data: Record<string, unknown> };

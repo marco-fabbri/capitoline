@@ -376,6 +376,7 @@ providers:
       collect: [test/fake-cli/fake-collect-image.sh]   # relative to the repo; the runner resolves it
       min_bytes: 200000
       quota_per_window: 12    # images per 5-hour window, reported in /health and /v1/models
+      allowed_tools: ["subagent:image-generator"]
 
 # The council. A virtual model, asked for in `model` like any other, which
 # answers by seating one member per family, having them rank each other's

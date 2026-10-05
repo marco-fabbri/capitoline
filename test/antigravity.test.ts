@@ -47,6 +47,26 @@ describe("antigravity adapter", () => {
     const sys = antigravityAdapter.buildCommand(repoCfg, opus, { model: "antigravity-claude-opus", stream: true, messages: [{ role: "system", text: "S" }, { role: "user", text: "q" }] });
     expect(JSON.parse(sys.stdin).message.content).toBe(`System instructions:\n${repoCfg.system_preamble}\n\nS\n\nq`);
   });
+  // Antigravity 1.2.16 makes images through a built-in subagent. The recorded
+  // run: one subagent step, which must reach the guard as a tool call under
+  // the subagent's name, and carry the conversation the subagent keeps, since
+  // its prompt sits there after the run's own conversation is gone.
+  it("reports a subagent step as a tool call named after the subagent, with the conversation it opened", async () => {
+    const ev = await events(linesOf("test/fixtures/antigravity/image-subagent.jsonl"));
+    const tools = ev.filter((e) => e.type === "tool") as { phase: string; name: string; conversations?: string[] }[];
+    expect(tools.map((e) => `${e.phase}:${e.name}`)).toEqual(["call:subagent:image-generator", "done:subagent:image-generator"]);
+    expect(tools[0].conversations).toBeUndefined(); // not opened yet when the step starts
+    expect(tools[1].conversations).toEqual(["d42fca3a-f043-4234-a505-30dd1099c02a"]);
+    expect(ev.find((e) => e.type === "meta")).toEqual({ type: "meta", conversationId: "e0405ad8-9fe1-45e8-9eea-b05629b4c775" });
+    expect(ev.at(-1)).toMatchObject({ type: "done" });
+  });
+  it("names every subagent of a step, and none when the step says none, so neither passes for the one allowed", async () => {
+    const step = (subagents: unknown) => JSON.stringify({ event: "step_update", step_update: { step_index: 2, state: "ACTIVE", step_type: "subagent", tool_name: "invoke_subagent", subagent_info: { subagents } } });
+    const names = async (subagents: unknown) => (await events((async function* () { yield step(subagents); })())).filter((e) => e.type === "tool").map((e) => (e as { name: string }).name);
+    expect(await names([{ type_name: "image-generator" }, { type_name: "browser" }])).toEqual(["subagent:image-generator,browser"]);
+    expect(await names([])).toEqual(["subagent:"]);
+    expect(await names(undefined)).toEqual(["subagent:"]);
+  });
   it("never puts the preamble on an image run, whose one job is to call a tool", () => {
     const image = models.find((m) => m.name === "antigravity-image")!;
     const c = antigravityAdapter.buildImageCommand!(repoCfg, image, { model: "antigravity-image", prompt: "a red bicycle" });
@@ -65,8 +85,9 @@ describe("antigravity adapter", () => {
     // whole text is pinned, so dropping the forbidding sentence fails here.
     expect(msg.message.content).toBe(IMAGE_PROMPT("a red bicycle"));
     expect(IMAGE_PROMPT("a red bicycle")).toBe(
-      'Use the generate_image tool exactly once, with ImageName "image", to create this image: a red bicycle\n' +
-      "Do not create, read, copy or modify any file, do not run commands, do not open a browser. When the tool has finished, reply only with the single word: done",
+      'Create exactly one image, named "image": a red bicycle\n' +
+      "Hand the request to the image-generator subagent, once, and wait for it to finish. " +
+      "Do not create, read, copy or modify any file yourself, do not run commands, do not open a browser. When the image is saved, reply only with the single word: done",
     );
     expect(c.stdin.endsWith("\n")).toBe(true);
   });

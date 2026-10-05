@@ -46,6 +46,18 @@ procedure below, which a person runs.
 
 Add a row for every update, newest last.
 
+**Antigravity 1.2.16 changed how images are made** (found on 2026-10-05, two
+days after the update). The agent that receives the prompt no longer holds the
+`generate_image` tool; the CLI hands image requests to a built-in
+`image-generator` subagent. The gateway's prompt still asked for the tool by
+name, and one image request in two ended in `bad_output`: the agent either
+said the tool was not available or reached for another one, which the guard
+stops. The update's own image check had passed, on the one request in two that
+worked. Since then the prompt names the subagent, `image.allowed_tools` admits
+that hand-off and nothing else, and the conversation the subagent keeps is
+forgotten with the run's. When an update touches images, read `agy changelog`
+before trusting one passing image.
+
 ## The model lists
 
 Exposing a new model, or withdrawing a retired one, no longer waits for an

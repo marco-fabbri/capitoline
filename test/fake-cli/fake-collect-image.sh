@@ -6,7 +6,7 @@
 #   tiny       prints test/fixtures/images/tiny.png (valid PNG far below min_bytes)
 #   none       exit 4 with nothing on stdout (quota exhausted or the agent never called the tool)
 #   image-run  as (unset), but only for the conversation id recorded in
-#              fixtures/antigravity/image-run.jsonl; any other id exits 4. End-to-end runs use
+#              fixtures/antigravity/image-subagent.jsonl; any other id exits 4. End-to-end runs use
 #              this so that a dispatch falling back to the chat recording fails loudly instead
 #              of being handed an image the run never produced.
 #
@@ -22,7 +22,7 @@ fixtures="$(cd "$(dirname "$0")/../fixtures/images" && pwd)"
 if [[ "$provider" == "codex" ]]; then
   recorded="01a0ccba-58c9-7980-9b15-63528791112c"; sample="$fixtures/sample-codex.png"
 else
-  recorded="40fc0b5c-042f-453a-9eaf-6162913de55e"; sample="$fixtures/sample.jpg"
+  recorded="e0405ad8-9fe1-45e8-9eea-b05629b4c775"; sample="$fixtures/sample.jpg"
 fi
 case "${FAKE_COLLECT:-sample}" in
   none) echo "no image produced" >&2; exit 4 ;;

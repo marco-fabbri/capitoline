@@ -89,7 +89,8 @@ describe("config", () => {
     expect(agy.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
     expect(agy.image.min_bytes).toBe(200000);
     expect(agy.image.quota_per_window).toBe(12);
-    expect(agy.image.allowed_tools).toEqual(["generate_image"]);
+    // The hand-off to the CLI's own image subagent, and nothing else (Antigravity 1.2.16).
+    expect(agy.image.allowed_tools).toEqual(["subagent:image-generator"]);
     expect(agy.image.args).toEqual([]);
     expect(cfg.providers.claude.image).toEqual({ args: [], allowed_tools: ["generate_image"], collect: undefined, min_bytes: 200000 });
   });

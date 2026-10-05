@@ -411,6 +411,10 @@ providers:
       collect: [/usr/local/bin/capitoline-collect-image]
       min_bytes: 200000       # anything smaller is a placeholder, not a picture
       quota_per_window: 12    # images per 5-hour window, reported in /health and /v1/models
+      # The one step an image run may take. Since 1.2.16 the CLI makes images
+      # through its built-in image-generator subagent, so that hand-off is what
+      # is admitted, once; any other tool or subagent still aborts the run.
+      allowed_tools: ["subagent:image-generator"]
 
 # The council. A virtual model, asked for in `model` like any other, which
 # answers by seating one member per family, having them rank each other's
