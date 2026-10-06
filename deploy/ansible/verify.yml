@@ -19,9 +19,15 @@
         url: http://127.0.0.1:8080/health
         return_content: true
       register: health
+      # Right after the restart a provider's health is null: its first check
+      # has no verdict yet. Reading .ok on null is an error, and with
+      # ansible-core 2.21 an error inside `until` fails the task at once
+      # instead of counting as "not yet", so the retries never ran. Providers
+      # without a verdict are dropped before .ok is read, and count as not
+      # ready.
       until: >-
         health.json is defined and
-        (health.json.providers | selectattr('health.ok', 'equalto', true) | map(attribute='id') | list | length)
+        (health.json.providers | selectattr('health') | selectattr('health.ok', 'equalto', true) | list | length)
         == (health.json.providers | length)
       retries: 18
       delay: 10
