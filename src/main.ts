@@ -6,7 +6,7 @@ import { Core } from "./core/core.js";
 import { Council } from "./council/council.js";
 import { createLogger, type Logger } from "./log.js";
 import { createMcpHandler } from "./mcp/server.js";
-import { createNotifier, describeAvailability, describeCatalogChange } from "./notify.js";
+import { availabilityLevel, createNotifier, describeAvailability, describeCatalogChange } from "./notify.js";
 import { VersionWatch } from "./versions.js";
 import { buildProviders } from "./providers/index.js";
 import type { Provider } from "./providers/adapter.js";
@@ -102,8 +102,8 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const notify = createNotifier(cfg.server.notify, log.child({ mod: "notify" }));
   const core = new Core(providers, usage, {
     maxWaitMs: cfg.server.queue.max_wait_s * 1000, budgets, imageQuotas, log: log.child({ mod: "core" }),
-    onCatalogChange: notify ? (provider, change) => notify(describeCatalogChange(cfg, provider, change)) : undefined,
-    onAvailability: notify ? (event) => notify(describeAvailability(cfg, event)) : undefined,
+    onCatalogChange: notify ? (provider, change) => notify(describeCatalogChange(cfg, provider, change), { level: "info" }) : undefined,
+    onAvailability: notify ? (event) => notify(describeAvailability(cfg, event), availabilityLevel(event)) : undefined,
     quotaNotifyBelow: Object.fromEntries(Object.entries(cfg.providers).flatMap(([id, p]) => (p.quota ? [[id, p.quota.notify_below]] : []))),
   });
 

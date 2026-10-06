@@ -3,7 +3,7 @@ import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import { loadConfig } from "../src/config.js";
 import { createLogger } from "../src/log.js";
-import { createNotifier, describeAvailability, describeCatalogChange } from "../src/notify.js";
+import { availabilityLevel, createNotifier, describeAvailability, describeCatalogChange } from "../src/notify.js";
 
 const cfg = loadConfig("config/capitoline.yaml");
 const log = createLogger("t");
@@ -36,6 +36,29 @@ describe("notifications", () => {
       expect(got.headers["content-type"]).toMatch(/^text\/plain/);
       expect(got.headers.authorization).toBe("Bearer tk_secret");
     } finally { e.close(); }
+  });
+  // A lost login and a new CLI version looked the same until the text was
+  // read: the level travels as ntfy's priority and tags, and as a header of
+  // its own for any other endpoint.
+  it("sends the level, as an ntfy topic reads it and in a header of its own, info when none is given", async () => {
+    const sent = async (opts?: Parameters<NonNullable<ReturnType<typeof createNotifier>>>[1]) => {
+      const e = await endpoint();
+      try { createNotifier({ url: e.url }, log, {})!("x", opts); return (await e.received).headers; } finally { e.close(); }
+    };
+    expect(await sent({ level: "critical" })).toMatchObject({ priority: "urgent", tags: "rotating_light", "x-capitoline-level": "critical" });
+    expect(await sent({ level: "warning" })).toMatchObject({ priority: "high", tags: "warning", "x-capitoline-level": "warning" });
+    expect(await sent()).toMatchObject({ priority: "default", tags: "information_source", "x-capitoline-level": "info" });
+    // Closing a problem: its level, a check mark, and no alarm.
+    expect(await sent({ level: "critical", recovery: true })).toMatchObject({ priority: "default", tags: "white_check_mark", "x-capitoline-level": "critical" });
+  });
+  it("gives each availability notice its level, and a closing one the level of what it closes", () => {
+    const at = Date.UTC(2026, 9, 6, 12);
+    expect(availabilityLevel({ kind: "signed_out", provider: "claude" })).toEqual({ level: "critical" });
+    expect(availabilityLevel({ kind: "signed_in", provider: "claude" })).toEqual({ level: "critical", recovery: true });
+    expect(availabilityLevel({ kind: "paused", provider: "claude", scope: null, until: at })).toEqual({ level: "warning" });
+    expect(availabilityLevel({ kind: "refusing", provider: "claude", scope: null, refusedMs: 3600_000 })).toEqual({ level: "warning" });
+    expect(availabilityLevel({ kind: "quota_low", provider: "antigravity", group: "G", remaining: 0.1, resetsAt: null })).toEqual({ level: "warning" });
+    expect(availabilityLevel({ kind: "resumed", provider: "claude", scope: null, pausedMs: 3600_000 })).toEqual({ level: "warning", recovery: true });
   });
   it("starts the message with the installation's name, when it has one", async () => {
     const e = await endpoint();

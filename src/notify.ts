@@ -4,11 +4,34 @@ import type { CatalogChange } from "./providers/adapter.js";
 import type { AvailabilityEvent } from "./core/core.js";
 
 /**
+ * How much a message asks of whoever receives it. `critical`: nothing works
+ * for that provider until a person acts (a lost login). `warning`: it is held
+ * back for a while and comes back by itself (a quota used up, a refusal with
+ * no reset, a weekly quota running low). `info`: nothing is held back (a new
+ * CLI version, a catalog that changed).
+ */
+export type NotifyLevel = "critical" | "warning" | "info";
+/**
+ * A message's level, and whether it closes a problem announced before ("signed
+ * in again", "available again"). A closing message keeps the level of what it
+ * closes, so the two are seen as a pair, and is sent at the endpoint's normal
+ * priority: the level says what it is about, the priority how loudly the phone
+ * rings, and good news is not an alarm.
+ */
+export interface NotifyOptions { level?: NotifyLevel; recovery?: boolean }
+
+/**
  * Sends one message and resolves to whether it was delivered. Never throws,
  * and nothing that serves a request waits on it: a notification is a side
  * effect. A caller that records "announced" awaits it, and records only on true.
  */
-export type Notify = (message: string) => Promise<boolean>;
+export type Notify = (message: string, opts?: NotifyOptions) => Promise<boolean>;
+
+// What an ntfy topic reads (docs/deploy.md §7.2): `Priority` sets how the
+// phone signals it, `Tags` puts an emoji before the title. `X-Capitoline-Level`
+// carries the level itself, for any other endpoint that wants to route on it.
+const PRIORITY: Record<NotifyLevel, string> = { critical: "urgent", warning: "high", info: "default" };
+const TAG: Record<NotifyLevel, string> = { critical: "rotating_light", warning: "warning", info: "information_source" };
 
 const TIMEOUT_MS = 10_000;
 // Two more tries after the first, a little apart: a send that fails on the
@@ -20,7 +43,8 @@ const RETRY_DELAYS_MS = [5_000, 30_000];
 /**
  * The optional notification of `server.notify`: one plain-text POST per
  * message, prefixed with the installation's `name` when it has one, with a
- * `Title` header and, when `token_env` names a variable that is
+ * `Title` header, the message's level in `Priority`, `Tags` and
+ * `X-Capitoline-Level`, and, when `token_env` names a variable that is
  * set, `Authorization: Bearer <token>`. That is exactly what an ntfy topic
  * takes (docs/deploy.md §7.2), and any other endpoint that accepts a text POST
  * works the same way. Undefined when nothing is configured, so the caller has
@@ -33,8 +57,14 @@ export function createNotifier(cfg: Config["server"]["notify"], log: Logger, env
   if (!cfg) return undefined;
   const token = cfg.token_env === undefined ? undefined : env[cfg.token_env];
   if (cfg.token_env !== undefined && !token) log.warn({ token_env: cfg.token_env }, "notify: the token variable is not set; sending without a token");
-  return async (message) => {
-    const headers: Record<string, string> = { "content-type": "text/plain; charset=utf-8", title: "Capitoline" };
+  return async (message, opts = {}) => {
+    const level = opts.level ?? "info";
+    const headers: Record<string, string> = {
+      "content-type": "text/plain; charset=utf-8", title: "Capitoline",
+      priority: opts.recovery ? PRIORITY.info : PRIORITY[level],
+      tags: opts.recovery ? "white_check_mark" : TAG[level],
+      "x-capitoline-level": level,
+    };
     if (token) headers.authorization = `Bearer ${token}`;
     const body = cfg.name ? `${cfg.name}: ${message}` : message;
     for (let attempt = 0; ; attempt++) {
@@ -105,6 +135,16 @@ const span = (ms: number): string => {
   const h = Math.floor(ms / 3600_000), d = Math.floor(h / 24);
   return d > 0 ? `${d}d ${h % 24}h` : `${h}h ${Math.floor((ms % 3600_000) / 60_000)}m`;
 };
+
+/** The level of an availability notice, and whether it closes one sent before. */
+export function availabilityLevel(e: AvailabilityEvent): NotifyOptions {
+  switch (e.kind) {
+    case "signed_out": return { level: "critical" };
+    case "signed_in": return { level: "critical", recovery: true };
+    case "paused": case "refusing": case "quota_low": return { level: "warning" };
+    case "resumed": return { level: "warning", recovery: true };
+  }
+}
 
 /** One line for a quota pause starting or ending, or a provider signing out or back in. */
 export function describeAvailability(cfg: Config, e: AvailabilityEvent): string {
