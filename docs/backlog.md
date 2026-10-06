@@ -70,7 +70,7 @@ finding has somewhere to go.
 3. **An example for each platform**: a compose file for Docker, and for Kubernetes one pod with the two containers and the socket in a shared volume. One pod rather than two: a CLI's capacity is its subscription's, so there is nothing to scale apart; the gateway keeps a single SQLite writer; and the channel between them is "execute this", which inside a pod is a socket nobody else can reach and between pods would be a network service to authenticate and fence. A container per CLI, in the same pod, is the variant for isolating the providers from each other.
 4. **The procedures that change**: signing each CLI in inside its container, and updating and checking a CLI there.
 
-Not started, and not needed by an installation on a machine of its own, which stays the supported shape.
+Not started, and not needed by an installation on a machine of its own, which stays the supported shape. Considered again on 2026-10-06 and left for when somebody asks for it: it doubles what has to be kept working at every CLI update (a second place to sign in, update and check the CLIs), for an installation that already works, and the one piece of value on its own, the runner as a service, replaces a `sudo` rule that is narrow and tested.
 
 ## Shipped
 
