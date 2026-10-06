@@ -45,6 +45,8 @@ procedure below, which a person runs.
 | Antigravity CLI (`agy`) | 1.2.16 | 2026-10-03 | updated from 1.2.14 with `scripts/update-cli.sh` while the image quota was used up: smoke test passed, image not verified; a command request is still refused. The script then died reading the newest of 472 logs (`ls \| head` under pipefail, fixed the same day), so the self-update switch was read by hand (still off) and no previous binary was kept; image verified 2026-10-03 with `scripts/update-cli.sh antigravity image`, once the quota was back |
 | Antigravity CLI (`agy`) | 1.2.17 | 2026-10-05 | updated from 1.2.16 with `scripts/update-cli.sh`; smoke test passed, image not verified by the script (the image quota ran out during the check, and the update was kept); a caller's request drew an image with it the same evening; a command request is still refused, `agy models` unchanged |
 | Codex CLI (`codex`) | 0.160.1 | 2026-10-05 | updated from 0.160.0 with scripts/update-cli.sh; smoke test with three images passed, no new feature, the tool probe took no step; `codex debug models` unchanged |
+| Claude Code (`claude`) | 2.1.291 | 2026-10-06 | updated from 2.1.289 with scripts/update-cli.sh; smoke test passed |
+| Antigravity CLI (`agy`) | 1.3.0 | 2026-10-06 | updated from 1.2.17 with `scripts/update-cli.sh`; smoke test with three images passed (image verified 2026-10-06), a command request is still refused, `agy models` unchanged; the changelog touches only the interactive view |
 
 Add a row for every update, newest last.
 

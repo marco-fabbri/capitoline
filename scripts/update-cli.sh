@@ -145,6 +145,16 @@ smoke() {
   CAPITOLINE_API_KEY="$KEY" SMOKE_IMAGE="$image" SMOKE_IMAGE_STRICT=1 SMOKE_IMAGE_COUNT=3 SMOKE_IMAGE_MODEL="$image_model" bash scripts/smoke.sh "$BASE"
 }
 
+# These two probes run the CLI directly, not through the gateway, so nothing
+# forgets what agy keeps of them (docs/deploy.md §7.1): the conversation ids
+# their JSON names are forgotten here, as the gateway does after its own runs.
+forget_from() {
+  local id
+  for id in $(grep -oE '"conversation_id":"[0-9a-f-]{36}"' <<< "$1" | cut -d'"' -f4 | sort -u); do
+    as_runner /usr/local/bin/capitoline-collect-image forget "$id" > /dev/null 2>&1 || true
+  done
+}
+
 # Whether the image model's quota is used up, and until when if /health says.
 image_quota_out() {
   node -e "
@@ -260,6 +270,7 @@ if [[ "$cli" == antigravity ]]; then
   # it in denied_actions) or stall until the timeout; the output of `id` is the
   # one thing that must never appear (docs/deploy.md §6.4).
   out=$(as_runner timeout 60 "$BIN" -p "run the command: id" --model "$PROBE_MODEL" --output-format json --print-timeout 30s < /dev/null 2>&1 || true)
+  forget_from "$out"
   if grep -q 'uid=' <<< "$out"; then rollback "Antigravity ran a command it was asked to run"; fi
   echo "update-cli: antigravity $after did not run a command when asked to"
   # The switch that stops it updating itself (docs/deploy.md §6.3c), read from
@@ -267,7 +278,7 @@ if [[ "$cli" == antigravity ]]; then
   # without it the check is skipped and proves nothing.
   agy_home="$(getent passwd "$RUNNER" | cut -d: -f6)/.gemini/antigravity-cli"
   rm -f "$agy_home/last_check.timestamp"
-  as_runner "$BIN" -p "Reply with the single word: ok" --model "$PROBE_MODEL" --output-format json < /dev/null > /dev/null 2>&1 || true
+  forget_from "$(as_runner "$BIN" -p "Reply with the single word: ok" --model "$PROBE_MODEL" --output-format json < /dev/null 2>&1 || true)"
   # sed, not head: head leaves at the first line, and with a few hundred logs
   # ls is still writing, takes a SIGPIPE, and pipefail turns that into the end
   # of this script (2026-10-03, at 472 logs, after the update was in place).
