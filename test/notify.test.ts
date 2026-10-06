@@ -41,15 +41,21 @@ describe("notifications", () => {
   // read: the level travels as ntfy's priority and tags, and as a header of
   // its own for any other endpoint.
   it("sends the level, as an ntfy topic reads it and in a header of its own, info when none is given", async () => {
-    const sent = async (opts?: Parameters<NonNullable<ReturnType<typeof createNotifier>>>[1]) => {
+    const sent = async (opts?: Parameters<NonNullable<ReturnType<typeof createNotifier>>>[1], icons = true) => {
       const e = await endpoint();
-      try { createNotifier({ url: e.url }, log, {})!("x", opts); return (await e.received).headers; } finally { e.close(); }
+      try { createNotifier({ url: e.url, icons }, log, {})!("x", opts); return (await e.received).headers; } finally { e.close(); }
     };
     expect(await sent({ level: "critical" })).toMatchObject({ priority: "urgent", tags: "rotating_light", "x-capitoline-level": "critical" });
     expect(await sent({ level: "warning" })).toMatchObject({ priority: "high", tags: "warning", "x-capitoline-level": "warning" });
     expect(await sent()).toMatchObject({ priority: "default", tags: "information_source", "x-capitoline-level": "info" });
     // Closing a problem: its level, a check mark, and no alarm.
     expect(await sent({ level: "critical", recovery: true })).toMatchObject({ priority: "default", tags: "white_check_mark", "x-capitoline-level": "critical" });
+    // The icons are asked for: without the flag the level is still sent, with no emoji.
+    const plain = await sent({ level: "critical" }, false);
+    expect(plain).toMatchObject({ priority: "urgent", "x-capitoline-level": "critical" });
+    expect(plain.tags).toBeUndefined();
+    const e = await endpoint();
+    try { createNotifier({ url: e.url }, log, {})!("x", { level: "warning" }); expect((await e.received).headers.tags).toBeUndefined(); } finally { e.close(); }
   });
   it("gives each availability notice its level, and a closing one the level of what it closes", () => {
     const at = Date.UTC(2026, 9, 6, 12);

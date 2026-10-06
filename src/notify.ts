@@ -28,8 +28,9 @@ export interface NotifyOptions { level?: NotifyLevel; recovery?: boolean }
 export type Notify = (message: string, opts?: NotifyOptions) => Promise<boolean>;
 
 // What an ntfy topic reads (docs/deploy.md §7.2): `Priority` sets how the
-// phone signals it, `Tags` puts an emoji before the title. `X-Capitoline-Level`
-// carries the level itself, for any other endpoint that wants to route on it.
+// phone signals it, and `Tags`, only with `icons: true`, puts an emoji before
+// the title. `X-Capitoline-Level` carries the level itself, for any other
+// endpoint that wants to route on it.
 const PRIORITY: Record<NotifyLevel, string> = { critical: "urgent", warning: "high", info: "default" };
 const TAG: Record<NotifyLevel, string> = { critical: "rotating_light", warning: "warning", info: "information_source" };
 
@@ -43,8 +44,8 @@ const RETRY_DELAYS_MS = [5_000, 30_000];
 /**
  * The optional notification of `server.notify`: one plain-text POST per
  * message, prefixed with the installation's `name` when it has one, with a
- * `Title` header, the message's level in `Priority`, `Tags` and
- * `X-Capitoline-Level`, and, when `token_env` names a variable that is
+ * `Title` header, the message's level in `Priority` and `X-Capitoline-Level`
+ * (and `Tags`, with `icons: true`), and, when `token_env` names a variable that is
  * set, `Authorization: Bearer <token>`. That is exactly what an ntfy topic
  * takes (docs/deploy.md §7.2), and any other endpoint that accepts a text POST
  * works the same way. Undefined when nothing is configured, so the caller has
@@ -62,8 +63,8 @@ export function createNotifier(cfg: Config["server"]["notify"], log: Logger, env
     const headers: Record<string, string> = {
       "content-type": "text/plain; charset=utf-8", title: "Capitoline",
       priority: opts.recovery ? PRIORITY.info : PRIORITY[level],
-      tags: opts.recovery ? "white_check_mark" : TAG[level],
       "x-capitoline-level": level,
+      ...(cfg.icons ? { tags: opts.recovery ? "white_check_mark" : TAG[level] } : {}),
     };
     if (token) headers.authorization = `Bearer ${token}`;
     const body = cfg.name ? `${cfg.name}: ${message}` : message;

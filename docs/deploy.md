@@ -700,17 +700,19 @@ command that installs it, and these:
 Each message carries a level, so a lost login is told from a new version
 before the text is read:
 
-| Level | Sent for | ntfy `Priority`, `Tags` |
-|---|---|---|
-| `critical` | a CLI signed out: nothing works for it until a person acts | `urgent`, 🚨 |
-| `warning` | a quota used up, a refusal with no reset, a weekly quota running low | `high`, ⚠️ |
-| `info` | a new CLI version, a catalog that changed, the test message | `default`, ℹ️ |
+| Level | Sent for | ntfy `Priority` | icon, with `icons: true` |
+|---|---|---|---|
+| `critical` | a CLI signed out: nothing works for it until a person acts | `urgent` | 🚨 |
+| `warning` | a quota used up, a refusal with no reset, a weekly quota running low | `high` | ⚠️ |
+| `info` | a new CLI version, a catalog that changed, the test message | `default` | ℹ️ |
 
 A message that closes a problem ("signed in again", "available again") keeps
-the level of the problem and is sent at `default` priority with ✅: it pairs
-with what it closes, and good news does not ring like an alarm. Besides
-ntfy's two headers every message has `X-Capitoline-Level`, for an endpoint
-that routes on something else.
+the level of the problem and is sent at `default` priority (and with ✅): it
+pairs with what it closes, and good news does not ring like an alarm. Every
+message also has `X-Capitoline-Level`, for an endpoint that routes on
+something else. The icons, ntfy's `Tags`, are off unless
+`server.notify.icons: true` asks for them: the priority already makes each
+level signal differently.
 
 Each is sent once: a restart does not repeat a pause already announced.
 Nothing else is ever sent. A POST that fails on the network or on the

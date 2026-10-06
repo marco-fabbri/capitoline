@@ -348,6 +348,10 @@ const ConfigObject = z
           // message, so two installations on one topic are told apart. In the
           // text and not the title: the body is UTF-8, a header ASCII only.
           name: z.string().min(1).max(80).optional(),
+          // An emoji before the title for each level (ntfy's Tags). Off unless
+          // asked for: the priority already makes each level signal
+          // differently, and some find the icons noise.
+          icons: z.boolean().optional(),
         }).strict().optional(),
       })
       .strict()
