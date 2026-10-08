@@ -510,7 +510,7 @@ describe("GET /health", () => {
   it("reports the image quota of a provider, and null for one without image models", async () => {
     const { app } = makeImages();
     const before = await request(app).get("/health");
-    expect(before.body.providers[0].imageQuota).toEqual({ used: 0, limit: 12, windowStartedAt: null, resetAt: null });
+    expect(before.body.providers[0].imageQuota).toEqual({ used: 0, limit: 12, windowStartedAt: null, resetAt: null, week: 0, weekLimit: null });
     await request(app).post("/v1/images/generations").send({ prompt: "a lighthouse", model: "antigravity-image" });
     const after = await request(app).get("/health");
     expect(after.body.providers[0].imageQuota).toMatchObject({ used: 1, limit: 12, windowStartedAt: expect.any(Number), resetAt: null });

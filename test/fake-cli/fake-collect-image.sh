@@ -34,5 +34,13 @@ case "${FAKE_COLLECT:-sample}" in
   subagent)
     [[ "$cid" == "d42fca3a-f043-4234-a505-30dd1099c02a" ]] || { echo "no image produced for conversation $cid" >&2; exit 4; }
     cat "$sample" ;;
+  # No image anywhere, and the subagent's conversation holds the refusal, as the real helper reports it.
+  subagent-quota)
+    if [[ "$cid" == "d42fca3a-f043-4234-a505-30dd1099c02a" ]]; then
+      echo "no image produced; the conversation held: .system_generated/logs/transcript.jsonl ; quota: RESOURCE_EXHAUSTED Your quota will reset after 58h29m15s. gemini-3.1-flash-image" >&2
+    else
+      echo "no image produced; the conversation held: .system_generated/logs/transcript.jsonl" >&2
+    fi
+    exit 4 ;;
   *)    cat "$sample" ;;
 esac

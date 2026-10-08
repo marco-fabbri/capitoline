@@ -482,11 +482,11 @@ describe("Core", () => {
 const IMG: ProviderEvent = { type: "image", mime: "image/jpeg", bytes: Buffer.from("ffd8ffe0", "hex"), width: 1376, height: 768 };
 const IMG_OK: ProviderEvent[] = [IMG, { type: "done" }];
 const imgReq = (model: string) => ({ model, prompt: "a lighthouse" });
-function makeImages(opts: { now?: () => number; imageQuotas?: Record<string, number> } = {}) {
+function makeImages(opts: { now?: () => number; imageQuotas?: Record<string, number>; imageWeekQuotas?: Record<string, number> } = {}) {
   const c = new FakeProvider("c", ["c-text", { name: "c-image", kind: "image" }], OK, 1);
   c.imageScript = IMG_OK;
   const usage = new UsageStore(":memory:");
-  const core = new Core([c], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: opts.now, imageQuotas: opts.imageQuotas });
+  const core = new Core([c], usage, { maxWaitMs: 200, budgets: {}, log: createLogger("t"), now: opts.now, imageQuotas: opts.imageQuotas, imageWeekQuotas: opts.imageWeekQuotas });
   return { c, usage, core };
 }
 
@@ -671,21 +671,29 @@ describe("Core images", () => {
   it("counts a generated image against the provider's image quota window", async () => {
     let t = 1_000_000;
     const { core } = makeImages({ now: () => t, imageQuotas: { c: 12 } });
-    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 0, limit: 12, windowStartedAt: null, resetAt: null });
+    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 0, limit: 12, windowStartedAt: null, resetAt: null, week: 0, weekLimit: null });
     expect(core.listModels().find((m) => m.name === "c-text")!.quota).toBeUndefined();
     await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
     const opened = t;
     t += 3600_000;
     await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
-    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 2, limit: 12, windowStartedAt: opened, resetAt: null });
-    expect(core.providerStates().find((p) => p.id === "c")!.imageQuota).toEqual({ used: 2, limit: 12, windowStartedAt: opened, resetAt: null });
+    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 2, limit: 12, windowStartedAt: opened, resetAt: null, week: 2, weekLimit: null });
+    expect(core.providerStates().find((p) => p.id === "c")!.imageQuota).toEqual({ used: 2, limit: 12, windowStartedAt: opened, resetAt: null, week: 2, weekLimit: null });
     // Five hours after the first generation the window has rolled over it.
     t = opened + 5 * 3600_000 + 1;
     expect(core.providerStates().find((p) => p.id === "c")!.imageQuota).toMatchObject({ used: 1, windowStartedAt: opened + 3600_000 });
+    // The week still holds both, and lets go of them seven days on.
+    expect(core.providerStates().find((p) => p.id === "c")!.imageQuota).toMatchObject({ week: 2 });
+    t = opened + 7 * 24 * 3600_000 + 3600_000 + 1;
+    expect(core.providerStates().find((p) => p.id === "c")!.imageQuota).toMatchObject({ used: 0, week: 0 });
+  });
+  it("reports the week's limit when one is configured", () => {
+    const { core } = makeImages({ imageQuotas: { c: 12 }, imageWeekQuotas: { c: 58 } });
+    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toMatchObject({ limit: 12, week: 0, weekLimit: 58 });
   });
   it("reports no limit when no image quota is configured, and no quota at all for a provider without image models", () => {
     const { core } = makeImages();
-    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 0, limit: null, windowStartedAt: null, resetAt: null });
+    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 0, limit: null, windowStartedAt: null, resetAt: null, week: 0, weekLimit: null });
     const { core: textOnly } = make();
     expect(textOnly.providerStates().map((p) => p.imageQuota)).toEqual([null, null]);
     expect(textOnly.listModels().every((m) => m.quota === undefined)).toBe(true);
@@ -697,7 +705,7 @@ describe("Core images", () => {
     c.imageScript = [{ type: "error", kind: "rate_limited", detail: "429", retryAfterS: 442_209 }];
     await drain(core.generateImage(imgReq("c-image"), { source: "http" }));
     const resetAt = t + 442_209 * 1000;
-    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 0, limit: 12, windowStartedAt: null, resetAt });
+    expect(core.listModels().find((m) => m.name === "c-image")!.quota).toEqual({ used: 0, limit: 12, windowStartedAt: null, resetAt, week: 0, weekLimit: null });
     expect(core.providerStates().find((p) => p.id === "c")!.imageQuota!.resetAt).toBe(resetAt);
     t = resetAt + 1;
     expect(core.providerStates().find((p) => p.id === "c")!.imageQuota!.resetAt).toBeNull();

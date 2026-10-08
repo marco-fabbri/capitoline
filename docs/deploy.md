@@ -589,6 +589,18 @@ is a copy: install it again after an upgrade that changes it** (the command of
 §7.1 above, or `deploy/ansible/site.yml`), or the sweep is refused as a bad
 argument and only logged.
 
+When a run ends with no image, the helper also says what the conversation's
+transcript holds of a quota refusal, as a few fixed phrases (the error's
+name, the model, "your quota will reset after …") and nothing else of the
+text. Since 1.2.16 the subagent writes its refusal there and the stream the
+gateway reads never carries it, so this is where the gateway learns that the
+image quota is used up and when it returns: the request is answered as a
+rate limit with that wait, the image model is paused until then, and the
+notice says so. The image model's own quota is weekly, about 58 images
+(`image.quota_per_week`, for reporting), apart from the Gemini group's
+buckets that `/usage` reports; the operator's page shows how many images the
+gateway drew in the last five hours and in the last seven days.
+
 What stays is not tied to a conversation: `agy`'s logs, which carry no prompt,
 and a 267-byte opaque file per working directory under `implicit/`.
 

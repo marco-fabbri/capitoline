@@ -173,6 +173,17 @@ describe("capitoline-collect-image, a conversation with no image", () => {
     expect(said).toContain(".system_generated/logs/transcript.jsonl");
     expect(said).not.toContain("must not travel");
     expect(existsSync(dir)).toBe(false);
+    // A transcript that holds a quota refusal: its fixed phrases come out, nothing else of it.
+    mkdirSync(join(dir, ".system_generated/logs"), { recursive: true });
+    writeFileSync(join(dir, ".system_generated/logs/transcript.jsonl"),
+      '{"type":"user","text":"a secret prompt about a lighthouse"}\n' +
+      '{"type":"tool","error":"429 {\\"status\\":\\"RESOURCE_EXHAUSTED\\",\\"message\\":\\"You have exhausted your capacity on this model. Your quota will reset after 58h29m15s.\\",\\"model\\":\\"gemini-3.1-flash-image\\"}"}\n');
+    const q = collect(h, id).stderr.toString();
+    expect(q).toMatch(/; quota: /);
+    expect(q).toContain("RESOURCE_EXHAUSTED");
+    expect(q).toContain("Your quota will reset after 58h29m15s");
+    expect(q).toContain("gemini-3.1-flash-image");
+    expect(q).not.toContain("lighthouse");
     // An empty one says so.
     mkdirSync(dir, { recursive: true });
     expect(collect(h, id).stderr.toString().trim()).toBe("no image produced; the conversation held: nothing");

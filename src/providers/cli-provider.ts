@@ -50,6 +50,15 @@ interface Run {
   windDown(): void;
 }
 
+// What kind of step an unexpected call was, for the journal: its type and the
+// names of its parameters, never their values, which carry the prompt.
+function stepShape(raw: string): Record<string, unknown> {
+  try {
+    const s = JSON.parse(raw) as { step_type?: unknown; state?: unknown; tool_info?: { parameters?: Record<string, unknown> }; subagent_info?: { subagents?: { type_name?: unknown }[] } };
+    return { type: s.step_type, state: s.state, parameters: Object.keys(s.tool_info?.parameters ?? {}), subagents: (s.subagent_info?.subagents ?? []).map((a) => a.type_name) };
+  } catch { return {}; }
+}
+
 // A failed image run that drew nothing and is worth one more: the agent was
 // stopped at a step it is not allowed, or ended without an image. Never a
 // quota refusal, a timeout or a collected file that was rejected: a second
@@ -350,7 +359,7 @@ export class CliProvider implements Provider {
           if (waiting.has(ev.name) && begun) continue;
           if (ev.phase === "call" && allowed.has(ev.name)) begun = true;
           if (ev.phase === "call" && !allowed.has(ev.name)) {
-            this.log.warn({ model: model.name, tool: ev.name }, "unexpected tool call: run aborted");
+            this.log.warn({ model: model.name, tool: ev.name, step: stepShape(ev.raw) }, "unexpected tool call: run aborted");
             run.ac.abort();
             // After the allowed step has finished the image may already be
             // there: with the picture saved, the agent went on to look at it
@@ -416,6 +425,11 @@ export class CliProvider implements Provider {
       }
       let collected = await this.collect(conversationId);
       const empty = (r: typeof collected) => r.exitCode === COLLECT_NO_IMAGE || (r.exitCode === 0 && r.stdout.length === 0);
+      // What the helper found of a quota refusal in a conversation that held
+      // no image (scripts/capitoline-collect-image): the subagent's, mostly.
+      const quotaSaid: string[] = [];
+      const heard = (r: typeof collected) => { const m = /; quota: (.*)$/m.exec(String(r.stderr)); if (m) quotaSaid.push(m[1]); };
+      if (empty(collected)) heard(collected);
       // The image is saved "to the conversation's artifacts", and when a
       // subagent made it that is not always the run's own conversation: a run
       // that ended with the agent's "done" left nothing there (2026-10-05).
@@ -425,6 +439,7 @@ export class CliProvider implements Provider {
         if (!empty(collected)) break;
         if (!CONVERSATION_ID.test(id)) continue;
         const elsewhere = await this.collect(id);
+        if (empty(elsewhere)) heard(elsewhere);
         if (!empty(elsewhere)) {
           this.log.info({ model: model.name, conversationId, subagentConversation: id }, "image collected from the subagent's conversation");
           collected = elsewhere;
@@ -434,7 +449,11 @@ export class CliProvider implements Provider {
         // Only now does the prose count: a quota hit leaves nothing in the
         // conversation, so an image that came out disproves it, and the prose
         // is prompt-driven text that may merely echo "rate limit" or "429".
-        if (proseHit) { yield this.quotaError(model, proseHit); return; }
+        // The refusal the subagent wrote comes first when it carries the
+        // instant the quota returns, which the agent's words rarely repeat.
+        const saidHit = quotaSaid.length > 0 ? detectQuotaExhausted(quotaSaid.join(" "), this.opts.now()) : null;
+        const hit = saidHit?.retryAfterS !== undefined ? saidHit : (proseHit ?? saidHit);
+        if (hit) { yield this.quotaError(model, hit); return; }
         // Stopped at a step it was not allowed, and nothing had been made yet.
         if (refused) { yield refused; return; }
         this.log.warn({ model: model.name, conversationId, prose: prose.slice(-500) }, "image run produced no image");

@@ -381,6 +381,7 @@ providers:
       collect: [test/fake-cli/fake-collect-image.sh]   # relative to the repo; the runner resolves it
       min_bytes: 200000
       quota_per_window: 12    # images per 5-hour window, reported in /health and /v1/models
+      quota_per_week: 58      # and per week: the limit that actually stopped images for days (2026-10-07)
       allowed_tools: ["subagent:image-generator"]
       # How the agent waits for that subagent: a timer the subagent's report
       # cancels, and a look at whether it is still running. Any other action of

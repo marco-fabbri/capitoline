@@ -24,7 +24,12 @@ export type VirtualKind = "council";
 // when that instant has passed). The provider has two quotas, one of hours and
 // one of days, and only the short one is countable here: the long one shows up
 // solely as a `resetAt` far in the future (spike, 2026-09-21).
-export interface ImageQuota { used: number; limit: number | null; windowStartedAt: number | null; resetAt: number | null }
+/**
+ * Images drawn through the gateway: in the short window (`used`, against
+ * `limit`) and in the last seven days (`week`, against `weekLimit`). Counts,
+ * not allowances: images made around the gateway are not in them.
+ */
+export interface ImageQuota { used: number; limit: number | null; windowStartedAt: number | null; resetAt: number | null; week: number; weekLimit: number | null }
 export interface ModelInfo { name: string; provider: string; kind: ModelKind | VirtualKind; available: boolean; reason?: string; overBudget: boolean; quota?: ImageQuota }
 /**
  * The catalog of a provider that lists its models (docs/deploy.md §7.2), as
@@ -45,6 +50,8 @@ export interface CoreOptions {
   maxWaitMs: number; budgets: Record<string, { window5h: number; window7d: number }>; log: Logger; now?: () => number;
   /** Per provider: how many images the short quota window allows (config image.quota_per_window). */
   imageQuotas?: Record<string, number>;
+  /** Per provider: how many a week (config image.quota_per_week). */
+  imageWeekQuotas?: Record<string, number>;
   /** Told of every change a fresh listing makes to a provider's catalog; never of a restore at startup. */
   onCatalogChange?: (provider: string, change: CatalogChange) => void;
   /** Told when a quota pause starts and, if it was long, ends, and when a provider signs out or back in. */
@@ -115,6 +122,7 @@ interface State {
   provider: Provider; sem: Semaphore; health: HealthStatus | null; pausedUntil: number | null; strikes: number;
   /** Set only for a provider that has image models; null otherwise. */
   imageLimit: number | null;
+  imageWeekLimit: number | null;
   /** The instant the exhausted image quota frees up, as the provider reported it. */
   imageResetAt: number | null;
   /** When the provider's current run of refusals began; null while it answers. */
@@ -222,7 +230,7 @@ export class Core {
       const models = p.models();
       this.states.set(p.id, {
         provider: p, sem: new Semaphore(p.concurrencyLimit), health: null, pausedUntil: null, strikes: 0,
-        imageLimit: opts.imageQuotas?.[p.id] ?? null, imageResetAt: null, refusedSince: null, hasImageModels: models.some((m) => m.kind === "image"),
+        imageLimit: opts.imageQuotas?.[p.id] ?? null, imageWeekLimit: opts.imageWeekQuotas?.[p.id] ?? null, imageResetAt: null, refusedSince: null, hasImageModels: models.some((m) => m.kind === "image"),
         catalog: null,
         quota: null,
       });
@@ -563,7 +571,8 @@ export class Core {
     if (!s.hasImageModels) return null;
     const now = this.now();
     const w = this.usage.imageWindow(id, H5, now);
-    return { used: w.used, limit: s.imageLimit, windowStartedAt: w.windowStartedAt, resetAt: s.imageResetAt !== null && s.imageResetAt > now ? s.imageResetAt : null };
+    const week = this.usage.imageWindow(id, D7, now);
+    return { used: w.used, limit: s.imageLimit, windowStartedAt: w.windowStartedAt, resetAt: s.imageResetAt !== null && s.imageResetAt > now ? s.imageResetAt : null, week: week.used, weekLimit: s.imageWeekLimit };
   }
 
   // Who spent the last day, busiest first: with more than one application on

@@ -97,11 +97,12 @@ export async function start(configPath: string, overrides: StartOverrides = {}) 
   const usage = new UsageStore(cfg.usage.db_path);
   const budgets = Object.fromEntries(Object.entries(cfg.providers).map(([id, p]) => [id, { window5h: p.budget.window_5h_tokens, window7d: p.budget.window_7d_tokens }]));
   const imageQuotas = Object.fromEntries(Object.entries(cfg.providers).flatMap(([id, p]) => (p.image.quota_per_window === undefined ? [] : [[id, p.image.quota_per_window] as const])));
+  const imageWeekQuotas = Object.fromEntries(Object.entries(cfg.providers).flatMap(([id, p]) => (p.image.quota_per_week === undefined ? [] : [[id, p.image.quota_per_week] as const])));
   // Optional (server.notify): a change in a provider's catalog is announced
   // as one plain-text POST, and nothing else is ever sent.
   const notify = createNotifier(cfg.server.notify, log.child({ mod: "notify" }));
   const core = new Core(providers, usage, {
-    maxWaitMs: cfg.server.queue.max_wait_s * 1000, budgets, imageQuotas, log: log.child({ mod: "core" }),
+    maxWaitMs: cfg.server.queue.max_wait_s * 1000, budgets, imageQuotas, imageWeekQuotas, log: log.child({ mod: "core" }),
     onCatalogChange: notify ? (provider, change) => notify(describeCatalogChange(cfg, provider, change), { level: "info" }) : undefined,
     onAvailability: notify ? (event) => notify(describeAvailability(cfg, event), availabilityLevel(event)) : undefined,
     quotaNotifyBelow: Object.fromEntries(Object.entries(cfg.providers).flatMap(([id, p]) => (p.quota ? [[id, p.quota.notify_below]] : []))),

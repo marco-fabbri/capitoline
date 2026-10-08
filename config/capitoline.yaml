@@ -421,6 +421,7 @@ providers:
       collect: [/usr/local/bin/capitoline-collect-image]
       min_bytes: 200000       # anything smaller is a placeholder, not a picture
       quota_per_window: 12    # images per 5-hour window, reported in /health and /v1/models
+      quota_per_week: 58      # and per week: the limit that actually stopped images for days (2026-10-07)
       # The one step an image run may take. Since 1.2.16 the CLI makes images
       # through its built-in image-generator subagent, so that hand-off is what
       # is admitted, once; any other tool or subagent still aborts the run.

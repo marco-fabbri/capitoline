@@ -293,6 +293,13 @@ describe("CliProvider.generateImage", () => {
       expect(quota[0]).toMatchObject({ type: "error", kind: "rate_limited" });
       expect(count(spy)).toBe(2); // the run's own conversation and the subagent's, one attempt
     });
+    // The agent said only "done"; the refusal and its reset were written in
+    // the subagent's own conversation (2026-10-07, 58 hours ahead).
+    it("reports the quota the subagent was refused, with its reset, read from the subagent's conversation", async () => {
+      const ev = await withCollect("subagent-quota", () => generate(imageProvider(SUBAGENT_RUN, twice)));
+      expect(ev).toHaveLength(1);
+      expect(ev[0]).toMatchObject({ type: "error", kind: "rate_limited", retryAfterS: 58 * 3600 + 29 * 60 + 15, scope: "model", cliModelId: "gemini-3.1-flash-image" });
+    });
     it("looks for the image in the subagent's conversation when the run's own holds none", async () => {
       const spy = spyRunner();
       const ev = await withCollect("subagent", () => generate(imageProvider(SUBAGENT_RUN, today, spy)));

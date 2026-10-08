@@ -89,6 +89,7 @@ describe("config", () => {
     expect(agy.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
     expect(agy.image.min_bytes).toBe(200000);
     expect(agy.image.quota_per_window).toBe(12);
+    expect(agy.image.quota_per_week).toBe(58);
     // The hand-off to the CLI's own image subagent, and nothing else (Antigravity 1.2.16).
     // The CLI's own quota report, and the share of a weekly bucket under which it is announced.
     expect(agy.quota).toEqual({ args: ["--output-format", "json", "-p", "/usage"], notify_below: 0.2 });

@@ -56,9 +56,13 @@ const ImageSchema = z
     collect: z.array(z.string()).min(1).optional(),
     min_bytes: z.number().int().min(0).default(200_000),
     // How many images the short quota window allows, for reporting only: the
-    // gateway never blocks on it, and the provider's second, much longer quota
-    // cannot be counted at all (it is reported through its reset instant).
+    // gateway never blocks on it.
     quota_per_window: z.number().int().min(1).optional(),
+    // The same for a week, the provider's second and much longer quota, also
+    // for reporting only. The gateway counts what it drew in the last seven
+    // days, which is not what the provider counts (images made around the
+    // gateway are not in it); the refusal, with its reset, stays what decides.
+    quota_per_week: z.number().int().min(1).optional(),
   })
   .strict()
   .default({});

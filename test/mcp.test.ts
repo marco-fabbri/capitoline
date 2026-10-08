@@ -70,7 +70,7 @@ describe("MCP", () => {
     const text = (r.content as { type: string; text: string }[])[0].text;
     expect(JSON.parse(text)).toEqual([
       { name: "claude-opus", provider: "claude", kind: "text", available: true, over_budget: false },
-      { name: "antigravity-image", provider: "antigravity", kind: "image", available: true, over_budget: false, quota: { used: 0, limit: null, windowStartedAt: null, resetAt: null } },
+      { name: "antigravity-image", provider: "antigravity", kind: "image", available: true, over_budget: false, quota: { used: 0, limit: null, windowStartedAt: null, resetAt: null, week: 0, weekLimit: null } },
     ]);
     await c.close();
   });

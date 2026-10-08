@@ -17,7 +17,11 @@
 #
 # When a conversation holds no image the names of the files it does hold go to
 # stderr with the refusal: names only, for the journal, to tell a run that made
-# nothing from one that saved its image somewhere unexpected.
+# nothing from one that saved its image somewhere unexpected. So does what its
+# transcript says of a quota refusal, as a handful of fixed phrases and nothing
+# else of the text: since Antigravity 1.2.16 an image is made by a subagent,
+# and its refusal, with the instant the quota comes back, is written in its
+# own conversation and never reaches the stream the gateway reads.
 #
 # `forget` removes what an Antigravity run leaves in the runner's home once it
 # has ended, since the CLI has no option not to keep it (Claude Code and Codex
@@ -86,9 +90,14 @@ fi
 # shellcheck disable=SC2086  # the pattern is ours, and globbing it is the point
 img=$(ls -t "$dir"/$pattern 2>/dev/null | head -1 || true)
 if [ -z "$img" ]; then
-  held=$(cd "$dir" && find . -maxdepth 3 -type f 2>/dev/null | sed 's|^\./||' | head -30 | tr '\n' ' ' || true)
+  # sed and not head: head leaves early, the writer before it takes a SIGPIPE,
+  # and pipefail turns that into an empty answer.
+  held=$(cd "$dir" && find . -maxdepth 3 -type f 2>/dev/null | sed 's|^\./||' | sed -n '1,30p' | tr '\n' ' ' || true)
+  quota=$(cat "$dir"/.system_generated/logs/transcript*.jsonl 2>/dev/null \
+    | grep -oE 'RESOURCE_EXHAUSTED|QUOTA_EXHAUSTED|[Yy]our quota will reset after [0-9hms.]+|gemini-[a-z0-9.-]*-image' \
+    | sort -u | sed -n '1,8p' | tr '\n' ' ' || true)
   rm -rf "$dir"
-  echo "no image produced; the conversation held: ${held:-nothing}" >&2
+  echo "no image produced; the conversation held: ${held:-nothing}${quota:+; quota: $quota}" >&2
   exit 4
 fi
 cat "$img"
