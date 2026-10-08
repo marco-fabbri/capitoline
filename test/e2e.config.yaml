@@ -414,33 +414,31 @@ council:
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
       - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
       - { family: open-weights, models: [antigravity-gpt-oss] }
-    # Every model here but the first sits in no seat of this council, and that
-    # is the whole design of the chain. Measured 2026-09-23: the previous one
-    # named the top model of each family, and *every* one of its five entries
-    # was reachable by a seat. With judge_allow_member: false a seated model is
-    # struck out of the chain, so the judge was never the best available — it
-    # was whatever the panel had left over. On a day when claude-fable was
-    # exhausted the anthropic seat took claude-opus, the first four entries
-    # were all gone, and the panel was judged by codex-gpt-5.6-sol, the
-    # cheapest thing in the list. That is the failure the chain was reordered
-    # to prevent this morning, arriving by a different road.
+    # The judge may also be a member, as karpathy/llm-council's chairman is
+    # (judge_allow_member: true since 2026-10-08). The seat-apart rule it
+    # replaces guarded against a synthesizer weighing its own answer, and
+    # measured it did not: eighteen syntheses by a seated chairman, three of
+    # them with its own answer wrong, followed the peers' verdict every time
+    # (docs/measurements/2026-09-23-council/, both addenda). What the rule did
+    # cost showed on the days the anthropic seat took claude-opus: the chain
+    # then had to step past the strongest model on the table to a weaker one.
     #
-    # claude-opus stays at the head and stays seat-reachable on purpose: when
-    # the anthropic seat takes claude-fable, as it does whenever Fable has
-    # quota, this is free and it is the strongest model on the table. When
-    # Fable is out the seat takes it instead, and the chain falls to
-    # antigravity-claude-opus — Claude Opus 4.6 through the Google subscription, in no
-    # seat of any council, spending neither the Anthropic weekly window nor the
-    # Codex allowance that becomes a Plus allowance in October. So the good day
-    # is judged by the best model and the bad day by a strong one, which is the
-    # opposite of what the old chain did.
+    # claude-opus stays at the head. When the anthropic seat takes
+    # claude-fable, as it does whenever Fable has quota, claude-opus sits in no
+    # seat and judges from outside; when Fable is out and the seat takes
+    # claude-opus, it judges as a member instead of handing the synthesis
+    # down. Fable is not put at the head: as chairman it would spend two of its
+    # calls per deliberation instead of one, on the tightest of the four
+    # subscriptions' limits, and a synthesis by Fable has not been measured to
+    # be better than one by Opus. The rest of the chain answers when no Claude
+    # can: Opus 4.6 through the Google subscription, then OpenAI's models,
+    # none of them in a seat.
     #
     # Not used, although they sit in no seat: claude-opus-1m and its siblings
-    # are the same model as a seated one with a wider context, so a judge
-    # seated there would be weighing its own answer, which is exactly what
-    # judge_allow_member: false exists to prevent.
+    # are the same model as a seated one with a wider context, and would add
+    # nothing the head does not.
     judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6.1-sol, codex-gpt-5.6-terra] }
-    judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
+    judge_allow_member: true    # the judge may be a member, as llm-council's chairman is (measured, see above)
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to rank
     stage_timeout_s: 20         # seconds, not minutes, so a hung member fails fast in the suite
@@ -472,7 +470,7 @@ council:
       - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
       - { family: open-weights, models: [antigravity-gpt-oss] }
     judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6.1-sol, codex-gpt-5.6-terra] }
-    judge_allow_member: false   # the judge is seated apart, so no synthesizer weighs its own answer
+    judge_allow_member: true    # as the reference panel: the judge may be a member
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to synthesize
     ranking: false              # no stage 2: four answers and a synthesis, five calls

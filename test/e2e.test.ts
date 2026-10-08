@@ -282,8 +282,8 @@ describe("a council end to end", () => {
       { label: "Response C", averageRank: 2.75, votes: 4 },
       { label: "Response D", averageRank: 3.25, votes: 4 },
     ]);
-    // The judge is seated apart from the panel: claude-fable took the
-    // Anthropic seat, so the judge's chain steps to claude-opus (§12.3).
+    // claude-fable took the Anthropic seat, so the head of the judge's chain,
+    // claude-opus, sits in no seat and judges from outside (§12.3).
     expect(d.judge).toEqual({ model: "claude-opus", blind: true });
     expect(d.strategyVersion).toBe(STRATEGY_VERSION);
     expect(d.calls).toBe(9);
@@ -316,8 +316,8 @@ describe("a council end to end", () => {
     const d = body.capitoline.council;
     expect(d.shape).toBe("fast");
     // The same four subscriptions answering as they answer a direct request,
-    // labelled and judged by a model seated apart from them — everything the
-    // reference panel does except stage 2.
+    // labelled and judged blind — everything the reference panel does except
+    // stage 2.
     expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
       ["anthropic", "claude-fable", ANSWERS.claude],
       ["openai", "codex-gpt-6-astra", ANSWERS.codex],

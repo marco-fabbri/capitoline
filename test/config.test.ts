@@ -357,7 +357,8 @@ describe("config", () => {
       // default seats put google and open-weights on antigravity (design §12.1).
       expect(cfg.providers.antigravity.concurrency, file).toBeGreaterThanOrEqual(2);
       // The snake_case the operator writes, under the names the code uses.
-      expect([c.judgeAllowMember, c.judgeBlind, c.minMembers], file).toEqual([false, true, 2]);
+      // The judge may sit among the members since 2026-10-08 (measured on 2026-09-27).
+      expect([c.judgeAllowMember, c.judgeBlind, c.minMembers], file).toEqual([true, true, 2]);
       // Minutes on the host, seconds in the end-to-end copy: from the moment
       // stage_timeout_s becomes a member's deadline, a test that never reaches
       // the process would otherwise hold the suite for five minutes.
@@ -385,7 +386,7 @@ describe("config", () => {
       // two, not a decision.
       expect(fast.seats, file).toEqual(full.seats);
       expect(fast.judge, file).toEqual(full.judge);
-      expect([fast.judgeAllowMember, fast.judgeBlind, fast.minMembers], file).toEqual([false, true, 2]);
+      expect([fast.judgeAllowMember, fast.judgeBlind, fast.minMembers], file).toEqual([true, true, 2]);
       expect(fast.stageTimeoutS, file).toBe(full.stageTimeoutS);
       // Two councils on one Antigravity subscription, each seating it twice:
       // the rule is per council, so the two slots the reference panel needs
@@ -600,7 +601,9 @@ describe("config", () => {
   });
 
   it("gives every council a judge its own seats cannot strike out", () => {
-    // With judge_allow_member: false a seated model is removed from the judge
+    // The shipped councils let the judge sit (judge_allow_member: true), and
+    // the chain is still built to work with false, the code's default and a
+    // host's to choose: with false a seated model is removed from the judge
     // chain, so a chain whose every entry a seat can take leaves the judge to
     // be whatever the panel happened not to use. Measured on the host
     // 2026-09-23: all five entries of the reference panel's chain were
@@ -624,10 +627,11 @@ describe("config", () => {
 
   it("never seats a judge that is the same model as one of its seats under another name", () => {
     // `claude-opus-1m` sits in no seat and would pass the check above, while
-    // being the same model as `claude-opus` with a wider context window: a
-    // judge seated there weighs its own answer, which is what
-    // judge_allow_member: false exists to prevent. The names differ and the
-    // CLI id does not, so the id is what this compares.
+    // being the same model as `claude-opus` with a wider context window: it
+    // would be the head again under another name, adding nothing, and with
+    // judge_allow_member: false it would bring back the seated judge that
+    // setting removes. The names differ and the CLI id does not, so the id is
+    // what this compares.
     for (const file of BOTH_FILES) {
       const cfg = loadConfig(file);
       const idOf = (name: string): string | undefined => {

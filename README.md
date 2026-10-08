@@ -30,8 +30,9 @@ the final response. Capitoline keeps those three stages and changes what is
 around them. The models are reached through their official CLIs, on your own
 subscriptions, with no pay-per-use API, and the council is a model name any
 OpenAI client or MCP client can ask for. Each seat is a model family with a
-fallback chain, not a single model. The judge is seated apart and blind by
-default: llm-council's chairman is a member, and here that is an option
+fallback chain, not a single model. The judge is blind to the members'
+names and may be one of them, as llm-council's chairman is: that was
+measured before it was allowed (`docs/measurements/`), and it is a setting
 (`judge_allow_member`). The synthesis builds on the top-ranked answer and
 asserts nothing the answers do not support. And every change to the strategy
 was measured before it shipped (`docs/measurements/`).
@@ -115,7 +116,7 @@ Two councils are configured, and a client asks for either the same way: in `mode
 
 | Model | What it convenes | Calls |
 |---|---|---|
-| `capitoline` | the reference panel: four families — Anthropic, OpenAI, Google, open weights — answer, rank each other blind, and a judge seated apart synthesizes. The shape to ask when the panel's own verdict on its answers is worth its price | 9 |
+| `capitoline` | the reference panel: four families — Anthropic, OpenAI, Google, open weights — answer, rank each other blind, and a blind judge synthesizes. The shape to ask when the panel's own verdict on its answers is worth its price | 9 |
 | `capitoline-fast` | the same four families and the same judge, without the ranking stage (`ranking: false`): four independent perspectives and a synthesis for half the price, and no panel verdict on them. It is `capitoline` at `reasoning_effort: low`, pinned under a name of its own for clients that cannot send the field. The response carries an empty `rankings` and `aggregate` and says which shape ran, so a fast deliberation is never read as one whose rankings all failed | 5 |
 
 The model list keeps itself current. Once a day, and at startup, the gateway asks the Codex and Antigravity CLIs which models they serve (`codex debug models`, `agy models`): a model they add is served under the door's prefix, one they drop disappears from `/v1/models` and the councils step past it, and `/health` shows what changed. Claude's names are aliases that already follow the latest model. Nothing is edited on disk, and a change can optionally be announced as one plain-text POST — to an [ntfy](https://ntfy.sh) topic, say, or any endpoint that takes one (`docs/deploy.md` §7.2).
