@@ -41,7 +41,8 @@ describe("reading the listings", () => {
   it("reads `codex debug models`: slugs, what the CLI hides, and the levels each serves", () => {
     const listed = codexListed();
     expect(listed.map((m) => m.id)).toEqual(["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-reserve", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "codex-auto-review"]);
-    expect(listed.filter((m) => m.hidden).map((m) => m.id)).toEqual(["gpt-reserve", "codex-auto-review"]);
+    // gpt-5.5 has been hidden by the CLI since 2026-10-08, ahead of its retirement.
+    expect(listed.filter((m) => m.hidden).map((m) => m.id)).toEqual(["gpt-reserve", "gpt-5.5", "codex-auto-review"]);
     expect(listed.find((m) => m.id === "gpt-6-luna")!.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
     expect(listed.find((m) => m.id === "gpt-6-astra")!.efforts).toContain("ultra");
   });

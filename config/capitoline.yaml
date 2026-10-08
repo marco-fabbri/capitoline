@@ -176,7 +176,7 @@ providers:
       codex-gpt-5.6-sol:   { cli_model: gpt-5.6-sol }
       codex-gpt-5.6-terra: { cli_model: gpt-5.6-terra }
       codex-gpt-5.6-luna:  { cli_model: gpt-5.6-luna,  efforts: [low, medium, high, xhigh, max] }
-      # gpt-5.5 is still listed and deliberately absent (`discover.exclude`
+      # gpt-5.5 is hidden by the CLI since 2026-10-08 and deliberately absent (`discover.exclude`
       # above keeps discovery from adding it back): it retires from Codex with
       # ChatGPT sign-in on 2026-10-14 (developers.openai.com/codex/models).
       # The two the cache lists that are not general chat models, exposed

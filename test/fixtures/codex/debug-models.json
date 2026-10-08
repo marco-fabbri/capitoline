@@ -194,7 +194,7 @@
     {
       "slug": "gpt-5.5",
       "display_name": "GPT-5.5",
-      "visibility": "list",
+      "visibility": "hide",
       "supported_reasoning_levels": [
         {
           "effort": "low"
