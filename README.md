@@ -16,7 +16,7 @@ This is a personal project, published as-is. It works for its author's setup;
 issues and pull requests are welcome but may not get an answer.
 
 You can give the floor to a single member: `claude-fable`,
-`codex-gpt-6-astra`, `antigravity-gemini-pro`, or any other model the three CLIs
+`codex-gpt-6-astra`, `antigravity-gemini-flash`, or any other model the three CLIs
 serve, since every one of them is exposed by name. Or the `capitoline` model convenes the
 Triad: every member answers, every member judges the others without knowing
 who wrote what, and a judge synthesizes. As in the Temple, the value is not

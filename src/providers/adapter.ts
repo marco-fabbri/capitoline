@@ -140,11 +140,11 @@ export interface Provider {
  * rather than flipped. An effort the caller named is the quality they expect,
  * and nothing in the response could tell them the cheap level ran instead,
  * while the cost of the opposite mistake is latency and quota, which /health
- * reports and the budget windows already track. The only model the rule
- * touches today is `antigravity-gemini-pro` (`efforts: [low, high]`, no medium in the
- * CLI's ids), whose default requests on the deployed host all resolve to
- * `gemini-3.1-pro-high`: flipping the tie-break would silently downgrade every
- * one of them with no request having asked for it. A caller who wants the
+ * reports and the budget windows already track. The model the rule was written
+ * for was Gemini 3.1 Pro (`efforts: [low, high]`, no medium in the CLI's ids),
+ * whose default requests all resolved to its high level until it left
+ * Antigravity's listing on 2026-10-13: flipping the tie-break would have
+ * silently downgraded every one of them with no request having asked for it. A caller who wants the
  * cheap level asks for `low`, which is never approximated away.
  */
 export function effortValue(cfg: ProviderConfig, model: ModelSpec, wanted: Effort | undefined): { effort: Effort; value: string } | null {

@@ -89,7 +89,7 @@ describe("modelSpecs", () => {
       name: "antigravity-image", provider: "antigravity", cliModel: "gemini-3.8-flash-low",
       effortSuffix: false, efforts: undefined, kind: "image", timeoutS: 240,
     });
-    expect(specs.find((s) => s.name === "antigravity-gemini-pro")!.efforts).toEqual(["low", "high"]);
+    expect(specs.find((s) => s.name === "antigravity-gpt-oss")!.efforts).toEqual(["medium"]);
   });
   it("stamps the provider id it was given, not one read from the file", () => {
     // The id is the registry key, and it is what Core pauses and what the

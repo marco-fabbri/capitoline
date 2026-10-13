@@ -12,7 +12,9 @@ const repoCfg = loadConfig("config/capitoline.yaml").providers.antigravity;
 const cfg = { ...repoCfg, system_preamble: null };
 const models = modelSpecs("antigravity", cfg);
 const flash = models.find((m) => m.name === "antigravity-gemini-flash")!;
-const pro = models.find((m) => m.name === "antigravity-gemini-pro")!;
+// A model that serves two of the three levels, as Gemini 3.1 Pro did until it
+// left the listing (2026-10-13): what the nearest-level rule is about.
+const pro = modelSpecs("antigravity", { ...cfg, models: { "test-pro": { cli_model: "gemini-test-pro", effort_suffix: true, efforts: ["low", "high"], kind: "text" } } })[0];
 const opus = models.find((m) => m.name === "antigravity-claude-opus")!;
 async function* linesOf(path: string) { for (const l of readFileSync(path, "utf8").split("\n")) yield l; }
 async function events(src: AsyncIterable<string>) { const out: AdapterEvent[] = []; for await (const e of antigravityAdapter.parse(src)) out.push(e); return out; }
@@ -25,8 +27,8 @@ describe("antigravity adapter", () => {
     expect(c.stdin.endsWith("\n")).toBe(true);
   });
   it("approximates a missing effort level to the nearest allowed one", () => {
-    const c = antigravityAdapter.buildCommand(cfg, pro, { model: "antigravity-gemini-pro", stream: true, effort: "medium", messages: [{ role: "user", text: "q" }] });
-    expect(c.args[c.args.indexOf("--model") + 1]).toBe("gemini-3.1-pro-high");
+    const c = antigravityAdapter.buildCommand(cfg, pro, { model: "test-pro", stream: true, effort: "medium", messages: [{ role: "user", text: "q" }] });
+    expect(c.args[c.args.indexOf("--model") + 1]).toBe("gemini-test-pro-high");
   });
   it("leaves the id alone for models without an effort suffix and prepends the system prompt", () => {
     const c = antigravityAdapter.buildCommand(cfg, opus, { model: "antigravity-claude-opus", stream: true, messages: [{ role: "system", text: "S" }, { role: "user", text: "q" }] });

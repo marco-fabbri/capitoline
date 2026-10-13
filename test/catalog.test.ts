@@ -51,7 +51,8 @@ describe("reading the listings", () => {
     expect(() => codexAdapter.listModels!(`{"models": null}`, cfg.providers.codex)).toThrow(/no models array/);
   });
   it("reads `agy models`, one id per tab-separated line, and skips anything else", () => {
-    expect(agyListed()).toHaveLength(14);
+    // Six since 2026-10-13: Gemini 3.8 Flash at three levels, two Claude models and GPT-OSS.
+    expect(agyListed()).toHaveLength(6);
     expect(antigravityAdapter.listModels!(`Fetching available models...\ngemini-9-flash-high\tGemini 9 Flash (High)\n\n`, cfg.providers.antigravity)).toEqual([{ id: "gemini-9-flash-high" }]);
   });
 });
@@ -91,7 +92,7 @@ describe("the catalog of one provider", () => {
     expect(p.applyListing(withoutHigh).removed).toEqual(["antigravity-gemini-flash-high"]);
     const withoutFlash = agyListed().filter((m) => !m.id.startsWith("gemini-3.8-flash"));
     expect(p.applyListing(withoutFlash).removed).toEqual(expect.arrayContaining(["antigravity-gemini-flash", "antigravity-gemini-flash-low", "antigravity-gemini-flash-medium", "antigravity-image"]));
-    expect(p.healthModel).toBe("antigravity-gemini-3.7-flash");
+    expect(p.healthModel).toBe("antigravity-claude-sonnet");
   });
   it("a hidden model that is still listed is served, not retired", () => {
     const p = codex();

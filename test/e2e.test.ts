@@ -109,8 +109,7 @@ describe("end to end with fake CLIs", () => {
     // still green.
     expect(data.find((m) => m.id === "antigravity-image")!.capitoline.quota).toEqual({ used: 0, limit: 12, window_started_at: null });
     expect(kinds["antigravity-image"]).toBe("image");
-    expect(kinds["antigravity-gemini-3.7-flash"]).toBe("text");
-    expect(kinds["antigravity-gemini-3.6-flash"]).toBe("text");
+    expect(kinds["antigravity-gemini-flash-medium"]).toBe("text");
     expect(kinds["antigravity-gemini-flash"]).toBe("text");
   });
 });
@@ -263,7 +262,7 @@ describe("a council end to end", () => {
     expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
       ["anthropic", "claude-fable", ANSWERS.claude],
       ["openai", "codex-gpt-6-astra", ANSWERS.codex],
-      ["google", "antigravity-gemini-pro", ANSWERS.agy],
+      ["google", "antigravity-gemini-flash", ANSWERS.agy],
       ["open-weights", "antigravity-gpt-oss", ANSWERS.agy],
     ]);
     expect(d.members.every((m) => m.fellBackFrom === undefined)).toBe(true);
@@ -272,7 +271,7 @@ describe("a council end to end", () => {
     // Every member ranked, and every ranking parsed: the four fake panels
     // answer stage 2 in JSON, so a reply the parser refused would show up
     // here as a missing vote rather than as an error nobody sees.
-    expect(d.rankings.map((x) => x.by).sort()).toEqual(["antigravity-gemini-pro", "antigravity-gpt-oss", "claude-fable", "codex-gpt-6-astra"]);
+    expect(d.rankings.map((x) => x.by).sort()).toEqual(["antigravity-gemini-flash", "antigravity-gpt-oss", "claude-fable", "codex-gpt-6-astra"]);
     // The aggregate of those four recorded ballots, best first. Exact, and it
     // can be: the recordings are fixed and the averages follow from them,
     // whichever seat each label fell to.
@@ -321,7 +320,7 @@ describe("a council end to end", () => {
     expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
       ["anthropic", "claude-fable", ANSWERS.claude],
       ["openai", "codex-gpt-6-astra", ANSWERS.codex],
-      ["google", "antigravity-gemini-pro", ANSWERS.agy],
+      ["google", "antigravity-gemini-flash", ANSWERS.agy],
       ["open-weights", "antigravity-gpt-oss", ANSWERS.agy],
     ]);
     expect(d.lost).toEqual([]);
@@ -454,8 +453,8 @@ describe("a ladder from docs/measure-a-model.md, end to end", () => {
     // reasoning level in its own id. All three answer what the same
     // subscription answers a direct request, since only the id differs.
     expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
-      ["pro-high", "antigravity-gemini-pro-high", ANSWERS.agy],
       ["flash-high", "antigravity-gemini-flash-high", ANSWERS.agy],
+      ["flash-medium", "antigravity-gemini-flash-medium", ANSWERS.agy],
       ["flash-low", "antigravity-gemini-flash-low", ANSWERS.agy],
     ]);
     // No chain on any rung, so a rung that failed could only be lost, never
@@ -468,7 +467,7 @@ describe("a ladder from docs/measure-a-model.md, end to end", () => {
     // Three ballots cast and three parsed: stage 2 ran three `agy` processes
     // in parallel as stage 1 did, and a rung that had waited out the queue
     // would be missing from this list.
-    expect(d.rankings.map((x) => x.by).sort()).toEqual(["antigravity-gemini-flash-high", "antigravity-gemini-flash-low", "antigravity-gemini-pro-high"]);
+    expect(d.rankings.map((x) => x.by).sort()).toEqual(["antigravity-gemini-flash-high", "antigravity-gemini-flash-low", "antigravity-gemini-flash-medium"]);
     expect(d.aggregate).toEqual([
       { label: "Response B", averageRank: 1, votes: 3 },
       { label: "Response A", averageRank: 2, votes: 3 },

@@ -84,8 +84,10 @@ describe("config", () => {
     const cfg = loadConfig("config/capitoline.yaml");
     const agy = cfg.providers.antigravity;
     expect(agy.models["antigravity-image"]).toEqual({ cli_model: "gemini-3.8-flash-low", effort_suffix: false, kind: "image", timeout_s: 240 });
-    expect(agy.models["antigravity-gemini-3.7-flash"].cli_model).toBe("gemini-3.7-flash");
-    expect(agy.models["antigravity-gemini-3.6-flash"].cli_model).toBe("gemini-3.6-flash");
+    // Gemini 3.1 Pro and the 3.6 and 3.7 Flash models left the listing on 2026-10-13.
+    expect(agy.models["antigravity-gemini-pro"]).toBeUndefined();
+    expect(agy.models["antigravity-gemini-3.7-flash"]).toBeUndefined();
+    expect(agy.health_fallback).toEqual(["antigravity-claude-sonnet"]);
     expect(agy.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
     expect(agy.image.min_bytes).toBe(200000);
     expect(agy.image.quota_per_window).toBe(12);

@@ -81,9 +81,9 @@ at two levels, and a bigger one above them. This is the ladder of the
 council:
   capitoline-gemini:
     seats:
-      - { family: pro-high,   models: [antigravity-gemini-pro-high] }
-      - { family: flash-high, models: [antigravity-gemini-flash-high] }
-      - { family: flash-low,  models: [antigravity-gemini-flash-low] }
+      - { family: flash-high,   models: [antigravity-gemini-flash-high] }
+      - { family: flash-medium, models: [antigravity-gemini-flash-medium] }
+      - { family: flash-low,    models: [antigravity-gemini-flash-low] }
     judge: { family: best-available, models: [codex-gpt-6-astra, claude-fable, claude-opus, codex-gpt-5.6-sol] }
     judge_allow_member: false
     judge_blind: true
@@ -104,7 +104,7 @@ council:
       - { family: opus,   models: [claude-opus] }
       - { family: sonnet, models: [claude-sonnet] }
       - { family: haiku,  models: [claude-haiku] }
-    judge: { family: best-available, models: [codex-gpt-6-astra, antigravity-gemini-pro, codex-gpt-5.6-sol] }
+    judge: { family: best-available, models: [codex-gpt-6-astra, antigravity-gemini-flash, codex-gpt-5.6-sol] }
     judge_allow_member: false
     judge_blind: true
     min_members: 3
@@ -126,7 +126,7 @@ council:
       - { family: astra, models: [codex-gpt-6-astra] }
       - { family: sol,   models: [codex-gpt-6-sol] }
       - { family: luna,  models: [codex-gpt-6-luna] }
-    judge: { family: best-available, models: [claude-opus, antigravity-gemini-pro, antigravity-claude-opus] }
+    judge: { family: best-available, models: [claude-opus, antigravity-gemini-flash, antigravity-claude-opus] }
     judge_allow_member: false
     judge_blind: true
     min_members: 3

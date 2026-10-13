@@ -58,24 +58,12 @@ prices:
     codex-gpt-5.6-sol:   { input: 4,    cached_input: 0.40,  output: 20 }
     codex-gpt-5.6-terra: { input: 2,    cached_input: 0.20,  output: 12 }
     codex-gpt-5.6-luna:  { input: 0.20, cached_input: 0.02,  output: 1.20 }
-    # Prompts up to 200k tokens; the tier above costs more and is not modelled.
-    antigravity-gemini-pro:      { input: 2, cached_input: 0.20, output: 12 }
-    antigravity-gemini-pro-high: { input: 2, cached_input: 0.20, output: 12 }
-    antigravity-gemini-pro-low:  { input: 2, cached_input: 0.20, output: 12 }
     # The Flash prices hold through 2026-12-31 and double on 2027-01-01
     # (input 1.50, cached 0.15, output 7.50): reread them then.
     antigravity-gemini-flash:        { input: 0.75, cached_input: 0.075, output: 3.75 }
     antigravity-gemini-flash-high:   { input: 0.75, cached_input: 0.075, output: 3.75 }
     antigravity-gemini-flash-medium: { input: 0.75, cached_input: 0.075, output: 3.75 }
     antigravity-gemini-flash-low:    { input: 0.75, cached_input: 0.075, output: 3.75 }
-    antigravity-gemini-3.7-flash:        { input: 0.75, cached_input: 0.075, output: 3.75 }
-    antigravity-gemini-3.7-flash-high:   { input: 0.75, cached_input: 0.075, output: 3.75 }
-    antigravity-gemini-3.7-flash-medium: { input: 0.75, cached_input: 0.075, output: 3.75 }
-    antigravity-gemini-3.7-flash-low:    { input: 0.75, cached_input: 0.075, output: 3.75 }
-    antigravity-gemini-3.6-flash:        { input: 0.75, cached_input: 0.075, output: 3.75 }
-    antigravity-gemini-3.6-flash-high:   { input: 0.75, cached_input: 0.075, output: 3.75 }
-    antigravity-gemini-3.6-flash-medium: { input: 0.75, cached_input: 0.075, output: 3.75 }
-    antigravity-gemini-3.6-flash-low:    { input: 0.75, cached_input: 0.075, output: 3.75 }
     antigravity-claude-opus:   { input: 5, cached_input: 0.50, output: 25 }
     antigravity-claude-sonnet: { input: 3, cached_input: 0.30, output: 15 }
 
@@ -304,7 +292,11 @@ providers:
     timeout_s: 10
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: antigravity-gemini-flash
-    health_fallback: [antigravity-gemini-3.7-flash]
+    # Since 2026-10-13 the listing holds one Gemini, 3.8 Flash, so the probe's
+    # fallback is a model of the other group the subscription serves. It
+    # leaves the plans that do not include it on 2026-11-02 (docs/backlog.md,
+    # Dated): name another one the listing holds by then.
+    health_fallback: [antigravity-claude-sonnet]
     # `agy models` lists every id the CLI serves, the level inside the id: one
     # no entry below reaches is served as antigravity-<id> (docs/deploy.md §7.2).
     discover: { args: [models], prefix: antigravity- }
@@ -315,29 +307,22 @@ providers:
     quota: { args: [--output-format, json, -p, /usage] }
     models:
       # effort is part of the model id: <base>-<effort>
+      # The one Gemini the listing has held since 2026-10-13, when Gemini 3.1
+      # Pro and the 3.6 and 3.7 Flash models left it (Gemini 4 is offered on
+      # the Ultra plan only). A newer one the subscription gains is exposed by
+      # discovery as antigravity-<id>, with nothing to configure.
       antigravity-gemini-flash:     { cli_model: gemini-3.8-flash, effort_suffix: true }
-      antigravity-gemini-3.7-flash: { cli_model: gemini-3.7-flash, effort_suffix: true }
-      antigravity-gemini-3.6-flash: { cli_model: gemini-3.6-flash, effort_suffix: true }
-      antigravity-gemini-pro:       { cli_model: gemini-3.1-pro,   effort_suffix: true, efforts: [low, high] }
-      # Three models with the reasoning level fixed in the id rather than
-      # chosen per request (effort_suffix: false): `antigravity-gemini-pro`
-      # above answers at whatever effort the request asks for, while
-      # `antigravity-gemini-pro-high` is always the same model at the same
-      # level. That is what a rung of a capability ladder needs
-      # (docs/measure-a-model.md), and what a caller pins when it wants one
-      # level and no resolution. Every id is one `agy models` lists.
-      #
-      # These three are aliases: every one of their CLI ids is already
-      # reachable under another name in this table. `antigravity-gemini-pro`
-      # at the default effort resolves to gemini-3.1-pro-high (efforts
-      # [low, high], and the medium tie breaks upward), `antigravity-gemini-flash` at
-      # high to gemini-3.8-flash-high, and `antigravity-image` already carries
+      # The same model with the reasoning level fixed in the id rather than
+      # chosen per request (effort_suffix: false): what a rung of a capability
+      # ladder needs (docs/measure-a-model.md), and what a caller pins when it
+      # wants one level and no resolution. They are aliases of the entry
+      # above at each level, and `antigravity-image` already carries
       # gemini-3.8-flash-low. That costs nothing: a model pause is keyed by
       # the id the CLI was actually given, so a refusal on any one of these
       # names darkens every other name that resolves to the same model.
-      antigravity-gemini-pro-high:   { cli_model: gemini-3.1-pro-high,   effort_suffix: false }
-      antigravity-gemini-flash-high: { cli_model: gemini-3.8-flash-high, effort_suffix: false }
-      antigravity-gemini-flash-low:  { cli_model: gemini-3.8-flash-low,  effort_suffix: false }
+      antigravity-gemini-flash-high:   { cli_model: gemini-3.8-flash-high,   effort_suffix: false }
+      antigravity-gemini-flash-medium: { cli_model: gemini-3.8-flash-medium, effort_suffix: false }
+      antigravity-gemini-flash-low:    { cli_model: gemini-3.8-flash-low,    effort_suffix: false }
       # The council's open-weights seat. `agy models` lists this family at one
       # effort only (gpt-oss-120b-medium), so `efforts` pins it: with the
       # provider's whole table open, a request asking for `high` would build
@@ -347,20 +332,6 @@ providers:
       antigravity-claude-opus:      { cli_model: claude-opus-4-6-thinking }
       # kind: image → served by /v1/images/generations and the generate_image MCP tool
       antigravity-image:            { cli_model: gemini-3.8-flash-low, kind: image, timeout_s: 240 }
-      # The remaining fixed ids of `agy models`, each under a name of its own.
-      # Every one is an alias: the effort-driven entries above already reach
-      # them, at whatever level a request asks for. Naming them outright is
-      # what lets a caller pin a rung instead of trusting the resolution — and
-      # it costs nothing now that a model pause is keyed by the id the CLI was
-      # given rather than by the gateway name (docs/backlog.md, Shipped).
-      antigravity-gemini-flash-medium:  { cli_model: gemini-3.8-flash-medium, effort_suffix: false }
-      antigravity-gemini-3.7-flash-high:   { cli_model: gemini-3.7-flash-high,   effort_suffix: false }
-      antigravity-gemini-3.7-flash-medium: { cli_model: gemini-3.7-flash-medium, effort_suffix: false }
-      antigravity-gemini-3.7-flash-low:    { cli_model: gemini-3.7-flash-low,    effort_suffix: false }
-      antigravity-gemini-3.6-flash-high:   { cli_model: gemini-3.6-flash-high,   effort_suffix: false }
-      antigravity-gemini-3.6-flash-medium: { cli_model: gemini-3.6-flash-medium, effort_suffix: false }
-      antigravity-gemini-3.6-flash-low:    { cli_model: gemini-3.6-flash-low,    effort_suffix: false }
-      antigravity-gemini-pro-low:          { cli_model: gemini-3.1-pro-low,      effort_suffix: false }
       # gpt-oss-120b-medium is not repeated here: `antigravity-gpt-oss` above is pinned
       # to the one level the family serves, so it is already the fixed rung.
     effort: { low: low, medium: medium, high: high }
@@ -427,7 +398,7 @@ council:
     seats:
       - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
-      - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
+      - { family: google,       models: [antigravity-gemini-flash] }
       - { family: open-weights, models: [antigravity-gpt-oss] }
     # The judge may also be a member, as karpathy/llm-council's chairman is
     # (judge_allow_member: true since 2026-10-08). The seat-apart rule it
@@ -482,7 +453,7 @@ council:
     seats:
       - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
-      - { family: google,       models: [antigravity-gemini-pro, antigravity-gemini-flash] }
+      - { family: google,       models: [antigravity-gemini-flash] }
       - { family: open-weights, models: [antigravity-gpt-oss] }
     judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6.1-sol, codex-gpt-5.6-terra] }
     judge_allow_member: true    # as the reference panel: the judge may be a member
