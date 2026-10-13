@@ -49,16 +49,22 @@ describe("the operator's routes under /v1/admin", () => {
   });
 
   it("reports usage by day, caller, model and outcome, and refuses a range it does not serve", async () => {
+    // The route counts back from the wall clock, so the calls are made now:
+    // with the fixed clock of the other tests they fell out of the range a
+    // week after the test was written.
+    t = Date.now();
+    const day = new Date(t).toISOString().slice(0, 10);
     await drain(core.execute({ model: "a-1", messages: [{ role: "user", text: "q" }], stream: false }, { source: "http", caller: "app-one" }));
     await drain(core.execute({ model: "a-1", messages: [{ role: "user", text: "q" }], stream: false }, { source: "http", caller: "app-one" }));
     const r = await get("/usage?days=7");
     expect(r.body.days).toBe(7);
-    expect(r.body.rows).toEqual([{ day: "2026-10-03", caller: "app-one", provider: "a", model: "a-1", outcome: "ok", calls: 2, inputTokens: 6, outputTokens: 4 }]);
+    expect(r.body.rows).toEqual([{ day, caller: "app-one", provider: "a", model: "a-1", outcome: "ok", calls: 2, inputTokens: 6, outputTokens: 4 }]);
     expect((await get("/usage?days=0")).status).toBe(400);
     expect((await get("/usage?days=1.5")).status).toBe(400);
   });
 
   it("prices the recorded tokens at the configured list prices, cached input at its own rate, and leaves an unpriced model without a cost", async () => {
+    t = Date.now(); // the route counts its days back from the wall clock, as /usage does
     const row = { provider: "a", durationMs: 1, outcome: "ok" as const, source: "http" as const, ts: t, caller: "app-one" };
     usage.record({ ...row, model: "a-1", inputTokens: 1_000_000, cachedInputTokens: 400_000, outputTokens: 100_000 });
     usage.record({ ...row, model: "a-1", inputTokens: 1_000_000, outputTokens: 0, outcome: "timeout" });

@@ -47,6 +47,8 @@ procedure below, which a person runs.
 | Codex CLI (`codex`) | 0.160.1 | 2026-10-05 | updated from 0.160.0 with scripts/update-cli.sh; smoke test with three images passed, no new feature, the tool probe took no step; `codex debug models` unchanged |
 | Claude Code (`claude`) | 2.1.291 | 2026-10-06 | updated from 2.1.289 with scripts/update-cli.sh; smoke test passed |
 | Antigravity CLI (`agy`) | 1.3.0 | 2026-10-06 | updated from 1.2.17 with `scripts/update-cli.sh`; smoke test with three images passed (image verified 2026-10-06), a command request is still refused, `agy models` unchanged; the changelog touches only the interactive view |
+| Antigravity CLI (`agy`) | 1.3.4 | 2026-10-13 | updated from 1.3.0 with `scripts/update-cli.sh`; three check images passed, a command request is still refused. `agy models` lists Gemini 3.8 Flash at three levels, the two Claude models and GPT-OSS: Gemini 3.1 Pro and 3.6/3.7 Flash left the listing the same day, retired by the daily catalog, and Gemini 4 Argon is offered only on the Ultra plan |
+| Claude Code (`claude`) | 2.1.296 | 2026-10-13 | updated from 2.1.291 with scripts/update-cli.sh; smoke test passed |
 
 Add a row for every update, newest last.
 

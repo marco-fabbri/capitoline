@@ -254,6 +254,21 @@ providers:
       - features.daemon_auto_start=false
       - -c
       - features.write_stdin_approval=false
+      # Enabled by default from Codex 0.162.1, read in codex-rs/features and
+      # none a tool of `codex exec`: model discovery for API-key sign-in, two
+      # desktop-app permissions (website annotation tools, Voice), preempting a
+      # response on new input in the interactive client, and the Ultra Fast
+      # mode selection. Switched off anyway, as every new default is.
+      - -c
+      - features.api_key_model_discovery=false
+      - -c
+      - features.browser_annotation_api=false
+      - -c
+      - features.in_app_voice=false
+      - -c
+      - features.instant_interrupt=false
+      - -c
+      - features.ultrafast_mode=false
     args_extra: []            # what this host adds; only an overlay ever sets it
     system_preamble: null     # this CLI's tools are switched off by flag, so there is nothing to tell it
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"
