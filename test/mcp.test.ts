@@ -219,8 +219,10 @@ describe("MCP", () => {
       const tool = (await c.listTools()).tools.find((t) => t.name === "ask_council")!;
       expect(tool.description).toMatch(/council/i);
       // The agent decides between this tool and ask_model on the description
-      // alone: nine calls over several minutes is the whole difference.
-      expect(tool.description).toMatch(/nine/);
+      // alone: seven calls over several minutes is the whole difference. The
+      // numbers are those of the shipped three-seat panel, and go stale with it.
+      expect(tool.description).toMatch(/seven model calls/);
+      expect(tool.description).toMatch(/four in all/);
       expect(Object.keys(tool.inputSchema.properties!).sort()).toEqual(["council", "effort", "question"]);
       await c.close();
     });

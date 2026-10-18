@@ -19,7 +19,7 @@ export interface CallRecord {
   caller?: string | null;
   /**
    * The council deliberation this call belongs to, null for a request a client
-   * made directly. One question is nine calls under six different models
+   * made directly. One question is seven calls under four different models
    * (spec 12.7), and this is what sums them back into one question instead of
    * a guess over a time window.
    */

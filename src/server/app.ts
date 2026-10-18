@@ -136,7 +136,7 @@ export function createApp(core: Core, opts: { access?: RequestHandler; log: Logg
    * out at once — not on the first token, as a single model's answer does.
    * Two stages produce no token at all, up to `stage_timeout_s` each, and
    * Cloudflare's edge answers the client 524 after 100 s of silence from the
-   * origin while the nine calls carry on being spent for nobody
+   * origin while the seven calls carry on being spent for nobody
    * (docs/deploy.md §9). Opening early is half of it: a keep-alive comment
    * every `KEEP_ALIVE_MS` covers the silence *inside* a stage, which is where
    * a deliberation spends nearly all of its minutes.

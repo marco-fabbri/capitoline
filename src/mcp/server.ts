@@ -111,7 +111,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
     outputSchema: { text: z.string(), model: z.string(), provider: z.string(), cliModelId: z.string().optional(), usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }), conversation: z.string().optional() },
   }, async ({ model, prompt, effort, system, images, conversation }, extra) => {
     // A council is not one model and this tool cannot run one: a deliberation
-    // is nine calls over several minutes, and the only progress this tool can
+    // is seven calls over several minutes, and the only progress this tool can
     // send counts the characters of the text it is receiving — nothing at all
     // while the first two stages run, which is the silence §12.6 exists to
     // avoid in Claude Code. It is refused here, before the calls are spent,
@@ -190,7 +190,7 @@ function buildServer(core: Core, log: Logger, opts: McpOptions, caller: string |
   });
 
   server.registerTool("ask_council", {
-    description: "Put one question to a council: several models of different families answer it independently, rank each other's answers without knowing whose is whose, and a judge writes the final answer from the ranking. One deliberation is nine model calls over several minutes on three different subscriptions; with effort low, or a council configured without the ranking stage (a `-fast` name), it costs one call per seat plus the synthesis, five in all. Either way ask_model is the right tool for anything a single model can answer. Use list_models for council names (kind council); omit council for the first available one.",
+    description: "Put one question to a council: several models of different families answer it independently, rank each other's answers without knowing whose is whose, and a judge writes the final answer from the ranking. One deliberation is seven model calls over several minutes on three different subscriptions; with effort low, or a council configured without the ranking stage (a `-fast` name), it costs one call per seat plus the synthesis, four in all. Either way ask_model is the right tool for anything a single model can answer. Use list_models for council names (kind council); omit council for the first available one.",
     inputSchema: {
       question: z.string().min(1).describe("The question the council deliberates on"),
       council: z.string().min(1).optional().describe("Council name from list_models (kind council); default: the first available council"),

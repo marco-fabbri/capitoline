@@ -11,7 +11,7 @@ import { CLIENT_MESSAGE, CapitolineError, type ErrorKind, type ImageRequest, typ
 /**
  * What a virtual model is owned by in `/v1/models` and in the `capitoline`
  * field of a response: the gateway itself. A council is served by no provider
- * — it is nine calls on the providers of its seats, each accounted under the
+ * — it is seven calls on the providers of its seats, each accounted under the
  * real model that served it (spec §12.7).
  */
 export const VIRTUAL_PROVIDER = "capitoline";
@@ -707,7 +707,7 @@ export class Core {
    * A system message is folded into the text instead of being dropped: the
    * council's prompts are the strategy and have no channel for one (§12.8), and
    * a client that wrote "answer in French" would otherwise be ignored in
-   * silence by all nine calls. `flatten` refuses a system message outright,
+   * silence by every one of its calls. `flatten` refuses a system message outright,
    * which is why `splitSystem` comes first.
    */
   private questionOf(req: InternalRequest): string {

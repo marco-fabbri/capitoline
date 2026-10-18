@@ -238,12 +238,12 @@ const SeatSchema = z.object({
 // setting is never spelled two ways in two places. The defaults are the
 // design's: a judge seated apart (§12.3) and blind, two members at the very
 // least (§12.5). `stage_timeout_s` is per member and per stage, not for the
-// whole deliberation, which runs nine calls across three subscriptions.
+// whole deliberation, which runs seven calls across three subscriptions.
 //
 // `ranking` is the one thing that changes the *sequence* of stages, which is
 // why it is a flag here and not a second strategy in the code: with false the
-// peer ranking does not run, and a four-seat council costs five calls instead
-// of nine (the `-fast` shape). It defaults to true, so a council that says
+// peer ranking does not run, and a three-seat council costs four calls instead
+// of seven (the `-fast` shape). It defaults to true, so a council that says
 // nothing is the panel of §12.1 exactly as before.
 const CouncilSchema = z.object({
   seats: z.array(SeatSchema),
@@ -532,7 +532,7 @@ export const ConfigSchema = ConfigObject
     const seatsOf = new Map<string, Map<string, number>>();
     // The councils, once every provider model is known. Everything checked
     // here is a mistake that would otherwise surface only in the middle of a
-    // deliberation, nine calls deep, as a seat nobody could fill.
+    // deliberation, several calls deep, as a seat nobody could fill.
     for (const [name, c] of Object.entries(cfg.council)) {
       // A council is asked for in the same `model` field as every other model,
       // so a name held by both would route to one of them and never the other.
@@ -617,7 +617,7 @@ export const ConfigSchema = ConfigObject
     // The seats of a single council start in the same instant, so a provider
     // with fewer slots than that council's seats loses a member to its own
     // queue after server.queue.max_wait_s in every deliberation, in both
-    // parallel stages — eight of the nine calls spent to discover a setting.
+    // parallel stages — all but the judge's call spent to discover a setting.
     // That is a property of the file, and only the file can fix it.
     //
     // Two councils sharing a provider is a different thing. They contend only
