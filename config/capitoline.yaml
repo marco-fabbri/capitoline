@@ -86,7 +86,7 @@ providers:
     health_model: claude-haiku
     # The daily "a new version exists" notice (docs/update-clis.md); installing
     # is scripts/update-cli.sh, run by a person.
-    version: { args: [--version], verified: 2.1.296, latest: { npm: "@anthropic-ai/claude-code" } }
+    version: { args: [--version], verified: 2.1.302, latest: { npm: "@anthropic-ai/claude-code" } }
     models:
       claude-opus:   { cli_model: opus }
       claude-sonnet: { cli_model: sonnet }
@@ -271,6 +271,19 @@ providers:
       - features.instant_interrupt=false
       - -c
       - features.ultrafast_mode=false
+      # Enabled by default from Codex 0.163.0, read in codex-rs (features,
+      # exec/src/daybreak.rs, core/src/cyber_access_program.rs) and none a tool
+      # of `codex exec`: Daybreak looks up the model list and the account on
+      # every turn and attaches a cyber access program, a server-side treatment
+      # of security requests, to it; the second forwards such programs on
+      # API-key sign-in; the third ends code mode cells, and code mode is off.
+      # Switched off anyway, so a run behaves as it did on 0.162.1.
+      - -c
+      - features.cli_daybreak=false
+      - -c
+      - features.api_key_cyber_access_programs=false
+      - -c
+      - features.code_mode_interrupt=false
     args_extra: []            # what this host adds; only an overlay ever sets it
     system_preamble: null     # this CLI's tools are switched off by flag, so there is nothing to tell it
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"
