@@ -11,12 +11,19 @@
 #
 # The council fixtures are the chat recording with the answer text swapped and
 # nothing else, so what each adapter parses is still the envelope the real CLI
-# produced. This one answers the ranking as a bare JSON array.
+# produced. This one answers the ranking as a bare JSON array, over Response
+# A..D when the prompt shows four answers and A..C when it shows three (the
+# shipped panels since 2026-10-18), since parseRanking refuses a ballot that
+# names a label it was not shown or leaves one out (see fake-agy.sh).
 set -euo pipefail
 dir="$(cd "$(dirname "$0")" && pwd)"
 stdin="$(cat)"
 case "$stdin" in
-  *"Reply with JSON only"*)            fixture="$dir/../fixtures/claude/council-ranking.jsonl" ;;
+  *"Reply with JSON only"*)
+    case "$stdin" in
+      *"Response D"*) fixture="$dir/../fixtures/claude/council-ranking.jsonl" ;;
+      *)              fixture="$dir/../fixtures/claude/council-ranking-3.jsonl" ;;
+    esac ;;
   *"You are writing the final answer"*) fixture="$dir/../fixtures/claude/council-synthesis.jsonl" ;;
   *)                                   fixture="$dir/../fixtures/claude/stream-json-locked.jsonl" ;;
 esac

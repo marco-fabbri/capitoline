@@ -446,16 +446,15 @@ configuration and a restart:
 
 | Council | What it convenes | Calls |
 |---|---|---|
-| `capitoline` | the reference panel: four families answer, rank each other blind, and a blind judge synthesizes. The shape to ask when the panel's own verdict on its answers is worth its price | 9 |
-| `capitoline-fast` | the same four families and the same judge with `ranking: false`, so stage 2 never runs: the everyday shape, at half the price and with no panel verdict on the four answers | 5 |
+| `capitoline` | the reference panel: three families answer, rank each other blind, and a blind judge synthesizes. The shape to ask when the panel's own verdict on its answers is worth its price | 7 |
+| `capitoline-fast` | the same three families and the same judge with `ranking: false`, so stage 2 never runs: the everyday shape, at a little more than half the price and with no panel verdict on the three answers | 4 |
 
 The price is one call per seat, one more per seat when the ranking stage runs,
-and one for the judge. The reference panel's nine land on three different
+and one for the judge. The reference panel's seven land on three different
 subscriptions at once: Anthropic, OpenAI and Antigravity answer in parallel in
-each of the two member stages, Antigravity twice over because the Google seat
-and the open-weights seat sit on that same subscription, and the ninth call
-spends the Anthropic window again for the judge. So one question costs about
-what nine direct requests cost, on windows this host does not replenish, and
+each of the two member stages, and the seventh call spends the Anthropic
+window again for the judge. So one question costs about what seven direct
+requests cost, on windows this host does not replenish, and
 takes as long as the slowest member of each stage in turn. Nothing rations
 any of it but the per-provider `concurrency`: a client looping over councils
 empties three windows at the same time.
@@ -470,20 +469,21 @@ Every key below is read from both blocks; the values are the shipped
 
 | Key | Why it reads as it does |
 |---|---|
-| `seats` | four families, each a **chain** and never one model: the first model the health and quota state reports available takes the seat, and an unforeseen refusal steps down the chain once. `antigravity-claude-*` is deliberately not seated — it is the Anthropic seat's opinion through another channel, and a panel of four wants four judgments |
-| `judge` | `claude-opus`, `antigravity-claude-opus`, `codex-gpt-6.1-sol`, `codex-gpt-5.6-terra`: strong models built around what the seats cannot take. Only the head of the chain can also be a seat, and the three behind it never are: with `judge_allow_member: true` the head judges as a member on a day the Anthropic seat takes it, and with `false` a seated model is struck out of the chain. The judge writes the answer the client reads, so it is the one seat where economising is false economy — a cheap judge was measured merging three answers into a claim none of them made. GPT-6.1-Sol replaced GPT-6-Sol on 2026-09-30, after a measurement where both judges wrote twelve correct syntheses with no invented claim (`docs/measurements/2026-09-30-judge-gpt-6.1-sol/`). When the judge's CLI crashes or returns output that cannot be read, the next model of the chain on another provider takes over. No weak model closes the chain either: when no judge can be seated the council returns the best-ranked answer unsynthesised and says so (design §12.5), which is a better floor than a weak synthesis. |
+| `seats` | three families, each a **chain** and never one model: the first model the health and quota state reports available takes the seat, and an unforeseen refusal steps down the chain once. `antigravity-claude-*` is deliberately not seated — it is the Anthropic seat's opinion through another channel, and a panel of three wants three judgments. The Google seat is `antigravity-gemini-flash-high`, the level measured against Gemini Pro, with no fallback: its levels share one quota. A fourth seat, open weights, held GPT-OSS through Antigravity until 2026-10-18; it leaves Antigravity on 2026-11-02, and no other subscription serves such a model |
+| `judge` | `claude-opus`, `codex-gpt-6.1-sol`, `codex-gpt-5.6-terra`: strong models built around what the seats cannot take. Only the head of the chain can also be a seat, and the two behind it never are: with `judge_allow_member: true` the head judges as a member on a day the Anthropic seat takes it, and with `false` a seated model is struck out of the chain. The judge writes the answer the client reads, so it is the one seat where economising is false economy — a cheap judge was measured merging three answers into a claim none of them made. GPT-6.1-Sol replaced GPT-6-Sol on 2026-09-30, after a measurement where both judges wrote twelve correct syntheses with no invented claim (`docs/measurements/2026-09-30-judge-gpt-6.1-sol/`). When the judge's CLI crashes or returns output that cannot be read, the next model of the chain on another provider takes over. No weak model closes the chain either: when no judge can be seated the council returns the best-ranked answer unsynthesised and says so (design §12.5), which is a better floor than a weak synthesis. |
 | `judge_allow_member` | `true` — the judge may also be a member, as karpathy/llm-council's chairman is. Measured before it was allowed: eighteen syntheses by a seated chairman, three with its own answer wrong, followed the peers' verdict every time (`docs/measurements/2026-09-23-council/`). `false` seats the judge apart, which is the code's default |
 | `judge_blind` | `true` — the judge sees the labels, never the real model names, so the deliberation is blind end to end. The transparency is not lost, it moves: the client's `capitoline.council` field carries the un-blinded record |
 | `min_members` | `2` — below two answers there is nothing to rank. With one the gateway returns that answer and says no council took place, rather than dressing a single opinion as a synthesis |
-| `ranking` | `true` here, `false` for `capitoline-fast`: with `false` stage 2 does not run, the judge is given the answers with no aggregate to weigh, and a four-seat council costs five calls instead of nine. It is the one setting that changes the *sequence* of stages, which is why it is a flag in the engine and not a fourth prompt (design §12.9). With `true` the request still chooses: `reasoning_effort: low` skips stage 2 for that deliberation, `high` or no effort runs it, the other levels resolve upward; with `false` the shape is pinned and the field is declared ignored |
+| `ranking` | `true` here, `false` for `capitoline-fast`: with `false` stage 2 does not run, the judge is given the answers with no aggregate to weigh, and a three-seat council costs four calls instead of seven. It is the one setting that changes the *sequence* of stages, which is why it is a flag in the engine and not a fourth prompt (design §12.9). With `true` the request still chooses: `reasoning_effort: low` skips stage 2 for that deliberation, `high` or no effort runs it, the other levels resolve upward; with `false` the shape is pinned and the field is declared ignored |
 | `stage_timeout_s` | `300` — per member and per stage, not for the whole deliberation. A council can therefore run for a quarter of an hour on paper, which is why it is asked for streaming through the tunnel (§9) and with a raised tool timeout over MCP (§10) |
 
 `providers.antigravity.concurrency` is `10`, as for every CLI: concurrency is
 sized from the host's memory (design §4.1), not from the councils. What the
 councils add is a floor, measured against the **largest** council the provider
-is seated in: `capitoline` and `capitoline-fast` seat two chains there each,
-Google and open weights, and both start in the same instant. With fewer slots
-than that the second would sit on that provider's queue until
+is seated in: `capitoline` and `capitoline-fast` seat one chain there each,
+Google's, since the open-weights seat left on 2026-10-18. A council that
+seated two would start both in the same instant, and with fewer slots than
+that the second would sit on that provider's queue until
 `server.queue.max_wait_s` and lose its seat — in every parallel stage, every
 time. A ladder added from `docs/measure-a-model.md` needs three.
 
@@ -491,7 +491,7 @@ The slots belong to the subscription and not to one council, so the check
 reads every block and measures each provider against the largest council it is
 seated in, never the sum of them: the sum would make the slots grow with the
 number of names declared — the two shipped councils would ask this one
-Antigravity subscription for four parallel `agy` processes, and every ladder
+Antigravity subscription for two parallel `agy` processes, and every ladder
 added for a measurement for three more — and, since the gateway validates at startup, would leave a file the service
 cannot restart with under `Restart=always`. Two councils asked for at the same
 moment do draw on the same slots, but that is contention between two
@@ -664,7 +664,12 @@ table of the usage database:
   valid. When the model comes back to the listing, it comes back.
 - **The health probe** moves to the first `health_fallback` still listed when
   `health_model` is retired, instead of failing every round and taking the
-  whole provider down with it.
+  whole provider down with it. When no fallback is listed either, or none is
+  configured, it moves to the first text model the listing still serves —
+  declared ones in the file's order, then discovered ones — and the change's
+  notice says "health probe now on …", with a reminder to name it in the
+  file when it is a model the file does not name for the probe. It returns
+  to `health_model` the day that model is listed again.
 - **A listing that fails**, comes back empty or cannot be read changes
   nothing. The previous catalog stays, and the log says why.
 
@@ -1152,7 +1157,7 @@ changed here, and this is where the move shows. Only Claude appears: a Codex slu
 and an Antigravity id are the model itself, so those rows carry no id and are
 left out rather than listed as unchanged.
 
-A council is nine of those rows for the reference panel and five for
+A council is seven of those rows for the reference panel and four for
 `capitoline-fast` (seven for a ladder), under as many models as
 the seats and the judge resolved to, and they are tied
 together by the identifier the deliberation minted — the same one the client
@@ -1166,16 +1171,16 @@ sudo -u capitoline sqlite3 -readonly /var/lib/capitoline/usage.sqlite \
 ```
 
 **The council, through the tunnel, is asked for streaming.** `capitoline` is
-not one call but nine, in three stages, and the first two produce no output
+not one call but seven, in three stages, and the first two produce no output
 at all: every member is answering, or ranking, and nothing is written until
 the judge starts the synthesis. `capitoline-fast` skips the ranking stage
-and is no better off — one silent stage of four answers is still minutes of
+and is no better off — one silent stage of three answers is still minutes of
 nothing. Each stage is bounded per member by each council's
 `stage_timeout_s` (300 s in both shipped blocks), so the wait before
 the first byte is minutes, not seconds — while Cloudflare's edge gives up on
 an origin that has sent nothing for 100 s and answers the client `524`. The
-deliberation does not stop with it: its calls carry on — nine for the
-reference panel, five for `capitoline-fast` — spending the
+deliberation does not stop with it: its calls carry on — seven for the
+reference panel, four for `capitoline-fast` — spending the
 subscriptions for a client that is already gone.
 
 So through the tunnel a council is asked for with `stream: true`, which opens
@@ -1317,8 +1322,8 @@ deadline of its own, only each member of each stage has one — each council's
 stages run in sequence, so the worst case is above 900 s with nothing wrong.
 The timeout has to stay larger than three times `stage_timeout_s`; re-derive
 it whenever that value changes. Below it Claude Code drops a call the
-gateway keeps running, and the deliberation's calls carry on — nine for the
-reference panel, five for `capitoline-fast` —
+gateway keeps running, and the deliberation's calls carry on — seven for the
+reference panel, four for `capitoline-fast` —
 spending the subscriptions for a client that is already gone: the MCP twin
 of the `524` of §9.
 
@@ -1335,7 +1340,7 @@ and the timeout above as the thing that carries it.
 Test: in Claude Code run `/mcp` (the server must show as connected), then
 ask "use capitoline ask_model with codex-gpt-6-luna: reply ok", "use capitoline
 generate_image: a red fox in the snow" and "use capitoline ask_council: why
-is a blind ranking better than a public one?". The last one is nine calls on
+is a blind ranking better than a public one?". The last one is seven calls on
 three subscriptions and takes minutes: run it once, and not on a day when
 the quotas are already tight (§9).
 

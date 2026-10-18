@@ -324,11 +324,12 @@ providers:
     # The manifest the official installer reads, for this host's platform
     # (linux_amd64; linux_arm64 on an ARM host, set in the overlay).
     version: { args: [--version], verified: 1.4.2, latest: { manifest: "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json" } }
-    # Since 2026-10-13 the listing holds one Gemini, 3.8 Flash, so the probe's
-    # fallback is a model of the other group the subscription serves. It
-    # leaves the plans that do not include it on 2026-11-02 (docs/backlog.md,
-    # Dated): name another one the listing holds by then.
-    health_fallback: [antigravity-claude-sonnet]
+    # None: since 2026-10-13 the listing holds one Gemini, 3.8 Flash, at three
+    # levels that leave together, and the other group's models leave the
+    # plans that do not include them on 2026-11-02. Should 3.8 Flash go, the
+    # probe moves to the first text model still listed, a discovered newer
+    # Gemini included, and the catalog's notice says so.
+    health_fallback: []
     # `agy models` lists every id the CLI serves, the level inside the id: one
     # no entry below reaches is served as antigravity-<id> (docs/deploy.md §7.2).
     discover: { args: [models], prefix: antigravity- }
@@ -340,9 +341,10 @@ providers:
     models:
       # effort is part of the model id: <base>-<effort>
       # The one Gemini the listing has held since 2026-10-13, when Gemini 3.1
-      # Pro and the 3.6 and 3.7 Flash models left it (Gemini 4 is offered on
-      # the Ultra plan only). A newer one the subscription gains is exposed by
-      # discovery as antigravity-<id>, with nothing to configure.
+      # Pro and the 3.6 and 3.7 Flash models left it. Gemini 4 Argon reaches
+      # plans in stages (on 2026-10-18 the picker read "available to Ultra and
+      # paid Pro plan subscribers"); a newer one the subscription gains is
+      # exposed by discovery as antigravity-<id>, with nothing to configure.
       antigravity-gemini-flash:     { cli_model: gemini-3.8-flash, effort_suffix: true }
       # The same model with the reasoning level fixed in the id rather than
       # chosen per request (effort_suffix: false): what a rung of a capability
@@ -355,8 +357,11 @@ providers:
       antigravity-gemini-flash-high:   { cli_model: gemini-3.8-flash-high,   effort_suffix: false }
       antigravity-gemini-flash-medium: { cli_model: gemini-3.8-flash-medium, effort_suffix: false }
       antigravity-gemini-flash-low:    { cli_model: gemini-3.8-flash-low,    effort_suffix: false }
-      # The council's open-weights seat. `agy models` lists this family at one
-      # effort only (gpt-oss-120b-medium), so `efforts` pins it: with the
+      # Seated in no council since 2026-10-18: it leaves Antigravity on
+      # 2026-11-02, with the two Claude models below leaving the plans that do
+      # not include them, and the catalog retires all three that day by
+      # itself. Until then they answer when asked by name. `agy models` lists
+      # this family at one effort only (gpt-oss-120b-medium), so `efforts` pins it: with the
       # provider's whole table open, a request asking for `high` would build
       # the model id `gpt-oss-120b-high`, which the CLI does not know.
       antigravity-gpt-oss:          { cli_model: gpt-oss-120b,     effort_suffix: true, efforts: [medium] }
@@ -446,6 +451,18 @@ providers:
 # and rank each other's failures highly. `antigravity-claude-*` is deliberately not
 # seated: it is the same opinion as the Anthropic seat, through another channel.
 #
+# Three seats since 2026-10-18. The fourth, open weights, was GPT-OSS through
+# Antigravity, which leaves it on 2026-11-02; no other subscription serves a
+# model with open weights, and a second Gemini in its place would share the
+# Google seat's blind spots (docs/backlog.md, Dated).
+#
+# The Google seat is 3.8 Flash at the high level, the rung measured against
+# Gemini Pro (docs/measurements/2026-09-23-council/: six correct of six,
+# ranked first on all six, where Pro was ranked first on one and the low
+# level was wrong on three). A seat without a level would take medium, which
+# was not measured. No fallback in the chain: the three levels draw on one
+# quota, so when the high one is refused the others are too.
+#
 # The three prompts are not here. They are the strategy itself, not a CLI
 # detail, so they live in src/council/prompts.ts and changing them changes the
 # council's name (design §12.8).
@@ -454,8 +471,7 @@ council:
     seats:
       - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
-      - { family: google,       models: [antigravity-gemini-flash] }
-      - { family: open-weights, models: [antigravity-gpt-oss] }
+      - { family: google,       models: [antigravity-gemini-flash-high] }
     # The judge may also be a member, as karpathy/llm-council's chairman is
     # (judge_allow_member: true since 2026-10-08). The seat-apart rule it
     # replaces guarded against a synthesizer weighing its own answer, and
@@ -473,20 +489,21 @@ council:
     # calls per deliberation instead of one, on the tightest of the four
     # subscriptions' limits, and a synthesis by Fable has not been measured to
     # be better than one by Opus. The rest of the chain answers when no Claude
-    # can: Opus 4.6 through the Google subscription, then OpenAI's models,
-    # none of them in a seat.
+    # can: OpenAI's models, neither of them in a seat. Opus 4.6 through the
+    # Google subscription stood second until 2026-10-18, and leaves the plans
+    # that do not include it on 2026-11-02.
     #
     # Not used, although they sit in no seat: claude-opus-1m and its siblings
     # are the same model as a seated one with a wider context, and would add
     # nothing the head does not.
-    judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6.1-sol, codex-gpt-5.6-terra] }
+    judge: { family: best-available, models: [claude-opus, codex-gpt-6.1-sol, codex-gpt-5.6-terra] }
     judge_allow_member: true    # the judge may be a member, as llm-council's chairman is (measured, see above)
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to rank
     stage_timeout_s: 300        # per member, per stage — not for the whole deliberation
 
-  # The same four families and the same judge, deliberating without the
-  # ranking stage: five calls instead of nine. `ranking: false` is an engine
+  # The same three families and the same judge, deliberating without the
+  # ranking stage: four calls instead of seven. `ranking: false` is an engine
   # flag (src/council/council.ts skips stage 2, and the judge is given the
   # answers with no aggregate) and not a fourth prompt — the prompts are the
   # strategy and stay in the code (design §12.8).
@@ -498,22 +515,21 @@ council:
   # as antigravity-gemini-flash-low stands next to antigravity-gemini-flash.
   # With `ranking: false` the effort is declared ignored. The reference panel
   # above is the one to ask when the panel's own verdict on its answers is
-  # worth its price; this one buys four independent perspectives and a
-  # synthesis for half of it.
+  # worth its price; this one buys three independent perspectives and a
+  # synthesis for a little more than half of it.
   #
   # Deliberately not a two-seat council that keeps the ranking, which costs
-  # the same five calls: two members cast one vote each and cannot break a
-  # tie, so four seats without a ranking buy four perspectives instead of two
-  # and give up only a mechanism that barely works at that size.
+  # five calls: two members cast one vote each and cannot break a tie, so
+  # three seats without a ranking buy three perspectives instead of two, for
+  # one call less, and give up only a mechanism that barely works at that size.
   capitoline-fast:
     seats:
       - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
-      - { family: google,       models: [antigravity-gemini-flash] }
-      - { family: open-weights, models: [antigravity-gpt-oss] }
-    judge: { family: best-available, models: [claude-opus, antigravity-claude-opus, codex-gpt-6.1-sol, codex-gpt-5.6-terra] }
+      - { family: google,       models: [antigravity-gemini-flash-high] }
+    judge: { family: best-available, models: [claude-opus, codex-gpt-6.1-sol, codex-gpt-5.6-terra] }
     judge_allow_member: true    # as the reference panel: the judge may be a member
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail
     min_members: 2              # below two answers there is nothing to synthesize
-    ranking: false              # no stage 2: four answers and a synthesis, five calls
+    ranking: false              # no stage 2: three answers and a synthesis, four calls
     stage_timeout_s: 300        # per member, per stage — not for the whole deliberation

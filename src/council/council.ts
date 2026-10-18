@@ -313,8 +313,8 @@ export class Council {
 
     // Stage 2: the anonymous peer ranking, each member shown every answer
     // including its own — unless the council is configured without it, which
-    // is the whole of the `-fast` shape: four seats cost five calls instead of
-    // nine, the judge is given the answers with no aggregate, and no
+    // is the whole of the `-fast` shape: three seats cost four calls instead of
+    // seven, the judge is given the answers with no aggregate, and no
     // `rankings` progress is emitted, since a client that renders the stages
     // must not be shown one that never runs.
     const rankings: MemberRanking[] = [];
@@ -552,7 +552,7 @@ export class Council {
    *
    * Three things end a call: the provider's own terminal event, the stage
    * timeout, and the client's cancellation. The timeout is per member and per
-   * stage, as `stage_timeout_s` says — a deliberation is nine calls over three
+   * stage, as `stage_timeout_s` says — a deliberation is seven calls over three
    * subscriptions and a single deadline over the whole of it would either be
    * too short for the slowest stage or useless for the others. The timer is
    * unref'd so a forgotten deliberation cannot hold the process open.

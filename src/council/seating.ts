@@ -15,8 +15,8 @@ export interface ModelState {
   /**
    * Which provider serves the model, when the state says. Optional only so a
    * hand-built state stays easy to write; `Core.listModels()` always sets it.
-   * Two seats can share one subscription (the default panel puts Google and
-   * open weights on Antigravity), and this is the only way a later stage can
+   * Two seats can share one subscription (until 2026-10-18 the default panel
+   * put Google and open weights on Antigravity), and this is the only way a later stage can
    * tell a seat lost on its provider's queue from a plain timeout (§12.1,
    * §12.6).
    */

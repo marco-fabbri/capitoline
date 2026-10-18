@@ -112,6 +112,11 @@ export function describeCatalogChange(cfg: Config, provider: string, change: Cat
       return uses.length > 0 ? `${name} (used by ${uses.join(", ")})` : name;
     }).join(", ")}`);
   }
+  if (change.healthModel !== undefined) {
+    const p = cfg.providers[provider];
+    const named = p?.health_model === change.healthModel || p?.health_fallback.includes(change.healthModel);
+    parts.push(`health probe now on ${change.healthModel}${named ? "" : " (taken from the listing: name a model in health_model or health_fallback)"}`);
+  }
   return `${provider} models changed. ${parts.join("; ")}.`;
 }
 

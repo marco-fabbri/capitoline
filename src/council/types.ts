@@ -139,7 +139,7 @@ export interface MemberRanking {
  * deliberation: the labels the members ranked under sit next to the real model
  * names, after the fact, where no prompt can reach them.
  *
- * `deliberationId` is what §12.7 asks for: the nine calls are nine rows under
+ * `deliberationId` is what §12.7 asks for: the seven calls are seven rows under
  * the real models that served them, and this is the only thing that ties them
  * back together, so the cost of one question can be summed instead of guessed
  * from a time window. It is minted per run and written to every usage row the
@@ -148,10 +148,10 @@ export interface MemberRanking {
  * `judge.model` is the empty string when nothing was synthesised: the case of
  * §12.5, where a single surviving answer is returned as it is, and the case of
  * a judge chain with no model left, where the best-ranked answer is returned
- * instead of throwing away eight calls that already answered.
+ * instead of throwing away six calls that already answered.
  *
- * `calls` counts every call the deliberation attempted, retries included: nine
- * for the default panel of four seats, five for the same panel without the
+ * `calls` counts every call the deliberation attempted, retries included: seven
+ * for the default panel of three seats, four for the same panel without the
  * ranking stage. A call the gateway refuses at its own gates — a standing
  * pause, a model the state has already taken down — spends no provider call
  * and writes no usage row, so `calls` is an upper bound on the rows of §12.7

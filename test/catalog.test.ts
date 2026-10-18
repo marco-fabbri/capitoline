@@ -92,7 +92,17 @@ describe("the catalog of one provider", () => {
     expect(p.applyListing(withoutHigh).removed).toEqual(["antigravity-gemini-flash-high"]);
     const withoutFlash = agyListed().filter((m) => !m.id.startsWith("gemini-3.8-flash"));
     expect(p.applyListing(withoutFlash).removed).toEqual(expect.arrayContaining(["antigravity-gemini-flash", "antigravity-gemini-flash-low", "antigravity-gemini-flash-medium", "antigravity-image"]));
-    expect(p.healthModel).toBe("antigravity-claude-sonnet");
+    // No health_fallback: the probe moves to the first text model still served.
+    expect(p.healthModel).toBe("antigravity-gpt-oss");
+  });
+  it("moves the health probe to a discovered model when nothing declared is left, and back when its own returns", () => {
+    const p = antigravity();
+    const change = p.applyListing([{ id: "gemini-4-argon-high" }]);
+    expect(change.added).toEqual(["antigravity-gemini-4-argon-high"]);
+    expect(p.healthModel).toBe("antigravity-gemini-4-argon-high");
+    expect(p.healthCliId).toBe("gemini-4-argon-high");
+    p.applyListing(agyListed());
+    expect(p.healthModel).toBe("antigravity-gemini-flash");
   });
   it("a hidden model that is still listed is served, not retired", () => {
     const p = codex();
@@ -126,7 +136,7 @@ describe("the catalog in Core", () => {
     const byName = new Map(core.listModels().map((m) => [m.name, m]));
     expect(byName.get("codex-gpt-7-nova")).toMatchObject({ available: true, provider: "codex" });
     expect(byName.get("codex-gpt-6-luna")).toMatchObject({ available: false, reason: "retired" });
-    expect(changes).toEqual([["codex", { added: ["codex-gpt-7-nova"], removed: ["codex-gpt-6-luna", "codex-image"] }]]);
+    expect(changes).toEqual([["codex", { added: ["codex-gpt-7-nova"], removed: ["codex-gpt-6-luna", "codex-image"], healthModel: "codex-gpt-5.6-luna" }]]);
     await expect((async () => { for await (const _ of core.execute({ model: "codex-gpt-6-luna", stream: false, messages: [{ role: "user", text: "q" }] }, { source: "http" })) { /* drain */ } })())
       .rejects.toMatchObject({ kind: "model_unavailable", message: expect.stringMatching(/retired/) });
     expect(core.providerStates()[0].catalog).toMatchObject({ ok: true, discovered: ["codex-gpt-7-nova"], retired: ["codex-gpt-6-luna", "codex-image"], healthModel: "codex-gpt-5.6-luna" });

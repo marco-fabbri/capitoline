@@ -363,7 +363,7 @@ Items 3 to 8 can be done on the Mac, where the CLIs are already authenticated; o
 
 Design settled 2026-09-22. The council is a virtual model, `capitoline`, served by the same endpoints as every other: a client asks for it in `model` and receives an ordinary completion, or calls the MCP tool `ask_council`.
 
-### 12.1 Three stages, nine calls
+### 12.1 Three stages, seven calls
 
 The strategy is karpathy/llm-council's, with the changes noted below:
 
@@ -371,7 +371,7 @@ The strategy is karpathy/llm-council's, with the changes noted below:
 2. **Anonymous peer ranking.** Each member receives every answer labelled `Response A`, `B`, …, its own among them and named as its own, and ranks them all. The members are anonymous to each other, never to themselves: a model recognises its own prose anyway, and one that is not told which answer is its own rates it highly while believing it is impartial. The reply is JSON against a schema, not prose parsed by a regex.
 3. **Synthesis.** A judge, seated separately, writes the final answer from the labelled answers and the aggregate ranking.
 
-Four seats is the default: nine calls, one per answer, one per ranking, one for the synthesis. The members run in parallel only if every provider offers one concurrency slot per seat it serves: one seat per family buys independent judgment (§12.2), not a free queue, and a family is not a provider. The default seats put Google and open weights on the same Antigravity subscription, so that provider needs one slot per seat it serves. In the shipped file `providers.antigravity.concurrency` is `10`, sized from memory (§4.1); what the councils set is its floor, the largest council the provider sits in — two seats, in both shipped councils — and never the sum over the councils; with one slot, the second of those members would sit on that provider's queue until `server.queue.max_wait_s` and lose its seat, in both parallel stages.
+Three seats is the default: seven calls, one per answer, one per ranking, one for the synthesis. (Four, and nine calls, until 2026-10-18: the open-weights seat's only model leaves Antigravity on 2026-11-02, and no other subscription serves one.) The members run in parallel only if every provider offers one concurrency slot per seat it serves: one seat per family buys independent judgment (§12.2), not a free queue, and a family is not a provider. A council that seats two families on one subscription — the default panel did, Google and open weights on Antigravity, and a ladder seats three — needs that many slots there. In the shipped file `providers.antigravity.concurrency` is `10`, sized from memory (§4.1); what the councils set is its floor, the largest council the provider sits in, and never the sum over the councils; with one slot, the second of those members would sit on that provider's queue until `server.queue.max_wait_s` and lose its seat, in both parallel stages.
 
 ### 12.2 Seats are families with a fallback chain
 
@@ -385,7 +385,7 @@ Seating happens in two steps, and both are needed:
 - **Before the call**, the seat takes the first model of its chain that the health and quota state reports available. Fable paused until Friday is skipped without spending a call to discover it.
 - **After an unforeseen refusal**, the seat steps down the chain once and retries. The first refusal of any window is by definition not in the state yet, so without this a deliberation fails whenever a quota turns over mid-flight; with a single step it cannot cascade through the whole chain.
 
-Default seats: Anthropic, OpenAI, Google, and open weights through `gpt-oss-120b` on Antigravity. Watch for one model reachable through two channels — `claude-opus` and `antigravity-claude-opus` are one opinion in two seats.
+Default seats: Anthropic, OpenAI and Google, the last on Gemini 3.8 Flash at the high level, the rung measured against Gemini Pro once Pro left the listing. Open weights through `gpt-oss-120b` on Antigravity was the fourth until 2026-10-18. Watch for one model reachable through two channels — `claude-opus` and `antigravity-claude-opus` are one opinion in two seats.
 
 ### 12.3 The judge
 
@@ -411,7 +411,7 @@ While the first two stages run there is nothing to stream token by token, so a s
 
 ### 12.7 Accounting
 
-Nine calls are nine rows in the usage table, each under the real model that served it, because quotas belong to those models and not to the council. A deliberation identifier ties them together, so the cost of one question can be summed.
+Seven calls are seven rows in the usage table, each under the real model that served it, because quotas belong to those models and not to the council. A deliberation identifier ties them together, so the cost of one question can be summed.
 
 ### 12.8 The prompts are the strategy
 
@@ -431,7 +431,7 @@ The first real deliberation (2026-09-22) cost nine calls and about 90k tokens fo
 
 **Two variants were considered and dropped**, and the reasons are recorded here rather than left in a conversation, because both look cheap on paper and will otherwise be proposed again:
 
-- **Two seats with the ranking kept**, which costs the same five calls as the fast shape. With two members the ranking is one vote each and **cannot break a tie**; the owner's own measurements put two judges in disagreement or deadlock on one pair in three. At that price four seats without a ranking buy four perspectives instead of two, and give up only a mechanism that barely works at that size.
+- **Two seats with the ranking kept**, which costs five calls, one more than the fast shape of the three-seat panel. With two members the ranking is one vote each and **cannot break a tie**; the owner's own measurements put two judges in disagreement or deadlock on one pair in three. At that price the panel's seats without a ranking buy more perspectives than two, and give up only a mechanism that barely works at that size.
 - **A panel that leaves Anthropic out to spare its quota.** If Anthropic has room, using it gives a better answer; if it does not, the seat walks down its chain and, when nothing on it is available, the panel degrades to three by itself (§12.2, §12.5). Handicapping the panel deliberately trades a worse answer now for a maybe-answer later.
 
 ## 13. Decisions taken and alternatives discarded

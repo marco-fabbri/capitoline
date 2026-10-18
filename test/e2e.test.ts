@@ -235,9 +235,9 @@ describe("a council end to end", () => {
     return callers.reduce((n, c) => n + c.calls, 0);
   };
 
-  // 30 s: nine CLI spawns, each in its own sandbox directory, on a machine
+  // 30 s: seven CLI spawns, each in its own sandbox directory, on a machine
   // that is also running the rest of the suite.
-  it("seats four families, ranks blind, synthesizes, and writes nine usage rows", async () => {
+  it("seats three families, ranks blind, synthesizes, and writes seven usage rows", async () => {
     const before = await rows();
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {
       method: "POST", headers: { "content-type": "application/json" },
@@ -257,48 +257,46 @@ describe("a council end to end", () => {
     expect(body.usage.total_tokens).toBeGreaterThan(0);
 
     const d = body.capitoline.council;
-    // Four seats, four families, four different subscriptions — and each one
-    // answering exactly what it answers a direct request.
+    // Three seats, three families, three different subscriptions — and each
+    // one answering exactly what it answers a direct request.
     expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
       ["anthropic", "claude-fable", ANSWERS.claude],
       ["openai", "codex-gpt-6-astra", ANSWERS.codex],
-      ["google", "antigravity-gemini-flash", ANSWERS.agy],
-      ["open-weights", "antigravity-gpt-oss", ANSWERS.agy],
+      ["google", "antigravity-gemini-flash-high", ANSWERS.agy],
     ]);
     expect(d.members.every((m) => m.fellBackFrom === undefined)).toBe(true);
     expect(d.lost).toEqual([]);
-    expect(d.members.map((m) => m.label).sort()).toEqual(["Response A", "Response B", "Response C", "Response D"]);
-    // Every member ranked, and every ranking parsed: the four fake panels
+    expect(d.members.map((m) => m.label).sort()).toEqual(["Response A", "Response B", "Response C"]);
+    // Every member ranked, and every ranking parsed: the three fake panels
     // answer stage 2 in JSON, so a reply the parser refused would show up
     // here as a missing vote rather than as an error nobody sees.
-    expect(d.rankings.map((x) => x.by).sort()).toEqual(["antigravity-gemini-flash", "antigravity-gpt-oss", "claude-fable", "codex-gpt-6-astra"]);
-    // The aggregate of those four recorded ballots, best first. Exact, and it
+    expect(d.rankings.map((x) => x.by).sort()).toEqual(["antigravity-gemini-flash-high", "claude-fable", "codex-gpt-6-astra"]);
+    // The aggregate of those three recorded ballots, best first. Exact, and it
     // can be: the recordings are fixed and the averages follow from them,
     // whichever seat each label fell to.
     expect(d.aggregate).toEqual([
-      { label: "Response B", averageRank: 1.75, votes: 4 },
-      { label: "Response A", averageRank: 2.25, votes: 4 },
-      { label: "Response C", averageRank: 2.75, votes: 4 },
-      { label: "Response D", averageRank: 3.25, votes: 4 },
+      { label: "Response B", averageRank: 1.667, votes: 3 },
+      { label: "Response A", averageRank: 2, votes: 3 },
+      { label: "Response C", averageRank: 2.333, votes: 3 },
     ]);
     // claude-fable took the Anthropic seat, so the head of the judge's chain,
     // claude-opus, sits in no seat and judges from outside (§12.3).
     expect(d.judge).toEqual({ model: "claude-opus", blind: true });
     expect(d.strategyVersion).toBe(STRATEGY_VERSION);
-    expect(d.calls).toBe(9);
+    expect(d.calls).toBe(7);
     expect(d.deliberationId).toEqual(expect.any(String));
-    // Nine calls, nine rows: the accounting of §12.7 is the usage table's,
+    // Seven calls, seven rows: the accounting of §12.7 is the usage table's,
     // not a number the council reports about itself.
-    expect((await rows()) - before).toBe(9);
+    expect((await rows()) - before).toBe(7);
   }, 30_000);
 
-  // The same four seats through the same door, with `ranking: false` in the
+  // The same three seats through the same door, with `ranking: false` in the
   // configuration: the half-price shape is only worth shipping if the saving
   // is real on the usage table, which is what this asserts and what no unit
   // test can (plan 2026-09-22-council-variants, task 2). The fake CLIs need no
   // new fixture: they pick the judge's recording by "You are writing the final
   // answer", a phrase the fast synthesis prompt keeps.
-  it("skips the ranking stage for capitoline-fast and writes five usage rows", async () => {
+  it("skips the ranking stage for capitoline-fast and writes four usage rows", async () => {
     const before = await rows();
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {
       method: "POST", headers: { "content-type": "application/json" },
@@ -314,33 +312,32 @@ describe("a council end to end", () => {
 
     const d = body.capitoline.council;
     expect(d.shape).toBe("fast");
-    // The same four subscriptions answering as they answer a direct request,
+    // The same three subscriptions answering as they answer a direct request,
     // labelled and judged blind — everything the reference panel does except
     // stage 2.
     expect(d.members.map((m) => [m.family, m.model, m.answer])).toEqual([
       ["anthropic", "claude-fable", ANSWERS.claude],
       ["openai", "codex-gpt-6-astra", ANSWERS.codex],
-      ["google", "antigravity-gemini-flash", ANSWERS.agy],
-      ["open-weights", "antigravity-gpt-oss", ANSWERS.agy],
+      ["google", "antigravity-gemini-flash-high", ANSWERS.agy],
     ]);
     expect(d.lost).toEqual([]);
-    expect(d.members.map((m) => m.label).sort()).toEqual(["Response A", "Response B", "Response C", "Response D"]);
+    expect(d.members.map((m) => m.label).sort()).toEqual(["Response A", "Response B", "Response C"]);
     expect(d.judge).toEqual({ model: "claude-opus", blind: true });
     // Nobody ranked and nothing was aggregated: not a vote that failed to
-    // parse — a ranked panel would still report its four labels with
+    // parse — a ranked panel would still report its three labels with
     // `votes: 0` — but a stage that never ran.
     expect(d.rankings).toEqual([]);
     expect(d.aggregate).toEqual([]);
-    expect(d.calls).toBe(5);
-    // Five spawns, five rows: the price the shape exists for, read off the
+    expect(d.calls).toBe(4);
+    // Four spawns, four rows: the price the shape exists for, read off the
     // usage table and not off the deliberation's own count.
-    expect((await rows()) - before).toBe(5);
+    expect((await rows()) - before).toBe(4);
   }, 30_000);
 
-  // The same five rows from the reference panel asked at `reasoning_effort:
+  // The same four rows from the reference panel asked at `reasoning_effort:
   // low`: the request chose the shape (design §12.9), the response says so,
   // and the field is not among the ignored ones.
-  it("runs capitoline as the five-call shape when asked at reasoning_effort low", async () => {
+  it("runs capitoline as the four-call shape when asked at reasoning_effort low", async () => {
     const before = await rows();
     const r = await fetch(`http://127.0.0.1:${app.port}/v1/chat/completions`, {
       method: "POST", headers: { "content-type": "application/json" },
@@ -351,8 +348,8 @@ describe("a council end to end", () => {
     const body = (await r.json()) as { choices: { message: { content: string } }[]; capitoline: { ignored: string[]; council: Deliberation } };
     expect(body.choices[0].message.content).toBe(COUNCIL_SYNTHESIS);
     expect(body.capitoline.ignored).toEqual([]);
-    expect(body.capitoline.council).toMatchObject({ shape: "fast", calls: 5, rankings: [], aggregate: [] });
-    expect((await rows()) - before).toBe(5);
+    expect(body.capitoline.council).toMatchObject({ shape: "fast", calls: 4, rankings: [], aggregate: [] });
+    expect((await rows()) - before).toBe(4);
   }, 30_000);
 });
 
@@ -382,7 +379,7 @@ describe("scripts/measure-council.sh", () => {
       child.on("close", (status) => resolve({ status, stdout, stderr }));
     });
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toMatch(/^capitoline-fast  q1  \d+s  calls=5  tokens=\d+  judge=/m);
+    expect(r.stdout).toMatch(/^capitoline-fast  q1  \d+s  calls=4  tokens=\d+  judge=/m);
     const raw = readFileSync(`${out}/capitoline-fast__q1.sse`, "utf8");
     expect(raw.trimEnd().endsWith("data: [DONE]")).toBe(true);
     const body = JSON.parse(readFileSync(`${out}/capitoline-fast__q1.json`, "utf8")) as { object: string; model: string; choices: { message: { content: string }; finish_reason: string }[]; usage: { total_tokens: number }; capitoline: { council: Deliberation } };
@@ -391,8 +388,8 @@ describe("scripts/measure-council.sh", () => {
     expect(body.choices[0].message.content).toBe(COUNCIL_SYNTHESIS);
     expect(body.choices[0].finish_reason).toBe("stop");
     expect(body.usage.total_tokens).toBeGreaterThan(0);
-    expect(body.capitoline.council).toMatchObject({ shape: "fast", calls: 5 });
-    expect(readFileSync(`${out}/run.log`, "utf8")).toMatch(/calls=5/);
+    expect(body.capitoline.council).toMatchObject({ shape: "fast", calls: 4 });
+    expect(readFileSync(`${out}/run.log`, "utf8")).toMatch(/calls=4/);
   }, 30_000);
 });
 
@@ -477,8 +474,8 @@ describe("a ladder from docs/measure-a-model.md, end to end", () => {
     // ladder does not synthesize its own measurement.
     // The ladder opens its judge chain on OpenAI, never on Gemini it is measuring
     expect(d.judge).toEqual({ model: "codex-gpt-6-astra", blind: true });
-    // Seven calls: three answers, three rankings, one synthesis — the panel's
-    // nine less the seat it does not have, read off the usage table.
+    // Seven calls: three answers, three rankings, one synthesis — the same as
+    // the panel's, read off the usage table.
     expect(d.calls).toBe(7);
     expect((await rows()) - before).toBe(7);
   }, 30_000);

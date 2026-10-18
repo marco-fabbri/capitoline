@@ -17,7 +17,7 @@ if [[ "${1:-}" == models ]]; then exec cat "$dir/../fixtures/antigravity/models.
 for arg in "$@"; do if [[ "$arg" == /usage ]]; then exec cat "$dir/../fixtures/antigravity/usage-command.json"; fi; done
 stdin="$(cat)"
 # The council's ranking stage is chosen the same way (see fake-claude.sh): this
-# CLI seats two of the four members of the panels and all three rungs of the
+# CLI seats the Google member of the panels and all three rungs of the
 # Gemini ladder (docs/measure-a-model.md), and it wraps the array in an
 # object, the third shape parseRanking tolerates. It is never asked to synthesize: every judge chain
 # reaches an Anthropic model first.

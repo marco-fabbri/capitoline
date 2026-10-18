@@ -25,7 +25,8 @@ export interface Command { args: string[]; stdin: string }
 export interface ListedModel { id: string; efforts?: Effort[]; hidden?: boolean }
 
 /** What a new listing changed: names now served that were not, and names no longer served. */
-export interface CatalogChange { added: string[]; removed: string[] }
+/** What a listing changed; `healthModel` is set when it moved the health probe, to the model it now runs. */
+export interface CatalogChange { added: string[]; removed: string[]; healthModel?: string }
 export type ImageCommand = Command;
 
 export interface Adapter {

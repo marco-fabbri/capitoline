@@ -14,7 +14,12 @@ case "$stdin" in
   # The image run: a real capture (2026-09-23) of Codex's built-in image
   # generation, whose thread id the fake collect helper recognises.
   *"Use the image generation tool exactly once"*) fixture="$dir/../fixtures/codex/image-run.jsonl" ;;
-  *"Reply with JSON only"*)             fixture="$dir/../fixtures/codex/council-ranking.jsonl" ;;
+  *"Reply with JSON only"*)
+    # Over A..D or A..C, as the prompt shows four answers or three (fake-agy.sh).
+    case "$stdin" in
+      *"Response D"*) fixture="$dir/../fixtures/codex/council-ranking.jsonl" ;;
+      *)              fixture="$dir/../fixtures/codex/council-ranking-3.jsonl" ;;
+    esac ;;
   *"You are writing the final answer"*) fixture="$dir/../fixtures/codex/council-synthesis.jsonl" ;;
   *)                                    fixture="$dir/../fixtures/codex/exec-json-locked.jsonl" ;;
 esac

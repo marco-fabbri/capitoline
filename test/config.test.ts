@@ -87,7 +87,8 @@ describe("config", () => {
     // Gemini 3.1 Pro and the 3.6 and 3.7 Flash models left the listing on 2026-10-13.
     expect(agy.models["antigravity-gemini-pro"]).toBeUndefined();
     expect(agy.models["antigravity-gemini-3.7-flash"]).toBeUndefined();
-    expect(agy.health_fallback).toEqual(["antigravity-claude-sonnet"]);
+    // None: 3.8 Flash is the one Gemini left, and its levels leave together.
+    expect(agy.health_fallback).toEqual([]);
     expect(agy.image.collect).toEqual(["/usr/local/bin/capitoline-collect-image"]);
     expect(agy.image.min_bytes).toBe(200000);
     expect(agy.image.quota_per_window).toBe(12);
@@ -326,9 +327,13 @@ describe("config", () => {
       // ("rejects two seats of the same family"), because models of one
       // lineage share their blind spots and two seats of one family would be
       // one opinion voting twice (design §12.2).
-      expect(c.seats.map((s) => s.family), file).toEqual(["anthropic", "openai", "google", "open-weights"]);
+      // Three since 2026-10-18: the open-weights seat's only model leaves
+      // Antigravity on 2026-11-02, and no second Gemini takes its place.
+      expect(c.seats.map((s) => s.family), file).toEqual(["anthropic", "openai", "google"]);
       expect(c.seats[0].models, file).toEqual(["claude-fable", "claude-opus", "claude-sonnet"]);
-      expect(c.seats[3].models, file).toEqual(["antigravity-gpt-oss"]);
+      // The rung measured against Gemini Pro, never the effort-driven name,
+      // which would take medium.
+      expect(c.seats[2].models, file).toEqual(["antigravity-gemini-flash-high"]);
       // The chain is built around models this council's seats cannot take.
       // The judge writes the answer the client reads, so it is the one seat
       // where economising is false economy — measured on 2026-09-22, when a
@@ -349,15 +354,15 @@ describe("config", () => {
       // anthropic seat takes claude-fable this is free and it is the strongest
       // model on the table. What follows it cannot be struck out, so the bad
       // day falls to a strong judge instead of a cheap one.
-      expect(c.judge, file).toEqual({ family: "best-available", models: ["claude-opus", "antigravity-claude-opus", "codex-gpt-6.1-sol", "codex-gpt-5.6-terra"] });
+      expect(c.judge, file).toEqual({ family: "best-available", models: ["claude-opus", "codex-gpt-6.1-sol", "codex-gpt-5.6-terra"] });
       const seatedModels = new Set(c.seats.flatMap((s) => s.models));
       expect(c.judge.models.filter((m) => !seatedModels.has(m)).length, `${file}: the seats can strike out the whole chain`).toBeGreaterThan(0);
       expect(c.judge.models.every((m) => typeof m === "string" && m.length > 0), file).toBe(true);
       expect(seatedModels.size, file).toBeGreaterThan(0);
       // Every provider must offer a slot per seat it serves, or the second
-      // member of that provider waits on the queue and loses its seat: the
-      // default seats put google and open-weights on antigravity (design §12.1).
-      expect(cfg.providers.antigravity.concurrency, file).toBeGreaterThanOrEqual(2);
+      // member of that provider waits on the queue and loses its seat
+      // (design §12.1): a ladder seats three on antigravity.
+      expect(cfg.providers.antigravity.concurrency, file).toBeGreaterThanOrEqual(3);
       // The snake_case the operator writes, under the names the code uses.
       // The judge may sit among the members since 2026-10-08 (measured on 2026-09-27).
       expect([c.judgeAllowMember, c.judgeBlind, c.minMembers], file).toEqual([true, true, 2]);
@@ -451,9 +456,8 @@ describe("config", () => {
         }
         for (const [pid, n] of per) largest.set(pid, Math.max(largest.get(pid) ?? 0, n));
       }
-      // The reference panel and the fast one seat Antigravity twice each,
-      // the largest seating any shipped council asks of one provider.
-      expect(largest.get("antigravity"), file).toBe(2);
+      // One seat per provider since the open-weights seat left on 2026-10-18.
+      for (const pid of ["claude", "codex", "antigravity"]) expect(largest.get(pid), `${file} ${pid}`).toBe(1);
       // Concurrency is sized from memory, not from this rule (design §4.1):
       // ten runs per CLI, which covers every shipped council and a ladder
       // declared in an overlay alike.

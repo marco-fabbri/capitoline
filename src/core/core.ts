@@ -1150,7 +1150,9 @@ export class Core {
         this.opts.log.warn({ provider: p.id, err: e instanceof Error ? e.message : String(e) }, "model listing failed; catalog kept");
         return;
       }
+      const probedBefore = p.healthModel;
       const change = p.applyListing!(listed);
+      if (p.healthModel !== undefined && p.healthModel !== probedBefore) change.healthModel = p.healthModel;
       this.usage.saveCatalog(p.id, listed, this.now());
       this.reindex(p);
       s.catalog = { checkedAt: this.now(), ok: true };

@@ -115,6 +115,12 @@ describe("notifications", () => {
       .toBe("codex models changed. new: codex-gpt-7-nova; no longer served: codex-gpt-6-luna (used by health_model, council capitoline, council capitoline-fast), codex-gpt-5.6-terra (used by council capitoline, council capitoline-fast), codex-image (used by image model).");
     expect(describeCatalogChange(cfg, "antigravity", { added: [], removed: ["antigravity-gemini-3.6-flash-low"] }))
       .toBe("antigravity models changed. no longer served: antigravity-gemini-3.6-flash-low.");
+    // The probe moved: to a fallback the file names, plainly; to a model taken
+    // from the listing, with what to do about it.
+    expect(describeCatalogChange(cfg, "codex", { added: [], removed: ["codex-gpt-6-luna", "codex-image"], healthModel: "codex-gpt-5.6-luna" }))
+      .toMatch(/; health probe now on codex-gpt-5\.6-luna\.$/);
+    expect(describeCatalogChange(cfg, "antigravity", { added: ["antigravity-gemini-4-argon-high"], removed: ["antigravity-gemini-flash"], healthModel: "antigravity-gemini-4-argon-high" }))
+      .toMatch(/health probe now on antigravity-gemini-4-argon-high \(taken from the listing: name a model in health_model or health_fallback\)\.$/);
   });
 });
 

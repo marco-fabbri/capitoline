@@ -93,22 +93,28 @@ export class CliProvider implements Provider {
     this.opts = { ...DEFAULTS, ...opts };
   }
 
+  get acceptsAttachments(): boolean { return this.cfg.attachments !== undefined; }
+
   /**
    * The model health() runs, so Core can skip the probe while that model is
    * paused: `health_model`, or — once the catalog has retired it — the first
-   * `health_fallback` still served. A retired probe would otherwise fail every
-   * round and mark every model of the provider unhealthy.
+   * `health_fallback` still served, or, when none is, the first text model
+   * the listing still serves, declared ones before discovered ones. A retired
+   * probe would otherwise fail every round and mark every model of the
+   * provider unhealthy while others answer; the catalog's notice says when
+   * the probe lands on a model the configuration does not name for it.
    */
-  get acceptsAttachments(): boolean { return this.cfg.attachments !== undefined; }
-
   get healthModel(): string {
-    if (!this.retired.has(this.cfg.health_model)) return this.cfg.health_model;
-    return this.cfg.health_fallback.find((name) => !this.retired.has(name)) ?? this.cfg.health_model;
+    const served = (name: string): boolean => !this.retired.has(name);
+    if (served(this.cfg.health_model)) return this.cfg.health_model;
+    return this.cfg.health_fallback.find(served)
+      ?? this.models().find((m) => m.kind === "text" && served(m.name))?.name
+      ?? this.cfg.health_model;
   }
 
   /** What that model resolves to at HEALTH_EFFORT: the key its pause is filed under. */
   get healthCliId(): string {
-    const probed = modelSpecs(this.id, this.cfg).find((m) => m.name === this.healthModel);
+    const probed = this.models().find((m) => m.name === this.healthModel);
     return probed ? resolveCliId(this.cfg, probed, HEALTH_EFFORT) : this.healthModel;
   }
 
