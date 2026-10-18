@@ -213,9 +213,9 @@ this with `client.responses.create({ model, input, previous_response_id })`.
 `store: false` keeps nothing, and a `404` on a previous id means the
 conversation expired or belongs to someone else: start a new one.
 
-**A council, quick or full.** `model: capitoline` is the full council, nine
+**A council, quick or full.** `model: capitoline` is the full council, seven
 calls and minutes; the same request with `reasoning_effort: low` skips the
-peer-ranking stage and costs five. A client that cannot set the field asks for
+peer-ranking stage and costs four. A client that cannot set the field asks for
 `capitoline-fast`, which is the same thing under its own name. Either way the
 response's `capitoline.council.shape` says which one ran, and either way ask
 for `stream: true` through a tunnel (`docs/deploy.md` §9).
