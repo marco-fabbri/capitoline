@@ -192,25 +192,6 @@
       ]
     },
     {
-      "slug": "gpt-5.5",
-      "display_name": "GPT-5.5",
-      "visibility": "hide",
-      "supported_reasoning_levels": [
-        {
-          "effort": "low"
-        },
-        {
-          "effort": "medium"
-        },
-        {
-          "effort": "high"
-        },
-        {
-          "effort": "xhigh"
-        }
-      ]
-    },
-    {
       "slug": "codex-auto-review",
       "display_name": "Codex Auto Review",
       "visibility": "hide",

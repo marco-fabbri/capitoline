@@ -144,7 +144,7 @@ providers:
     timeout_s: 600
     budget: { window_5h_tokens: 0, window_7d_tokens: 0 }
     health_model: codex-gpt-6-luna
-    version: { args: [--version], verified: 0.162.1, latest: { npm: "@openai/codex" } }
+    version: { args: [--version], verified: 0.163.0, latest: { npm: "@openai/codex" } }
     # Probed instead when the catalog says health_model is no longer listed.
     health_fallback: [codex-gpt-5.6-luna]
     # The daily catalog (docs/deploy.md §7.2): `codex debug models` is the
@@ -164,9 +164,9 @@ providers:
       codex-gpt-5.6-sol:   { cli_model: gpt-5.6-sol }
       codex-gpt-5.6-terra: { cli_model: gpt-5.6-terra }
       codex-gpt-5.6-luna:  { cli_model: gpt-5.6-luna,  efforts: [low, medium, high, xhigh, max] }
-      # gpt-5.5 is hidden by the CLI since 2026-10-08 and deliberately absent (`discover.exclude`
-      # above keeps discovery from adding it back): it retires from Codex with
-      # ChatGPT sign-in on 2026-10-14 (developers.openai.com/codex/models).
+      # gpt-5.5 retired from Codex with ChatGPT sign-in on 2026-10-14
+      # (developers.openai.com/codex/models) and left the listing with Codex
+      # 0.163.0; `discover.exclude` above still keeps it out should a cache list it.
       # The two the cache lists that are not general chat models, exposed
       # because they are models the subscription serves and named so nobody
       # reaches for them by accident: `gpt-reserve` is the fallback tier, and
@@ -323,7 +323,7 @@ providers:
     health_model: antigravity-gemini-flash
     # The manifest the official installer reads, for this host's platform
     # (linux_amd64; linux_arm64 on an ARM host, set in the overlay).
-    version: { args: [--version], verified: 1.3.4, latest: { manifest: "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json" } }
+    version: { args: [--version], verified: 1.4.2, latest: { manifest: "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json" } }
     # Since 2026-10-13 the listing holds one Gemini, 3.8 Flash, so the probe's
     # fallback is a model of the other group the subscription serves. It
     # leaves the plans that do not include it on 2026-11-02 (docs/backlog.md,

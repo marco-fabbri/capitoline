@@ -40,9 +40,9 @@ const agyListed = (): ListedModel[] => antigravityAdapter.listModels!(AGY_LISTIN
 describe("reading the listings", () => {
   it("reads `codex debug models`: slugs, what the CLI hides, and the levels each serves", () => {
     const listed = codexListed();
-    expect(listed.map((m) => m.id)).toEqual(["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-reserve", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "codex-auto-review"]);
-    // gpt-5.5 has been hidden by the CLI since 2026-10-08, ahead of its retirement.
-    expect(listed.filter((m) => m.hidden).map((m) => m.id)).toEqual(["gpt-reserve", "gpt-5.5", "codex-auto-review"]);
+    expect(listed.map((m) => m.id)).toEqual(["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-reserve", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "codex-auto-review"]);
+    // gpt-5.5 left the listing with Codex 0.163.0, after its retirement on 2026-10-14.
+    expect(listed.filter((m) => m.hidden).map((m) => m.id)).toEqual(["gpt-reserve", "codex-auto-review"]);
     expect(listed.find((m) => m.id === "gpt-6-luna")!.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
     expect(listed.find((m) => m.id === "gpt-6-astra")!.efforts).toContain("ultra");
   });
@@ -102,7 +102,7 @@ describe("the catalog of one provider", () => {
   it("runs the CLI's own listing command and refuses a failed, empty or unreadable answer", async () => {
     const r = runnerAnswering(() => ({ stdout: Buffer.from(CODEX_LISTING) }));
     const p = new CliProvider("codex", cfg.providers.codex, codexAdapter, r, log);
-    expect(await p.listModels()).toHaveLength(10);
+    expect(await p.listModels()).toHaveLength(9);
     expect(r.calls).toEqual([["codex", "debug", "models"]]);
     await expect(codex(() => ({ exitCode: 1, stderr: "boom" })).listModels()).rejects.toThrow(/exited with 1/);
     await expect(codex(() => ({ timedOut: true })).listModels()).rejects.toThrow(/timed out/);

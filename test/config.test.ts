@@ -560,7 +560,7 @@ describe("config", () => {
   });
 
   it("declares, for every Codex model, only the reasoning levels its cache prices", () => {
-    // The cache carries the levels per model — `gpt-5.5` stops at xhigh where
+    // The cache carries the levels per model — `gpt-6-luna` stops at max where
     // `gpt-6-astra` goes to ultra — and the provider's table prices the union.
     // A model left open to the whole table would be sent a level the CLI
     // refuses, which is the same failure the Antigravity suffix check catches

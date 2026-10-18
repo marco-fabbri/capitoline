@@ -51,6 +51,8 @@ procedure below, which a person runs.
 | Claude Code (`claude`) | 2.1.296 | 2026-10-13 | updated from 2.1.291 with scripts/update-cli.sh; smoke test passed |
 | Codex CLI (`codex`) | 0.162.1 | 2026-10-13 | the script stopped the first attempt: five features newly on by default (`api_key_model_discovery`, `browser_annotation_api`, `in_app_voice`, `instant_interrupt`, `ultrafast_mode`), none a tool of `codex exec`, all now switched off in `providers.codex.args`; second attempt passed, three images and the tool probe included, `codex debug models` unchanged |
 | Claude Code (`claude`) | 2.1.302 | 2026-10-18 | updated from 2.1.296 with scripts/update-cli.sh; smoke test passed |
+| Codex CLI (`codex`) | 0.163.0 | 2026-10-18 | the script stopped the first attempt: three features newly on by default (`cli_daybreak`, `api_key_cyber_access_programs`, `code_mode_interrupt`), none a tool of `codex exec`, all now switched off in `providers.codex.args`; second attempt passed, three images and the tool probe included; `codex debug models` no longer lists `gpt-5.5`, retired on 2026-10-14, and the fixture was re-captured |
+| Antigravity CLI (`agy`) | 1.4.2 | 2026-10-18 | updated from 1.3.4 with `scripts/update-cli.sh`; three check images passed, a command request is still refused, self-update still off; `agy models` unchanged (Opus 5.5 and Sonnet 5.5 not listed); the changelog since 1.3.4 touches neither images nor print mode beyond retries and subagent questions skipped in `-p` runs |
 
 Add a row for every update, newest last.
 
