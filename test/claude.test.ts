@@ -125,6 +125,13 @@ describe("claude adapter", () => {
     expect(ev[0]).toMatchObject({ type: "error", kind: "auth_expired" });
     expect(ev[0]).not.toHaveProperty("scope");    // an invalid credential is the subscription's, not the model's
   });
+  it("classifies a login whose refresh failed as auth_expired, provider-wide, with no status to go by", async () => {
+    // The real capture of 2026-10-23: no API call was made, so no status.
+    const ev = await events("test/fixtures/claude/oauth-refresh-failed.json");
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ type: "error", kind: "auth_expired", detail: "Failed to authenticate: OAuth session expired and could not be refreshed" });
+    expect(ev[0]).not.toHaveProperty("scope");
+  });
   it("prefers the status over the prose, and falls back to the prose without one", async () => {
     const one = async (o: Record<string, unknown>) => {
       const src = (async function* () { yield JSON.stringify({ type: "result", is_error: true, subtype: "success", ...o }); })();

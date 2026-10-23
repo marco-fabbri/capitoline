@@ -3,7 +3,13 @@ import type { ErrorKind } from "../core/types.js";
 // Patterns come from the CLIs' known messages. Real captures from an expired
 // token or an exhausted window (spike open item 3) must be added to the tests
 // when they happen; until then these are the documented strings.
-const AUTH = /login expired|not logged in|unauthori[sz]ed|\b401\b|invalid.*token|expired.*token|authentication (failed|required)|please run \/login|codex login/i;
+//
+// Real capture on the host, 2026-10-23 (Claude Code 2.1.302): a refresh token
+// that no longer works ends the run with "Failed to authenticate: OAuth
+// session expired and could not be refreshed" and no API status, since no
+// call reached the API. It matched none of these, so for four days the probe
+// read a lost login as cli_crashed and no sign-out notice was sent.
+const AUTH = /login expired|not logged in|unauthori[sz]ed|\b401\b|invalid.*token|expired.*token|authentication (failed|required)|failed to authenticate|session expired and could not be refreshed|please run \/login|codex login/i;
 const RATE = /rate.?limit|\b429\b|too many requests|usage limit|quota|resets? at/i;
 // The provider's own infrastructure, not the owner's quota. Real capture on the
 // host, 2026-09-22: "UNAVAILABLE (code 503): No capacity available for model

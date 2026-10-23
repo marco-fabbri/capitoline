@@ -46,6 +46,15 @@ describe("classifyError over the real expired-credential captures", () => {
   // credential (A5): the patterns are checked against what the CLIs say, not
   // against what their documentation says.
   const fixture = (p: string) => readFileSync(join(process.cwd(), "test/fixtures", p), "utf8");
+  it("reads a claude login whose refresh failed as auth_expired, with no API status to go by", () => {
+    // Recorded on the host on 2026-10-23, the day it was found: the refresh
+    // token had stopped working on 2026-10-19 and the probe had been reading
+    // it as a crash since.
+    const o = JSON.parse(fixture("claude/oauth-refresh-failed.json")) as { result: string; api_error_status: number | null; is_error: boolean };
+    expect(o.is_error).toBe(true);
+    expect(o.api_error_status).toBeNull();
+    expect(classifyError(o.result)).toBe("auth_expired");
+  });
   it("reads the claude result message as auth_expired", () => {
     const o = JSON.parse(fixture("claude/auth-expired.json")) as { result: string; api_error_status: number };
     expect(o.api_error_status).toBe(401);
