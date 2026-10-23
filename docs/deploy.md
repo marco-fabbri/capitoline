@@ -104,7 +104,7 @@ printf '\nexport PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"\n' >> ~/.pr
 . ~/.profile
 # The versions this repository was last verified with: providers.<id>.version.verified
 # in config/capitoline.yaml, the newest row of each CLI in docs/update-clis.md.
-npm install -g @anthropic-ai/claude-code@2.1.302 @openai/codex@0.163.0
+npm install -g @anthropic-ai/claude-code@2.1.309 @openai/codex@0.163.0
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 claude --version; codex --version; agy --version
 exit
@@ -165,7 +165,13 @@ was started in, the runner's home: answer Yes, or the CLI exits before the
 login.
 
 The credentials land in `/home/runner/.claude/.credentials.json` (mode
-0600) and refresh themselves. Verify the way the gateway will call it:
+0600) and refresh themselves. A refresh can still fail — on 2026-10-19 one
+did, and every run then ended with "Failed to authenticate: OAuth session
+expired and could not be refreshed" — and the gateway reports it as the
+provider signed out. To log in again, run the same command and type
+`/login` yourself: with the old file still there the CLI opens as if
+nothing were wrong and does not ask. Then restart the service. Verify the
+way the gateway will call it:
 
 ```sh
 sudo -Hu runner /home/runner/.npm-global/bin/claude -p "Reply with the single word: ok" \
