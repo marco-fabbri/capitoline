@@ -147,8 +147,8 @@ export function availabilityLevel(e: AvailabilityEvent): NotifyOptions {
   switch (e.kind) {
     case "signed_out": return { level: "critical" };
     case "signed_in": return { level: "critical", recovery: true };
-    case "paused": case "refusing": case "quota_low": return { level: "warning" };
-    case "resumed": return { level: "warning", recovery: true };
+    case "paused": case "refusing": case "quota_low": case "failing": return { level: "warning" };
+    case "resumed": case "healthy": return { level: "warning", recovery: true };
   }
 }
 
@@ -160,6 +160,10 @@ export function describeAvailability(cfg: Config, e: AvailabilityEvent): string 
     case "refusing": return `${scopeName(cfg, e.provider, e.scope)} has been refused for ${span(e.refusedMs)}, and the provider gives no reset time.${e.weeklyResetAt !== undefined ? ` The subscription's weekly window resets ${when(e.weeklyResetAt)}, which may be when it returns.` : ""}`;
     case "signed_out": return `${e.provider} is signed out: log in again as runner (docs/deploy.md §6), then restart the service.`;
     case "signed_in": return `${e.provider} is signed in again.`;
+    // The CLI's message is what tells a crash from a login it could not renew
+    // (2026-10-19); cut, since a CLI can print a page of it.
+    case "failing": return `${e.provider} has failed its health check for ${span(e.failingMs)} (${e.healthKind})${e.detail ? `: ${e.detail.length > 300 ? `${e.detail.slice(0, 300)}…` : e.detail}` : ""}. Its models are unavailable until it passes.`;
+    case "healthy": return `${e.provider} passes its health check again, after ${span(e.failingMs)} of failures.`;
     case "quota_low": return `${e.provider}: ${Math.round(e.remaining * 100)}% of the weekly quota of ${e.group} is left${e.resetsAt !== null ? `, and it refills ${when(e.resetsAt)}` : ""}.`;
   }
 }

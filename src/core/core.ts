@@ -79,6 +79,11 @@ export type AvailabilityEvent =
   | { kind: "refusing"; provider: string; scope: string | null; refusedMs: number; weeklyResetAt?: number }
   | { kind: "signed_out"; provider: string }
   | { kind: "signed_in"; provider: string }
+  // A provider failing its probe for another reason (a crash, an answer that
+  // cannot be read, a timeout, the provider's own capacity) for at least
+  // FAILING_NOTICE_MS, and its first passing probe after that notice.
+  | { kind: "failing"; provider: string; failingMs: number; healthKind: string; detail?: string }
+  | { kind: "healthy"; provider: string; failingMs: number }
   // A weekly bucket of the provider's own quota report under the configured
   // share: once per window, so the operator hears of it before the refusals.
   | { kind: "quota_low"; provider: string; group: string; remaining: number; resetsAt: number | null };
@@ -96,6 +101,18 @@ export const RESUME_NOTICE_MS = 3600_000;
 // success after that is told too (`resumed`). In memory only: a restart in the
 // middle starts the count again, which delays the notice and loses nothing.
 export const REFUSING_NOTICE_MS = 3600_000;
+
+// A probe failing for any reason but a lost login (signed_out) or a quota
+// (the pause notices) used to be logged and nothing else: on 2026-10-19 a
+// login whose refresh failed was read as a crash, and every model of the
+// provider stayed down for four days with no notice sent. Now such a run of
+// failures is told once it has lasted this long, with the CLI's own message,
+// and its end is told too. A little under the hourly interval, so the notice
+// comes with the next scheduled round after the one that found the failure,
+// whatever the probes' own durations. In memory only, like the refusals: a
+// restart in the middle starts the count again.
+export const FAILING_NOTICE_MS = 55 * 60_000;
+const NOT_FAILING: ReadonlySet<string> = new Set(["auth_expired", "rate_limited"]);
 
 // A CLI that fails to renew its token once answers a probe exactly as a
 // signed-out one does, and the next probe an hour later finds it signed in:
@@ -127,6 +144,9 @@ interface State {
   imageResetAt: number | null;
   /** When the provider's current run of refusals began; null while it answers. */
   refusedSince: number | null;
+  /** When its current run of failed probes began (FAILING_NOTICE_MS), and whether it was told; null while it passes. */
+  failingSince: number | null;
+  failingTold: boolean;
   hasImageModels: boolean;
   /** The last listing attempt, for a provider that lists its models; null until the first. */
   catalog: { checkedAt: number; ok: boolean } | null;
@@ -230,7 +250,7 @@ export class Core {
       const models = p.models();
       this.states.set(p.id, {
         provider: p, sem: new Semaphore(p.concurrencyLimit), health: null, pausedUntil: null, strikes: 0,
-        imageLimit: opts.imageQuotas?.[p.id] ?? null, imageWeekLimit: opts.imageWeekQuotas?.[p.id] ?? null, imageResetAt: null, refusedSince: null, hasImageModels: models.some((m) => m.kind === "image"),
+        imageLimit: opts.imageQuotas?.[p.id] ?? null, imageWeekLimit: opts.imageWeekQuotas?.[p.id] ?? null, imageResetAt: null, refusedSince: null, failingSince: null, failingTold: false, hasImageModels: models.some((m) => m.kind === "image"),
         catalog: null,
         quota: null,
       });
@@ -405,6 +425,25 @@ export class Core {
     const timer = setInterval(() => this.sweepPauses(), intervalMs);
     timer.unref();
     return () => clearInterval(timer);
+  }
+
+  // Every probe's verdict, the doubted first one included, so the run of
+  // failures is counted from the probe that found it. A verdict that is not a
+  // failure of this kind ends the run, and a run that was told ends with a
+  // notice of its own: a sign-out or a quota has its own notices from there.
+  private noteFailing(s: State, status: HealthStatus): void {
+    const id = s.provider.id;
+    if (status.ok || NOT_FAILING.has(status.kind ?? "")) {
+      if (s.failingTold && status.ok) this.tell({ kind: "healthy", provider: id, failingMs: this.now() - (s.failingSince ?? this.now()) });
+      s.failingSince = null;
+      s.failingTold = false;
+      return;
+    }
+    s.failingSince ??= this.now();
+    const failingMs = this.now() - s.failingSince;
+    if (s.failingTold || failingMs < FAILING_NOTICE_MS) return;
+    s.failingTold = true;
+    this.tell({ kind: "failing", provider: id, failingMs, healthKind: status.kind ?? "cli_crashed", ...(status.detail ? { detail: status.detail } : {}) });
   }
 
   // Signed out and back in, told on the transition only: a provider that stays
@@ -1086,6 +1125,7 @@ export class Core {
       let status: HealthStatus;
       try { status = await s.provider.health(); }
       catch (e) { status = { ok: false, kind: "cli_crashed", detail: String(e), checkedAt: this.now() }; }
+      this.noteFailing(s, status);
       // Not at startup and not for a provider already out (s.health?.ok): there
       // the verdict is taken at once, so the port is never held for it.
       const id = s.provider.id;

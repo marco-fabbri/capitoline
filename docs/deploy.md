@@ -709,6 +709,16 @@ command that installs it, and these:
 - **signed out**, when a health check finds a CLI's login gone twice a minute
   apart (§8), with what to do, and **signed in again** when a check finds it
   back;
+- **failing its health check**, when a CLI has failed its hourly probe for
+  any other reason — a crash, an answer that cannot be read, a timeout, the
+  provider's own capacity — for about an hour, which with the default
+  interval is the next scheduled round after the one that found it. The
+  message carries the CLI's own words, cut at 300 characters, because they
+  are what tells an unknown failure from a login the gateway did not
+  recognise: on 2026-10-19 a login whose refresh failed was read as a crash,
+  and every Claude model stayed down for four days with nothing sent. Told
+  once, and **passes its health check again** at the first probe that
+  passes. A restart in between starts the hour again;
 - **a weekly quota running low**, for a CLI that reports its own quota
   (`providers.<id>.quota`, Antigravity today). The gateway runs the CLI's
   quota report at start, every hour and right after a refusal for a rate
@@ -726,10 +736,11 @@ before the text is read:
 | Level | Sent for | ntfy `Priority` | icon, with `icons: true` |
 |---|---|---|---|
 | `critical` | a CLI signed out: nothing works for it until a person acts | `urgent` | 🚨 |
-| `warning` | a quota used up, a refusal with no reset, a weekly quota running low | `high` | ⚠️ |
+| `warning` | a quota used up, a refusal with no reset, a weekly quota running low, a health check failing for an hour | `high` | ⚠️ |
 | `info` | a new CLI version, a catalog that changed, the test message | `default` | ℹ️ |
 
-A message that closes a problem ("signed in again", "available again") keeps
+A message that closes a problem ("signed in again", "available again",
+"passes its health check again") keeps
 the level of the problem and is sent at `default` priority (and with ✅): it
 pairs with what it closes, and good news does not ring like an alarm. Every
 message also has `X-Capitoline-Level`, for an endpoint that routes on

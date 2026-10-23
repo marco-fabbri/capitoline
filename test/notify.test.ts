@@ -61,6 +61,8 @@ describe("notifications", () => {
     const at = Date.UTC(2026, 9, 6, 12);
     expect(availabilityLevel({ kind: "signed_out", provider: "claude" })).toEqual({ level: "critical" });
     expect(availabilityLevel({ kind: "signed_in", provider: "claude" })).toEqual({ level: "critical", recovery: true });
+    expect(availabilityLevel({ kind: "failing", provider: "claude", failingMs: 3600_000, healthKind: "cli_crashed" })).toEqual({ level: "warning" });
+    expect(availabilityLevel({ kind: "healthy", provider: "claude", failingMs: 3600_000 })).toEqual({ level: "warning", recovery: true });
     expect(availabilityLevel({ kind: "paused", provider: "claude", scope: null, until: at })).toEqual({ level: "warning" });
     expect(availabilityLevel({ kind: "refusing", provider: "claude", scope: null, refusedMs: 3600_000 })).toEqual({ level: "warning" });
     expect(availabilityLevel({ kind: "quota_low", provider: "antigravity", group: "G", remaining: 0.1, resetsAt: null })).toEqual({ level: "warning" });
@@ -126,6 +128,17 @@ describe("notifications", () => {
 
 describe("the availability messages", () => {
   const at = Date.UTC(2026, 9, 3, 18, 49);
+  it("says how long a provider has failed its probe, with the CLI's message cut short, and when it passes again", () => {
+    expect(describeAvailability(cfg, { kind: "failing", provider: "claude", failingMs: 3_660_000, healthKind: "cli_crashed", detail: "Failed to start" }))
+      .toBe("claude has failed its health check for 1h 1m (cli_crashed): Failed to start. Its models are unavailable until it passes.");
+    expect(describeAvailability(cfg, { kind: "failing", provider: "codex", failingMs: 3_600_000, healthKind: "timeout" }))
+      .toBe("codex has failed its health check for 1h 0m (timeout). Its models are unavailable until it passes.");
+    const long = describeAvailability(cfg, { kind: "failing", provider: "codex", failingMs: 3_600_000, healthKind: "bad_output", detail: "x".repeat(1000) });
+    expect(long).toContain(`${"x".repeat(300)}…`);
+    expect(long).not.toContain("x".repeat(301));
+    expect(describeAvailability(cfg, { kind: "healthy", provider: "claude", failingMs: 4 * 86_400_000 }))
+      .toBe("claude passes its health check again, after 4d 0h of failures.");
+  });
   it("says what paused, until when, and whose quota", () => {
     expect(describeAvailability(cfg, { kind: "quota_low", provider: "antigravity", group: "Gemini Models", remaining: 0.236, resetsAt: null }))
       .toBe("antigravity: 24% of the weekly quota of Gemini Models is left.");

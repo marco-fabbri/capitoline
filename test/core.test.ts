@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Core, type AvailabilityEvent } from "../src/core/core.js";
+import { Core, FAILING_NOTICE_MS, type AvailabilityEvent } from "../src/core/core.js";
 import { UsageStore } from "../src/usage/store.js";
 import { FakeProvider } from "./fake-provider.js";
 import { createLogger } from "../src/log.js";
@@ -1063,6 +1063,51 @@ describe("availability notices", () => {
       { kind: "signed_in", provider: "a" },
       { kind: "signed_out", provider: "b" },
     ]);
+  });
+
+  // 2026-10-19: a login whose refresh failed read as cli_crashed, and the
+  // provider stayed down four days with nothing told. Any failure but a
+  // sign-out or a quota is now told once it has lasted FAILING_NOTICE_MS.
+  it("tells a provider failing its probe for an hour once, with the CLI's message, and its return", async () => {
+    let t = 1_000_000;
+    const { a, core, told } = makeTold(() => t);
+    const detail = "Failed to start: something the patterns do not know";
+    a.healthResult = { ok: false, kind: "cli_crashed", detail, checkedAt: 0 };
+    await core.checkHealth("a");                  // the run starts
+    t += FAILING_NOTICE_MS - 1;
+    await core.checkHealth("a");
+    expect(told).toEqual([]);                     // not yet
+    t += 1;
+    await core.checkHealth("a");
+    t += 3600_000;
+    await core.checkHealth("a");                  // told once, not every round
+    expect(told).toEqual([{ kind: "failing", provider: "a", failingMs: FAILING_NOTICE_MS, healthKind: "cli_crashed", detail }]);
+    a.healthResult = { ok: true, checkedAt: 0 };
+    await core.checkHealth("a");
+    expect(told[1]).toEqual({ kind: "healthy", provider: "a", failingMs: FAILING_NOTICE_MS + 3600_000 });
+    // A short run that ends before the hour is not news at either end.
+    a.healthResult = { ok: false, kind: "timeout", checkedAt: 0 };
+    await core.checkHealth("a");
+    a.healthResult = { ok: true, checkedAt: 0 };
+    t += 60_000;
+    await core.checkHealth("a");
+    expect(told).toHaveLength(2);
+    core.cancelAuthRechecks();                    // the timeout on a healthy provider scheduled one
+  });
+
+  it("leaves a sign-out and a quota to their own notices, and a run broken by one starts again", async () => {
+    let t = 1_000_000;
+    const { a, core, told } = makeTold(() => t);
+    a.healthResult = { ok: false, kind: "auth_expired", checkedAt: 0 };
+    await core.checkHealth("a");
+    t += 2 * FAILING_NOTICE_MS;
+    await core.checkHealth("a");
+    expect(told).toEqual([{ kind: "signed_out", provider: "a" }]);
+    a.healthResult = { ok: false, kind: "bad_output", checkedAt: 0 };
+    await core.checkHealth("a");                  // the count starts here, not at the sign-out
+    t += FAILING_NOTICE_MS - 1;
+    await core.checkHealth("a");
+    expect(told).toHaveLength(1);
   });
 });
 
