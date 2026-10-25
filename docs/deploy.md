@@ -1632,4 +1632,9 @@ the only end-to-end check of the sudoers entry of §5 and of the helper of
 429 on the image model is printed and does not fail the run.
 `SMOKE_IMAGE_MODEL=codex-image` checks the Codex one instead of the first the
 configuration declares. `scripts/update-cli.sh` runs this script after every
-CLI update (`docs/update-clis.md`).
+CLI update (`docs/update-clis.md`), with `SMOKE_REQUIRED` set to the updated
+CLI's health model: the other providers are still called and printed, but a
+failure of theirs is marked "not counted" and does not fail the run, since a
+provider whose weekly limit is used up would otherwise hold back every other
+CLI's update for days. A named model this gateway does not serve fails the
+run. Unset, as by hand, every provider counts.

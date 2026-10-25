@@ -23,9 +23,27 @@ SERVED=$(jq -r '.models[].name' <<<"$HEALTH" 2>/dev/null || true)
 served() { [[ -z "$SERVED" ]] || grep -qxF "$1" <<<"$SERVED"; }
 MODELS=$(yq -r '.providers[].health_model' "$CFG" 2>/dev/null || grep -E '^\s+health_model:' "$CFG" | awk '{print $2}' || true)
 [[ -n "${MODELS// /}" ]] || { echo "smoke: no health_model found in $CFG" >&2; exit 1; }
+# SMOKE_REQUIRED names the text models whose failure fails the run, separated
+# by spaces; unset, every one does. scripts/update-cli.sh sets it to the health
+# model of the CLI it updated: the update changed that CLI alone, and a
+# provider whose weekly limit is used up stays refused for days, which would
+# otherwise hold back the update of every other CLI for as long. The other
+# providers are still called and printed, marked as not counted. A required
+# model is tried even if no health_model names it, and one this gateway does
+# not serve fails the run: skipping it would pass an update nothing checked.
+REQUIRED="${SMOKE_REQUIRED:-}"
+required() { [[ -z "${REQUIRED// /}" ]] || tr ' ' '\n' <<<"$REQUIRED" | grep -qxF "$1"; }
+for r in $REQUIRED; do grep -qxF "$r" <<<"$MODELS" || MODELS+=$'\n'"$r"; done
 fail=0
 for m in $MODELS; do
-  if ! served "$m"; then printf '%-22s %s\n' "$m" "skipped (not served by this gateway)"; continue; fi
+  if ! served "$m"; then
+    if [[ -n "${REQUIRED// /}" ]] && required "$m"; then
+      printf '%-22s %s\n' "$m" "not served by this gateway, and it is the model to check"; fail=1
+    else
+      printf '%-22s %s\n' "$m" "skipped (not served by this gateway)"
+    fi
+    continue
+  fi
   : > "$TMP"
   resp=$(curl -sS ${HDR[@]+"${HDR[@]}"} -o "$TMP" -w '%{http_code}' -H 'content-type: application/json' \
     -d "{\"model\":\"$m\",\"reasoning_effort\":\"low\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with the single word: ok\"}]}" \
@@ -33,8 +51,10 @@ for m in $MODELS; do
   [[ -n "$resp" ]] || resp=000
   if [[ "$resp" == "200" ]]; then
     printf '%-22s %s  %-40s tokens=%s\n' "$m" "$resp" "$(jq -r '.choices[0].message.content' "$TMP" | head -c 40 | tr '\n' ' ')" "$(jq -r '.usage.total_tokens' "$TMP")"
-  else
+  elif required "$m"; then
     printf '%-22s %s  %s\n' "$m" "$resp" "$(jq -r '.error.message // empty' "$TMP" 2>/dev/null)"; fail=1
+  else
+    printf '%-22s %s  %s\n' "$m" "$resp" "$(jq -r '.error.message // empty' "$TMP" 2>/dev/null) [not counted: not the model being checked]"
   fi
 done
 

@@ -54,7 +54,7 @@ OVERLAY="${CAPITOLINE_OVERLAY:-/etc/capitoline/overlay.yaml}"
 BASE="${CAPITOLINE_URL:-http://127.0.0.1:8080}"
 # The binary and the runner user as the service sees them: the base
 # configuration merged with the host's overlay.
-read -r BIN RUNNER SWITCHED_OFF PROBE_MODEL < <(sudo -u capitoline env CAPITOLINE_OVERLAY="$OVERLAY" node -e "
+read -r BIN RUNNER SWITCHED_OFF PROBE_MODEL HEALTH_MODEL < <(sudo -u capitoline env CAPITOLINE_OVERLAY="$OVERLAY" node -e "
   Promise.all([import('./dist/config.js'), import('./dist/providers/adapter.js')]).then(([m, a]) => {
     const c = m.loadConfig('config/capitoline.yaml', process.env.CAPITOLINE_OVERLAY || undefined);
     const p = c.providers['$cli'];
@@ -65,7 +65,7 @@ read -r BIN RUNNER SWITCHED_OFF PROBE_MODEL < <(sudo -u capitoline env CAPITOLIN
     // The CLI id the health probe sends, at its lowest effort: what the
     // Antigravity checks below ask with, so no model id is written here.
     const spec = a.modelSpecs('$cli', p).find((s) => s.name === p.health_model);
-    console.log(p.binary, c.runner.user, off.join(',') || '-', spec ? a.cliId(p, spec, 'low') : '-');
+    console.log(p.binary, c.runner.user, off.join(',') || '-', spec ? a.cliId(p, spec, 'low') : '-', p.health_model);
   });")
 [[ -x "$BIN" && -n "$RUNNER" ]] || { echo "update-cli: no binary or runner user for $cli in the configuration" >&2; exit 1; }
 
@@ -142,7 +142,10 @@ smoke() {
   # verified image either. On 2026-10-05 the image check alone met a 429 at
   # once, this script said the version "draws an image" and threw away what a
   # rollback needed, with nothing drawn.
-  CAPITOLINE_API_KEY="$KEY" SMOKE_IMAGE="$image" SMOKE_IMAGE_STRICT=1 SMOKE_IMAGE_COUNT=3 SMOKE_IMAGE_MODEL="$image_model" bash scripts/smoke.sh "$BASE"
+  # Only this CLI's model decides the verdict; the others are printed. A
+  # provider out of its weekly limit says nothing about this update, and would
+  # hold it back for days.
+  CAPITOLINE_API_KEY="$KEY" SMOKE_REQUIRED="$HEALTH_MODEL" SMOKE_IMAGE="$image" SMOKE_IMAGE_STRICT=1 SMOKE_IMAGE_COUNT=3 SMOKE_IMAGE_MODEL="$image_model" bash scripts/smoke.sh "$BASE"
 }
 
 # These two probes run the CLI directly, not through the gateway, so nothing

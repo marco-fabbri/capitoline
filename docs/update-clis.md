@@ -139,7 +139,9 @@ On the host, as root, from the clone:
    a temporary gateway key it revokes afterwards, checks that Antigravity still
    refuses to run a command (`docs/deploy.md` §6.4) and still has its
    self-update switched off (§6.3c), and **puts the previous version back if
-   any of that fails**, then smoke-tests the restored one.
+   any of that fails**, then smoke-tests the restored one. Only the updated
+   CLI's model decides the smoke test; the other providers are printed, and
+   one out of its quota is marked "not counted" (`docs/deploy.md` §12).
    The same holds if the script itself stops on an error after installing:
    it restores the previous version on its way out, so a new version never
    stays in place half-checked.
