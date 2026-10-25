@@ -1,0 +1,135 @@
+{
+  "id": "chatcmpl-4b4e2fe9-bad2-4685-b1a5-0c602706adf4",
+  "object": "chat.completion",
+  "created": 1792907470,
+  "model": "capitoline-argon",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The kernel declares the connection dead after **7,875 seconds**, which is **2 hours, 11 minutes, 15 seconds**, counted from the last packet seen on the socket.\n\n## Parameters\n\nWith `SO_KEEPALIVE` on and no per-socket `TCP_KEEPIDLE`, `TCP_KEEPINTVL`, `TCP_KEEPCNT` or `TCP_USER_TIMEOUT`, the kernel uses three global sysctls under `/proc/sys/net/ipv4/`. These apply to IPv6 TCP sockets too.\n\n| Sysctl | Default | Meaning |\n|---|---|---|\n| `net.ipv4.tcp_keepalive_time` | **7200 s** (2 h) | How long the connection must be idle before the first probe is sent |\n| `net.ipv4.tcp_keepalive_intvl` | **75 s** | Time between unanswered probes |\n| `net.ipv4.tcp_keepalive_probes` | **9** | Number of unanswered probes before the connection is aborted |\n\n## Calculation\n\n```\ntcp_keepalive_time + tcp_keepalive_probes × tcp_keepalive_intvl\n= 7200 + 9 × 75\n= 7200 + 675\n= 7875 s\n```\n\n## Timeline\n\n- **t = 0 s**: last packet on the connection.\n- **t = 7200 s**: the idle timer expires and probe 1 is sent.\n- **t = 7275 s**: no ACK, so probe 2 is sent. Further probes follow every 75 s.\n- **t = 7800 s** (7200 + 8×75): probe 9, the last one, is sent. The 75 s timer is armed once more.\n- **t = 7875 s** (7200 + 9×75): that timer expires with 9 probes unanswered. The kernel:\n  - sends a RST;\n  - moves the socket to `TCP_CLOSE`;\n  - sets the socket error to `ETIMEDOUT`.\n\nA common mistake is to give **7,800 s**. That figure assumes the connection is dropped when the 9th probe is sent. In fact Linux (`tcp_keepalive_timer` in `net/ipv4/tcp_timer.c`) waits one more interval for an answer to that probe.\n\n## Caveats\n\n- **Idle time before the power loss.** The clock starts at the last packet, not at the power loss. If the connection had already been idle for *T* seconds when the peer died, it is declared dead 7875 − *T* seconds after the power loss.\n- **What the application sees.** A blocked or later I/O call returns `-1` with `errno = ETIMEDOUT`. With `poll`/`epoll` this shows up as `EPOLLERR`/`EPOLLHUP`.\n- **Keepalive versus retransmission.** This figure holds only because nothing is waiting to be sent. If the application had written data after the peer died, normal retransmission would apply instead. That is governed by `net.ipv4.tcp_retries2` (default 15), which gives up after roughly 15 minutes.\n- **Timer granularity.** The real elapsed time can differ by a few milliseconds because of jiffies and timer-wheel resolution."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 62618,
+    "completion_tokens": 18430,
+    "total_tokens": 81048
+  },
+  "capitoline": {
+    "provider": "capitoline",
+    "ignored": [],
+    "council": {
+      "deliberationId": "324ac275-8554-46a2-874e-a6cca07aa747",
+      "strategyVersion": 2,
+      "shape": "ranked",
+      "members": [
+        {
+          "family": "argon-high",
+          "model": "antigravity-gemini-argon-high",
+          "label": "Response A",
+          "answer": "On a stock Linux system, the kernel declares the connection dead **7,875 seconds** (**2 hours, 11 minutes, and 15 seconds**, or **131 minutes and 15 seconds**) after the last packet activity on the socket.\n\n---\n\n### The Parameters\n\nWith `SO_KEEPALIVE` enabled and no per-socket overrides (`TCP_KEEPIDLE`, `TCP_KEEPINTVL`, `TCP_KEEPCNT`, or `TCP_USER_TIMEOUT`), the kernel uses three global sysctl parameters (defined in `include/net/tcp.h` and exposed under `/proc/sys/net/ipv4/`):\n\n1. **`net.ipv4.tcp_keepalive_time`** (corresponds to `TCP_KEEPIDLE`): **`7200` seconds** (2 hours)\n   The duration the connection must remain completely idle before the kernel sends the first keepalive probe.\n2. **`net.ipv4.tcp_keepalive_intvl`** (corresponds to `TCP_KEEPINTVL`): **`75` seconds**\n   The interval between consecutive keepalive probes when the peer does not respond.\n3. **`net.ipv4.tcp_keepalive_probes`** (corresponds to `TCP_KEEPCNT`): **`9` probes**\n   The number of unacknowledged keepalive probes sent before the kernel aborts the connection and reports `ETIMEDOUT` to the application.\n\n*( Note: In Linux, these `net.ipv4.tcp_keepalive_*` sysctls govern both IPv4 and IPv6 TCP sockets.)*\n\n---\n\n### Calculation and Timeline\n\n$$\\text{Total Time} = \\texttt{tcp\\_keepalive\\_time} + (\\texttt{tcp\\_keepalive\\_probes} \\times \\texttt{tcp\\_keepalive\\_intvl})$$\n\n$$7200\\text{ s} + (9 \\times 75\\text{ s}) = 7200\\text{ s} + 675\\text{ s} = 7875\\text{ s}$$\n\n* **$t = 0\\text{ s}$**: Last packet activity occurs.\n* **$t = 7200\\text{ s}$ (2h 00m 00s)**: Idle timer expires; **Probe 1** is sent.\n* **$t = 7275\\text{ s}$ (2h 01m 15s)**: Probe 1 times out; **Probe 2** is sent.\n* $\\vdots$\n* **$t = 7800\\text{ s}$ (2h 10m 00s)**: Probe 8 times out ($7200 + 8 \\times 75$); **Probe 9** (the final probe) is sent.\n* **$t = 7875\\text{ s}$ (2h 11m 15s)**: Probe 9 times out after one final 75-second interval ($7200 + 9 \\times 75$). The kernel sends a `RST`, transitions the socket closed, and sets `sk_err = ETIMEDOUT`.\n\n---\n\n### Important Details & Edge Cases\n\n* **Idle time prior to power loss**: The 7,875-second figure is measured from the **last packet activity** on the connection. If the connection had already been idle for $T$ seconds when the peer lost power, the kernel will declare the connection dead $7875 - T$ seconds after power loss.\n* **No interaction with `tcp_retries2`**: Because there is no outbound application traffic in the send queue, the normal TCP data retransmission timer (`net.ipv4.tcp_retries2`, which defaults to 15 retries / ~15 minutes) is never armed. Keepalive probes are empty ACK segments with sequence number $\\text{SND.NXT} - 1$ and are handled solely by the keepalive timer (`tcp_keepalive_timer`).\n"
+        },
+        {
+          "family": "flash-high",
+          "model": "antigravity-gemini-flash-high",
+          "label": "Response C",
+          "answer": "On a stock Linux system, the kernel will declare the connection dead after **7,875 seconds** (which is **2 hours, 11 minutes, and 15 seconds**).\n\n---\n\n### 1. The Kernel Parameters (sysctls)\n\nThe behavior is governed by three global `sysctl` settings located under `net.ipv4.*` (which apply to both IPv4 and IPv6 TCP sockets):\n\n| Parameter | Stock Default Value | Meaning |\n| :--- | :--- | :--- |\n| `net.ipv4.tcp_keepalive_time` | **7200 seconds** (2 hours) | The duration the connection must remain completely idle before the kernel transmits the first keepalive probe. |\n| `net.ipv4.tcp_keepalive_intvl` | **75 seconds** | The interval between successive unacknowledged keepalive probes. |\n| `net.ipv4.tcp_keepalive_probes` | **9** | The maximum number of unacknowledged keepalive probes sent before aborting the connection. |\n\n---\n\n### 2. Timeline and Calculation\n\nThe total duration is calculated as:\n$$\\text{Total Time} = \\text{tcp\\_keepalive\\_time} + (\\text{tcp\\_keepalive\\_probes} \\times \\text{tcp\\_keepalive\\_intvl})$$\n$$7200\\text{ s} + (9 \\times 75\\text{ s}) = 7200\\text{ s} + 675\\text{ s} = \\mathbf{7875\\text{ s}}$$\n\nThe exact progression is as follows:\n\n1. **$t = 0$ s:** The connection becomes idle (last packet received).\n2. **$t = 7,200$ s:** `tcp_keepalive_time` expires. The kernel transmits **Probe 1** and arms a timer for 75 seconds (`tcp_keepalive_intvl`).\n3. **$t = 7,275$ s:** Timer expires with no ACK. The kernel transmits **Probe 2**.\n4. **$t = 7,350$ s:** **Probe 3** sent.\n5. ...\n6. **$t = 7,800$ s ($7200 + 8 \\times 75$):** **Probe 9** (the final probe) is transmitted. The kernel arms the 75-second timer one last time to allow the peer an opportunity to acknowledge this probe.\n7. **$t = 7,875$ s ($7200 + 9 \\times 75$):** The timer for the 9th probe expires. The probe counter has reached `tcp_keepalive_probes` (9). Because no response was received, the kernel declares the connection broken, transitions the socket to `TCP_CLOSE`, and marks the socket error as `ETIMEDOUT` (Connection timed out).\n\n*(Note: A common misconception is $7,200 + (9 - 1) \\times 75 = 7,800\\text{ s}$, which incorrectly assumes the connection is dropped immediately upon sending the 9th probe without waiting for its response.)*\n\n---\n\n### 3. Relevant Caveats and Details\n\n- **Error reported to application:** Any subsequent I/O call (or one currently blocking) returns `-1` with `errno = ETIMEDOUT`. An asynchronous event loop (`poll`/`epoll`) triggers `EPOLLERR` / `EPOLLHUP`.\n- **Timer granularity:** The actual timing is subject to standard Linux timer wheel resolution and jiffies granularity, meaning the real-world elapsed time will vary by a few milliseconds.\n- **Keepalive vs. Retransmission:** This timeline strictly applies because there is **no outgoing application traffic**. If the application had attempted to write to the socket after the peer lost power, regular TCP data retransmissions would take over instead (governed by `net.ipv4.tcp_retries2`, which typically declares the peer dead in approximately 13 to 30 minutes, usually around 15 minutes by default).\n"
+        },
+        {
+          "family": "flash-low",
+          "model": "antigravity-gemini-flash-low",
+          "label": "Response B",
+          "answer": "On a stock Linux system, the kernel declares the connection dead after **7,290 seconds** (which is **2 hours, 1 minute, and 30 seconds**).\n\n---\n\n### The Parameters and Their Stock Linux Defaults\n\nTCP keepalive behavior in the Linux kernel is governed globally by three `sysctl` settings located under `/proc/sys/net/ipv4/`:\n\n1. **`tcp_keepalive_time`** = **`7200`** seconds (2 hours)\n   * The idle time after the last data packet was exchanged before the kernel sends the very first keepalive probe.\n2. **`tcp_keepalive_intvl`** = **`75`** seconds\n   * The interval between successive keepalive probe retransmissions if no ACK is received.\n3. **`tcp_keepalive_probes`** = **`9`**\n   * The maximum number of unanswered keepalive probes the kernel will send before declaring the connection dead and closing it (or sending an `ETIMEDOUT` to the application).\n\n*(Note: Per-socket overrides correspond to the socket options `TCP_KEEPIDLE`, `TCP_KEEPINTVL`, and `TCP_KEEPCNT` via `setsockopt(2)`, none of which are used here).*\n\n---\n\n### Timeline Calculation\n\nWhen the peer abruptly loses power and no data is being sent:\n\n1. **$t = 0$ s to $t = 7200$ s**: The socket sits idle. At $t = 7200\\text{ s}$, the kernel sends **Probe #1**.\n2. **$t = 7200 + 75 = 7275$ s**: No ACK received for Probe #1; kernel sends **Probe #2**.\n3. **$t = 7275 + 75 = 7350$ s** ... and so on, continuing at 75-second intervals.\n4. **$t = 7200 + (8 \\times 75) = 7800$ s**: The 9th and final probe (**Probe #9**) is sent.\n5. **$t = 7200 + (9 \\times 75) = 7875$ s**: The timer for Probe #9 expires. Having sent all 9 probes without receiving any acknowledgment, the kernel drops the connection.\n\n* Total time: $7200 + (9 \\times 75) = 7200 + 675 =$ **7,875 seconds** (or **2 hours, 11 minutes, and 15 seconds**).\n\n---\n\n### Alternative Interpretation / Precision Caveat\n\n* If the connection is declared dead at the moment the **9th probe is sent** (if an implementation considered 9 failures before sending or counted the initial idle timeout as probe 1), the time would be $7200 + (8 \\times 75) = \\mathbf{7{,}800\\text{ seconds}}$.\n* However, in the Linux TCP implementation (`net/ipv4/tcp_timer.c`), the connection remains active until the final probe's retry timer expires without an ACK:\n  $$\\text{Total Time} = \\text{tcp\\_keepalive\\_time} + (\\text{tcp\\_keepalive\\_probes} \\times \\text{tcp\\_keepalive\\_intvl}) = 7200 + (9 \\times 75) = \\mathbf{7{,}875\\text{ seconds}} \\text{ (2h 11m 15s)}$$\n\n*(Note: Sometimes `tcp_keepalive_intvl` is confused with `tcp_syn_retries` or other sysctls, but 7200s idle + 9 probes $\\times$ 75s interval = **7,875s** is the standard formula).*\n"
+        }
+      ],
+      "lost": [],
+      "rankings": [
+        {
+          "by": "antigravity-gemini-argon-high",
+          "ranking": [
+            {
+              "label": "Response A",
+              "rank": 1,
+              "reason": "Correctly gives the 7,875-second (2h 11m 15s) figure, identifies all three sysctl parameters and their corresponding per-socket option names, and accurately notes that the timer runs from the last packet activity rather than the moment of power loss."
+            },
+            {
+              "label": "Response C",
+              "rank": 1,
+              "reason": "Correctly states the 7,875-second figure and the three sysctl parameters in a clear table, provides an accurate step-by-step probe timeline, and includes helpful context on socket errors and retransmission timers."
+            },
+            {
+              "label": "Response B",
+              "rank": 3,
+              "reason": "Opens with an incorrect figure of 7,290 seconds (2h 1m 30s) before contradicting itself later in the response when it calculates the actual total of 7,875 seconds."
+            }
+          ]
+        },
+        {
+          "by": "antigravity-gemini-flash-high",
+          "ranking": [
+            {
+              "label": "Response A",
+              "rank": 1,
+              "reason": "Provides the correct total time of 7,875 seconds, accurately details the three relevant sysctl parameters and their stock defaults, and includes clear, technically precise timeline calculations and edge-case context."
+            },
+            {
+              "label": "Response C",
+              "rank": 1,
+              "reason": "Provides the correct total time of 7,875 seconds, correctly identifies all three sysctl parameters, and offers an accurate step-by-step timeline alongside helpful implementation details."
+            },
+            {
+              "label": "Response B",
+              "rank": 2,
+              "reason": "Contains an internal contradiction by stating an incorrect figure of 7,290 seconds in its opening summary, even though the body later calculates the correct figure of 7,875 seconds."
+            }
+          ]
+        },
+        {
+          "by": "antigravity-gemini-flash-low",
+          "ranking": [
+            {
+              "label": "Response A",
+              "rank": 1,
+              "reason": "It accurately calculates the total time as 7,875 seconds, correctly names and describes all three stock kernel sysctl parameters, and provides a clear, precise timeline."
+            },
+            {
+              "label": "Response C",
+              "rank": 1,
+              "reason": "It gives the correct total time of 7,875 seconds along with the exact stock sysctl parameters, provides a clear timeline breakdown, and includes thorough, accurate technical context."
+            },
+            {
+              "label": "Response B",
+              "rank": 3,
+              "reason": "The introductory summary states an erroneous figure of 7,290 seconds (2 hours, 1 minute, and 30 seconds), directly contradicting its own later calculation and explanation of 7,875 seconds."
+            }
+          ]
+        }
+      ],
+      "aggregate": [
+        {
+          "label": "Response A",
+          "averageRank": 1,
+          "votes": 3
+        },
+        {
+          "label": "Response C",
+          "averageRank": 1,
+          "votes": 3
+        },
+        {
+          "label": "Response B",
+          "averageRank": 2.667,
+          "votes": 3
+        }
+      ],
+      "judge": {
+        "model": "claude-opus",
+        "blind": true
+      },
+      "calls": 7
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# The ladder of this measurement, as added to the host overlay for the run and
+# removed after it (docs/measure-a-model.md). The 2026-09-23 Gemini ladder with
+# Gemini 4 Argon in Pro's place. The judge chain is Claude's alone: the Codex
+# subscription was out of its weekly limit that day.
+council:
+  capitoline-argon:
+    seats:
+      - { family: argon-high, models: [antigravity-gemini-argon-high] }
+      - { family: flash-high, models: [antigravity-gemini-flash-high] }
+      - { family: flash-low,  models: [antigravity-gemini-flash-low] }
+    judge: { family: best-available, models: [claude-opus, claude-fable] }
+    judge_allow_member: false
+    judge_blind: true
+    min_members: 3
+    stage_timeout_s: 300

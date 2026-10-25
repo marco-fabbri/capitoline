@@ -331,9 +331,12 @@ describe("config", () => {
       // Antigravity on 2026-11-02, and no second Gemini takes its place.
       expect(c.seats.map((s) => s.family), file).toEqual(["anthropic", "openai", "google"]);
       expect(c.seats[0].models, file).toEqual(["claude-fable", "claude-opus", "claude-sonnet"]);
-      // The rung measured against Gemini Pro, never the effort-driven name,
-      // which would take medium.
-      expect(c.seats[2].models, file).toEqual(["antigravity-gemini-flash-high"]);
+      // Argon at the high level, measured on 2026-10-25, then the Flash rung
+      // measured against Gemini Pro: never the effort-driven names, which
+      // would take medium. Argon keeps a quota of its own on the plans where
+      // it is not in the Gemini bucket, so Flash answers once it is spent.
+      expect(c.seats[2].models, file).toEqual(["antigravity-gemini-argon-high", "antigravity-gemini-flash-high"]);
+      expect(cfg.council["capitoline-fast"].seats[2].models, file).toEqual(c.seats[2].models);
       // The chain is built around models this council's seats cannot take.
       // The judge writes the answer the client reads, so it is the one seat
       // where economising is false economy — measured on 2026-09-22, when a

@@ -436,12 +436,21 @@ providers:
 # model with open weights, and a second Gemini in its place would share the
 # Google seat's blind spots (docs/backlog.md, Dated).
 #
-# The Google seat is 3.8 Flash at the high level, the rung measured against
-# Gemini Pro (docs/measurements/2026-09-23-council/: six correct of six,
-# ranked first on all six, where Pro was ranked first on one and the low
-# level was wrong on three). A seat without a level would take medium, which
-# was not measured. No fallback in the chain: the three levels draw on one
-# quota, so when the high one is refused the others are too.
+# The Google seat is Gemini 4 Argon at the high level, with 3.8 Flash at the
+# high level behind it. Argon was measured on 2026-10-25 in Pro's place on
+# the 2026-09-23 ladder (docs/measurements/2026-10-25-argon/): correct on all
+# six registered questions, ranked first or tied first on five, its calls
+# quicker than Flash high's, none lost. Flash high is the rung measured
+# against Gemini Pro (docs/measurements/2026-09-23-council/: six correct of
+# six, where the low level was wrong on three), and beside Argon correct on
+# five and partial on one. It is worth its place behind Argon because the CLI's quota
+# report puts Argon in a group of its own on the plans where it is not part
+# of the larger Gemini bucket: when Argon's weekly limit is spent, Flash
+# still answers. Where the two share a bucket they are refused together and
+# the second link costs nothing; where the listing does not hold Argon, the
+# catalog retires it and the seat is Flash's. A seat without a level would
+# take medium, which was measured for neither, and Flash's other levels share
+# Flash's quota, so none of them follows it.
 #
 # The three prompts are not here. They are the strategy itself, not a CLI
 # detail, so they live in src/council/prompts.ts and changing them changes the
@@ -451,7 +460,7 @@ council:
     seats:
       - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
-      - { family: google,       models: [antigravity-gemini-flash-high] }
+      - { family: google,       models: [antigravity-gemini-argon-high, antigravity-gemini-flash-high] }
     # The judge may also be a member, as karpathy/llm-council's chairman is
     # (judge_allow_member: true since 2026-10-08). The seat-apart rule it
     # replaces guarded against a synthesizer weighing its own answer, and
@@ -507,7 +516,7 @@ council:
     seats:
       - { family: anthropic,    models: [claude-fable, claude-opus, claude-sonnet] }
       - { family: openai,       models: [codex-gpt-6-astra, codex-gpt-5.6-sol, codex-gpt-6-luna] }
-      - { family: google,       models: [antigravity-gemini-flash-high] }
+      - { family: google,       models: [antigravity-gemini-argon-high, antigravity-gemini-flash-high] }
     judge: { family: best-available, models: [claude-opus, codex-gpt-6.1-sol, codex-gpt-5.6-terra] }
     judge_allow_member: true    # as the reference panel: the judge may be a member
     judge_blind: true           # it sees the labels, never the real model names; the client gets the detail

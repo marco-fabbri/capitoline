@@ -385,7 +385,7 @@ Seating happens in two steps, and both are needed:
 - **Before the call**, the seat takes the first model of its chain that the health and quota state reports available. Fable paused until Friday is skipped without spending a call to discover it.
 - **After an unforeseen refusal**, the seat steps down the chain once and retries. The first refusal of any window is by definition not in the state yet, so without this a deliberation fails whenever a quota turns over mid-flight; with a single step it cannot cascade through the whole chain.
 
-Default seats: Anthropic, OpenAI and Google, the last on Gemini 3.8 Flash at the high level, the rung measured against Gemini Pro once Pro left the listing. Open weights through `gpt-oss-120b` on Antigravity was the fourth until 2026-10-18. Watch for one model reachable through two channels — `claude-opus` and `antigravity-claude-opus` are one opinion in two seats.
+Default seats: Anthropic, OpenAI and Google, the last on Gemini 4 Argon at the high level, measured on 2026-10-25, with Gemini 3.8 Flash at the high level behind it, the rung measured against Gemini Pro once Pro left the listing; Argon's quota is its own where it is not part of the Gemini bucket, so the second link is a real fallback. Open weights through `gpt-oss-120b` on Antigravity was the fourth until 2026-10-18. Watch for one model reachable through two channels — `claude-opus` and `antigravity-claude-opus` are one opinion in two seats.
 
 ### 12.3 The judge
 

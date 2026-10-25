@@ -35,6 +35,12 @@ no registered answers: the peers' blind ranking is a credible sign of which
 rung was wrong. Where all three rungs are right, the ranking reflects
 presentation, not correctness, and should not be read as a verdict.
 
+Re-run on 2026-10-25 with Gemini 4 Argon in the place Pro held
+(`docs/measurements/2026-10-25-argon/`), the same questions gave the same
+picture: the top two rungs correct, the bottom one wrong on three of six and
+ranked last each time. It is the use the last section describes: a new model,
+and the questions already registered.
+
 ## Declaring a ladder
 
 Add one of the blocks below to the host overlay (`/etc/capitoline/overlay.yaml`,
@@ -75,15 +81,18 @@ The rules every ladder follows, and why:
 Antigravity serves each Gemini model at several reasoning levels with the
 level fixed in the model id, which makes these the cleanest rungs: one model
 at two levels, and a bigger one above them. This is the ladder of the
-2026-09-23 measurement.
+2026-09-23 measurement, with Gemini 4 Argon where Gemini Pro was (the
+2026-10-25 re-run). Where a listing does not hold Argon yet, the three Flash
+levels are the ladder: drop the Argon rung and seat
+`antigravity-gemini-flash-medium` between the other two.
 
 ```yaml
 council:
   capitoline-gemini:
     seats:
-      - { family: flash-high,   models: [antigravity-gemini-flash-high] }
-      - { family: flash-medium, models: [antigravity-gemini-flash-medium] }
-      - { family: flash-low,    models: [antigravity-gemini-flash-low] }
+      - { family: argon-high, models: [antigravity-gemini-argon-high] }
+      - { family: flash-high, models: [antigravity-gemini-flash-high] }
+      - { family: flash-low,  models: [antigravity-gemini-flash-low] }
     judge: { family: best-available, models: [codex-gpt-6-astra, claude-fable, claude-opus, codex-gpt-5.6-sol] }
     judge_allow_member: false
     judge_blind: true

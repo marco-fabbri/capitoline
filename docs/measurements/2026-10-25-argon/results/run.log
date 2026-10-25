@@ -1,0 +1,6 @@
+capitoline-argon  tcp-keepalive  113s  calls=7  tokens=81048  judge=claude-opus
+capitoline-argon  rf2-node-failure  86s  calls=7  tokens=66319  judge=claude-opus
+capitoline-argon  subnet-27  78s  calls=7  tokens=61952  judge=claude-opus
+capitoline-argon  ipv4-regex  240s  calls=7  tokens=100256  judge=claude-opus
+capitoline-argon  ec-backup-6-nodes  85s  calls=7  tokens=65702  judge=claude-opus
+capitoline-argon  rf3-min-nodes  92s  calls=7  tokens=74380  judge=claude-opus

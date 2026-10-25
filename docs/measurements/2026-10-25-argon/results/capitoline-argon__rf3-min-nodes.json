@@ -1,0 +1,135 @@
+{
+  "id": "chatcmpl-7105ee0d-8383-4fc3-a5ce-4b4c5580e262",
+  "object": "chat.completion",
+  "created": 1792908114,
+  "model": "capitoline-argon",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "# Minimum nodes for Nutanix RF3: 5\n\nA Nutanix cluster needs at least **5 nodes** to run Redundancy Factor 3 (shown in Prism as Fault Tolerance 2, or FT2) and survive two simultaneous node failures.\n\nThree copies of user data only need three nodes. The limit is set by the cluster's consensus and metadata services, not by the user data copies.\n\n## Why 5\n\n### 1. Metadata runs at RF5 and uses majority quorum (Cassandra / Medusa)\n\n- Under RF3, the distributed metadata ring raises its own replication to **5 copies**. This metadata records where extents live and maps logical to physical locations.\n- Each metadata copy must sit on a different node, so you need **at least 5 nodes** just to place them.\n- Metadata reads and writes use Paxos-based quorum, which needs a strict majority: ⌊5/2⌋ + 1 = **3**. If 2 of 5 nodes fail, 3 replicas remain, and metadata I/O continues without risk of split-brain.\n\n### 2. Cluster configuration quorum (ZooKeeper / Zeus)\n\n- ZooKeeper stores cluster configuration, membership and leader election. Under FT2 it runs as a **5-member ensemble**.\n- To tolerate F failures, a consensus group needs **2F + 1** members. For F = 2, that is 5.\n- Here is how smaller clusters fare when two nodes fail:\n\n| Nodes | Left after 2 failures | Strict majority? |\n|---|---|---|\n| 3 | 1 (1/3) | No |\n| 4 | 2 (2/4, a tie) | No, so 4 nodes only tolerate 1 failure |\n| 5 | 3 (3/5) | Yes |\n\n### 3. User data availability (Stargate)\n\n- RF3 keeps 3 copies of every extent, each on a different node.\n- If any 2 nodes fail, at least 1 copy of every extent survives, so no data is lost and everything stays readable.\n- With 3 nodes left, the cluster can still place 3 node-distinct copies of new writes. On a 4-node cluster, only 2 nodes would remain, which is not enough.\n\n## Surviving is not the same as self-healing\n\nFive nodes is the minimum to **stay online** through two simultaneous failures. After those failures, the 3 remaining nodes run in a **degraded state**:\n\n- **User data:** extents can be re-protected to 3 copies across the 3 survivors, as long as there is enough free capacity.\n- **Metadata:** it cannot return to RF5, because that needs 5 distinct nodes.\n- **Result:** the cluster is not back to full FT2 protection until the failed nodes are repaired or replaced.\n\nTo lose two nodes and still rebuild metadata to RF5 without replacing anything, you would need 5 surviving nodes. That means starting with **7**.\n\n## Summary\n\nThe requirement is 5 nodes because both the RF5 metadata ring and the ZooKeeper ensemble need a 3-of-5 majority to keep working after two nodes fail."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 61915,
+    "completion_tokens": 12465,
+    "total_tokens": 74380
+  },
+  "capitoline": {
+    "provider": "capitoline",
+    "ignored": [],
+    "council": {
+      "deliberationId": "0acbaa56-ce7e-4918-904b-0cef514a5864",
+      "strategyVersion": 2,
+      "shape": "ranked",
+      "members": [
+        {
+          "family": "argon-high",
+          "model": "antigravity-gemini-argon-high",
+          "label": "Response B",
+          "answer": "A Nutanix cluster requires a minimum of **5 nodes** to run with **Redundancy Factor 3 (RF3)** (also referred to in Nutanix Prism as **Fault Tolerance 2 / FT2**) and tolerate two simultaneous node failures.\n\nWhile storing 3 copies of user data only requires 3 physical locations in theory, a distributed hyperconverged cluster cannot function on 3 or 4 nodes when 2 nodes fail. The requirement for **5 nodes** comes down to three architectural requirements in Nutanix AOS: **cluster quorum (ZooKeeper)**, **metadata consensus (Cassandra)**, and **continued RF3 write availability (Stargate)**.\n\n---\n\n### 1. Cluster Quorum and Split-Brain Prevention (Apache ZooKeeper)\nNutanix uses Apache ZooKeeper to store cluster-wide configuration and state (hosts, IPs, disk mappings, storage containers, etc.). Distributed consensus protocols require a **strict majority (quorum)** of voting members to remain online to elect leaders and prevent split-brain scenarios.\n\nThe formula for the minimum number of voting nodes $N$ needed to tolerate $F$ failures is:\n$$N = 2F + 1$$\n\n* For **RF2 ($F = 1$ failure)**: $2(1) + 1 = 3$ ZooKeeper nodes (quorum is 2 of 3).\n* For **RF3 ($F = 2$ failures)**: $2(2) + 1 = \\mathbf{5}$ ZooKeeper nodes (quorum is 3 of 5).\n\nWhy fewer nodes fail:\n* **With 3 nodes:** Losing 2 nodes leaves 1 node ($1/3$), which is not a majority.\n* **With 4 nodes:** Losing 2 nodes leaves 2 nodes ($2/4 = 50\\%$), which is a tie, not a strict majority (a 4-node quorum requires 3 nodes, so 4 nodes can only tolerate 1 failure).\n* **With 5 nodes:** Losing 2 nodes leaves **3 nodes** ($3/5 = 60\\%$), preserving a strict majority so the cluster stays online.\n\n---\n\n### 2. Distributed Metadata Replication Factor of 5 (Apache Cassandra / Medusa)\nNutanix stores distributed storage metadata (where data extents live, logical-to-physical mappings, etc.) in a modified Apache Cassandra ring running across the Controller VMs (CVMs). \n\nUnlike user data, Cassandra metadata reads and writes use **Paxos consensus (`QUORUM`)** to guarantee strict consistency:\n* In an **RF2** cluster, metadata has a replication factor of **3** (requiring 2 of 3 replicas to respond for a quorum read/write).\n* In an **RF3** cluster, metadata is actually replicated **5 times (RF5)** across 5 distinct nodes.\n\nBecause metadata operations require a strict majority of replicas to agree before an I/O operation can proceed, tolerating 2 simultaneous node failures ($F = 2$) means the metadata layer must still have a majority of replicas online. With **5 metadata replicas across 5 nodes**, losing 2 nodes leaves **3 metadata replicas online** ($3/5$), satisfying Cassandra's Paxos quorum. Since two replicas of the same metadata cannot be placed on the same node, the ring must have at least **5 nodes**.\n\n---\n\n### 3. User Data Availability and Ongoing RF3 Writes (Stargate)\nFor guest VM data (Oplog and Extent Store managed by Stargate), RF3 maintains **3 copies** of every piece of data on 3 different nodes:\n* **Surviving the failure:** When 2 nodes fail simultaneously, at least **1 copy** of every data extent is guaranteed to remain intact on one of the surviving nodes ($3 - 2 = 1$), so all data remains readable.\n* **Continuing RF3 writes and self-healing:** With 5 nodes initially, losing 2 nodes leaves **3 surviving nodes**. Having 3 surviving nodes means the cluster still has enough distinct physical nodes to continue writing **3 separate copies** for *new* incoming writes (and to re-protect/rebuild data back to 3 copies, assuming sufficient free storage capacity on the surviving 3 nodes). If the cluster only had 4 nodes and lost 2, only 2 nodes would remain—making it impossible to place 3 node-distinct copies of new or rebuilt data.\n\n---\n\n### Summary Table\n\n| Component | Copies / Instances in RF2 (FT1) | Copies / Instances in RF3 (FT2) | Surviving After 2 Failures (in 5-Node RF3) | Why 5 Nodes Are Required |\n| :--- | :--- | :--- | :--- | :--- |\n| **ZooKeeper** (Cluster Config) | 3 | **5** | 3 of 5 | Needs strict majority ($>50\\%$) to maintain cluster quorum. |\n| **Cassandra** (Metadata) | 3 | **5** | 3 of 5 | Uses Paxos quorum; needs 3 of 5 replicas online to read/write metadata. |\n| **Stargate** (User Data) | 2 | **3** | At least 1 copy of existing data; 3 nodes left for new writes | Needs $\\ge 1$ surviving copy to read existing data and $\\ge 3$ surviving nodes to write new RF3 data. |\n"
+        },
+        {
+          "family": "flash-high",
+          "model": "antigravity-gemini-flash-high",
+          "label": "Response C",
+          "answer": "The minimum number of nodes a Nutanix cluster needs to run with Redundancy Factor 3 (RF3) is **5 nodes**.\n\n---\n\n### Why 5 Nodes?\n\nThe requirement is driven primarily by **cluster quorum and distributed metadata architecture**, rather than just raw user data copies:\n\n#### 1. Metadata Replication (Metadata RF5) and Majority Quorum\n* **Metadata vs. User Data:** While user data under RF3 maintains 3 copies across separate nodes, Nutanix’s distributed metadata service (Cassandra) automatically increases its redundancy factor to **5 (Metadata RF5)**.\n* **Failure Domain Isolation:** Each of the 5 metadata copies must reside on a distinct physical node to ensure fault independence. Therefore, at least 5 physical nodes are required simply to place the 5 copies.\n* **Majority Quorum to Prevent Split-Brain:** Distributed consensus requires a strict majority:\n  $$\\text{Quorum} = \\left\\lfloor \\frac{N}{2} \\right\\rfloor + 1 = \\left\\lfloor \\frac{5}{2} \\right\\rfloor + 1 = 3$$\n  If two nodes fail simultaneously in a 5-node cluster, **3 nodes remain active**, maintaining the necessary 3-of-5 majority to continue servicing reads and writes safely without split-brain conditions. A 4-node cluster could not place 5 replicas, and a 4-node cluster losing 2 nodes would leave only 2 nodes (50%), which cannot establish a quorum.\n\n#### 2. Cluster Configuration Management (ZooKeeper / Zeus)\n* Nutanix uses ZooKeeper (the *Zeus* service) for cluster configuration, leader elections, and membership tracking.\n* In an RF3 cluster, the ZooKeeper ensemble runs across 5 nodes. Like Cassandra, a 5-node ZooKeeper ensemble requires 3 active members to maintain quorum, allowing it to survive 2 node outages.\n\n#### 3. Data Availability (Stargate)\n* RF3 stores 3 copies of every data extent across 3 different nodes.\n* If 2 nodes fail simultaneously, at least 1 copy of every data block is guaranteed to survive on an active node, ensuring no data loss.\n\n---\n\n### Important Distinction: Surviving vs. Self-Healing\n* **5 nodes** is the minimum to **tolerate** (remain online and operational during) 2 simultaneous node failures.\n* In a 5-node cluster that loses 2 nodes, the remaining 3 nodes will operate in a **degraded state**. The cluster cannot restore metadata back to RF5 or rebuild full RF3 redundancy until the failed nodes are restored or replaced, because Metadata RF5 requires 5 distinct physical nodes. (To fully *self-heal* back to RF3 after losing 2 nodes without replacing them, a cluster would require at least 7 nodes initially).\n"
+        },
+        {
+          "family": "flash-low",
+          "model": "antigravity-gemini-flash-low",
+          "label": "Response A",
+          "answer": "The minimum number of nodes required for a Nutanix cluster configured with **Redundancy Factor 3 (RF3)** to tolerate two simultaneous node failures is **5 nodes**.\n\n---\n\n### Why 5 Nodes?\n\nThe requirement comes down to two distinct layers of the Nutanix architecture: **data redundancy (storage)** and **metadata/consensus quorum (Cassandra/Zookeeper/Paxos)**.\n\n#### 1. Cluster Metadata and Distributed Consensus (Quorum)\n* Nutanix uses a distributed metadata service (Cassandra modified with Paxos consensus) to track the state and location of all data across the cluster.\n* To tolerate the loss of $N$ nodes simultaneously, a consensus system requires a strict majority ($> 50\\%$) of the remaining nodes to form a quorum and make decisions. The general formula to tolerate $F$ simultaneous failures is:\n  $$\\text{Nodes} \\ge 2F + 1$$\n* For two simultaneous node failures ($F = 2$):\n  $$2(2) + 1 = 5 \\text{ nodes}$$\n* If a cluster only had 4 nodes and 2 failed, only 2 out of 4 nodes (50%) would remain. Since 50% is not a strict majority, the cluster would lose quorum, metadata operations would halt, and the storage cluster would become unavailable (read-only or offline). With 5 nodes, if 2 fail, 3 nodes (60%) remain, maintaining a strict majority quorum.\n\n#### 2. Data Redundancy and Replication Factor\n* Under RF3, the Distributed Storage Fabric (DSF) maintains **3 copies** of every data block (extent group).\n* Each of the 3 copies must reside on a separate physical node to ensure fault tolerance.\n* Therefore, the baseline minimum for writing data under RF3 is **3 nodes**. \n* However, if 2 nodes were to fail simultaneously from a 3- or 4-node cluster:\n  * In a 3-node cluster, 2 failures leave 1 node. It is impossible to maintain distributed copies, and quorum is lost.\n  * In a 4-node cluster, 2 failures leave 2 nodes, which cannot maintain quorum, nor could the cluster re-replicate back to an RF3 state.\n* In a 5-node cluster, after losing 2 nodes, 3 nodes remain active. These 3 remaining nodes satisfy both:\n  1. Metadata quorum ($3/5 > 50\\%$).\n  2. The minimum node count required to hold 3 distinct copies of any newly written data or rebuild critical extents back to an RF3 configuration.\n\n---\n\n### Summary\n* **Minimum Node Count:** **5 nodes**\n* **Reasoning:** While storage data replication factor 3 technically requires 3 independent targets to store 3 copies of data, distributed consensus and metadata quorum require a strict majority ($2F + 1$). To survive $F = 2$ simultaneous node failures without losing quorum or write capability, the cluster must have at least $2(2) + 1 = 5$ nodes.\n"
+        }
+      ],
+      "lost": [],
+      "rankings": [
+        {
+          "by": "antigravity-gemini-argon-high",
+          "ranking": [
+            {
+              "label": "Response B",
+              "rank": 1,
+              "reason": "Provides the most complete and technically precise explanation by separating all three relevant Nutanix AOS layers (5-node ZooKeeper quorum, Cassandra's RF5 Paxos metadata quorum, and Stargate's requirement for 3 surviving nodes to continue writing 3 data copies)."
+            },
+            {
+              "label": "Response C",
+              "rank": 2,
+              "reason": "Accurately details Cassandra's Metadata RF5, the 5-node ZooKeeper (Zeus) ensemble, and Stargate user data availability, while adding useful context on why restoring full metadata redundancy after two permanent failures requires more than 5 nodes."
+            },
+            {
+              "label": "Response A",
+              "rank": 3,
+              "reason": "Correctly identifies 5 nodes and explains the general 2F + 1 quorum math and 3-node surviving storage requirement, but conflates Cassandra and ZooKeeper without explaining that Nutanix increases metadata replication to RF5 under RF3."
+            }
+          ]
+        },
+        {
+          "by": "antigravity-gemini-flash-high",
+          "ranking": [
+            {
+              "label": "Response C",
+              "rank": 1,
+              "reason": "Accurately explains that 5 nodes are required because Cassandra metadata scales to RF5 across distinct nodes, and correctly notes that surviving two failures leaves the cluster in a degraded state unable to fully self-heal."
+            },
+            {
+              "label": "Response B",
+              "rank": 2,
+              "reason": "Offers strong architectural breakdowns across ZooKeeper, Cassandra RF5, and Stargate, but misleadingly implies the surviving three nodes can rebuild full cluster redundancy."
+            },
+            {
+              "label": "Response A",
+              "rank": 3,
+              "reason": "Relies on generic consensus formulas without explaining that metadata scales to RF5 requiring 5 distinct physical hosts, and incorrectly claims three surviving nodes can rebuild back to an RF3 configuration."
+            }
+          ]
+        },
+        {
+          "by": "antigravity-gemini-flash-low",
+          "ranking": [
+            {
+              "label": "Response C",
+              "rank": 1,
+              "reason": "It correctly identifies that Cassandra metadata scales to RF5 (requiring 5 distinct nodes for placement), details ZooKeeper/Zeus and Stargate data survivability, and accurately clarifies the critical architectural nuance that a 5-node cluster survives in a degraded state and cannot self-heal back to RF5 without node replacement."
+            },
+            {
+              "label": "Response B",
+              "rank": 2,
+              "reason": "It provides a very detailed breakdown of ZooKeeper, Cassandra RF5 metadata, and Stargate components with a clear summary table, though it mistakenly implies that 3 surviving nodes could re-protect and rebuild the cluster back to full RF3/FT2 redundancy."
+            },
+            {
+              "label": "Response A",
+              "rank": 3,
+              "reason": "While it reaches the correct number (5 nodes) and explains quorum consensus well, it completely misses the crucial Nutanix architectural fact that metadata is replicated 5 times (RF5) under RF3, incorrectly treating metadata replication as being 3 copies."
+            }
+          ]
+        }
+      ],
+      "aggregate": [
+        {
+          "label": "Response C",
+          "averageRank": 1.333,
+          "votes": 3
+        },
+        {
+          "label": "Response B",
+          "averageRank": 1.667,
+          "votes": 3
+        },
+        {
+          "label": "Response A",
+          "averageRank": 3,
+          "votes": 3
+        }
+      ],
+      "judge": {
+        "model": "claude-opus",
+        "blind": true
+      },
+      "calls": 7
+    }
+  }
+}
