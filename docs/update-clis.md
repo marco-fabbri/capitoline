@@ -54,6 +54,9 @@ procedure below, which a person runs.
 | Codex CLI (`codex`) | 0.163.0 | 2026-10-18 | the script stopped the first attempt: three features newly on by default (`cli_daybreak`, `api_key_cyber_access_programs`, `code_mode_interrupt`), none a tool of `codex exec`, all now switched off in `providers.codex.args`; second attempt passed, three images and the tool probe included; `codex debug models` no longer lists `gpt-5.5`, retired on 2026-10-14, and the fixture was re-captured |
 | Antigravity CLI (`agy`) | 1.4.2 | 2026-10-18 | updated from 1.3.4 with `scripts/update-cli.sh`; three check images passed, a command request is still refused, self-update still off; `agy models` unchanged (Opus 5.5 and Sonnet 5.5 not listed); the changelog since 1.3.4 touches neither images nor print mode beyond retries and subagent questions skipped in `-p` runs |
 | Claude Code (`claude`) | 2.1.309 | 2026-10-23 | updated from 2.1.302 with scripts/update-cli.sh, right after the runner's login was renewed; smoke test passed |
+| Claude Code (`claude`) | 2.1.310 | 2026-10-25 | updated from 2.1.309 with scripts/update-cli.sh; smoke test passed. The first attempt was rolled back because Codex, out of its weekly limit, failed the same smoke test; since then only the updated CLI's model decides it |
+| Antigravity CLI (`agy`) | 1.4.7 | 2026-10-25 | updated from 1.4.2 with `scripts/update-cli.sh`, once the gateway admitted the image hand-off in its new shape (below); three check images passed, a command request is still refused, self-update still off. `agy models` adds Gemini 4 Argon and Claude Opus 5.5 and Sonnet 5.5, each at three levels, and drops Claude Opus 4.6 and Sonnet 4.6 |
+| Codex CLI (`codex`) | 0.163.0 | 2026-10-25 | 0.164.0 not installed: the subscription's weekly limit was used up, and the update's checks need Codex to answer |
 
 Add a row for every update, newest last.
 
@@ -71,6 +74,16 @@ agent waits for it with (a timer, and listing its subagents), and the
 conversation the subagent keeps is forgotten with the run's. When an update touches images, read `agy changelog`
 before trusting a passing image; the update script now asks for three in a
 row, since one passes half the time when the agent goes wrong one run in two.
+
+**The hand-off changed shape again on 2026-10-22**, on the service's side:
+1.4.2 and 1.4.7 alike announce it first as a plain tool step,
+`invoke_subagent` with the subagent's type in its parameters, and only the
+step's DONE update is a subagent step. The guard judges a step at its first
+sighting, so every image request ended `unexpected tool call:
+invoke_subagent` until the gateway read the type from the parameters too
+(`test/fixtures/antigravity/image-subagent-tool-step.jsonl`). The update
+script caught it: the restored version failed the same image check, which is
+how a change on the service's side shows.
 
 ## The model lists
 

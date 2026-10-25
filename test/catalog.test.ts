@@ -51,8 +51,9 @@ describe("reading the listings", () => {
     expect(() => codexAdapter.listModels!(`{"models": null}`, cfg.providers.codex)).toThrow(/no models array/);
   });
   it("reads `agy models`, one id per tab-separated line, and skips anything else", () => {
-    // Six since 2026-10-13: Gemini 3.8 Flash at three levels, two Claude models and GPT-OSS.
-    expect(agyListed()).toHaveLength(6);
+    // Thirteen since 2026-10-25: Gemini 4 Argon, Gemini 3.8 Flash, Claude Opus
+    // 5.5 and Claude Sonnet 5.5 at three levels each, and GPT-OSS at one.
+    expect(agyListed()).toHaveLength(13);
     expect(antigravityAdapter.listModels!(`Fetching available models...\ngemini-9-flash-high\tGemini 9 Flash (High)\n\n`, cfg.providers.antigravity)).toEqual([{ id: "gemini-9-flash-high" }]);
   });
 });
@@ -92,15 +93,16 @@ describe("the catalog of one provider", () => {
     expect(p.applyListing(withoutHigh).removed).toEqual(["antigravity-gemini-flash-high"]);
     const withoutFlash = agyListed().filter((m) => !m.id.startsWith("gemini-3.8-flash"));
     expect(p.applyListing(withoutFlash).removed).toEqual(expect.arrayContaining(["antigravity-gemini-flash", "antigravity-gemini-flash-low", "antigravity-gemini-flash-medium", "antigravity-image"]));
-    // No health_fallback: the probe moves to the first text model still served.
-    expect(p.healthModel).toBe("antigravity-gpt-oss");
+    // No health_fallback: the probe moves to the first text model still served,
+    // in the order the configuration declares them.
+    expect(p.healthModel).toBe("antigravity-gemini-argon");
   });
   it("moves the health probe to a discovered model when nothing declared is left, and back when its own returns", () => {
     const p = antigravity();
-    const change = p.applyListing([{ id: "gemini-4-argon-high" }]);
-    expect(change.added).toEqual(["antigravity-gemini-4-argon-high"]);
-    expect(p.healthModel).toBe("antigravity-gemini-4-argon-high");
-    expect(p.healthCliId).toBe("gemini-4-argon-high");
+    const change = p.applyListing([{ id: "gemini-5-xenon-high" }]);
+    expect(change.added).toEqual(["antigravity-gemini-5-xenon-high"]);
+    expect(p.healthModel).toBe("antigravity-gemini-5-xenon-high");
+    expect(p.healthCliId).toBe("gemini-5-xenon-high");
     p.applyListing(agyListed());
     expect(p.healthModel).toBe("antigravity-gemini-flash");
   });

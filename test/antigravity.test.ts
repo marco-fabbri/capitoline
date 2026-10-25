@@ -16,6 +16,8 @@ const flash = models.find((m) => m.name === "antigravity-gemini-flash")!;
 // left the listing (2026-10-13): what the nearest-level rule is about.
 const pro = modelSpecs("antigravity", { ...cfg, models: { "test-pro": { cli_model: "gemini-test-pro", effort_suffix: true, efforts: ["low", "high"], kind: "text" } } })[0];
 const opus = models.find((m) => m.name === "antigravity-claude-opus")!;
+// A fixed-level alias: the level is in cli_model already, so nothing is added.
+const fixed = models.find((m) => m.name === "antigravity-gemini-argon-high")!;
 async function* linesOf(path: string) { for (const l of readFileSync(path, "utf8").split("\n")) yield l; }
 async function events(src: AsyncIterable<string>) { const out: AdapterEvent[] = []; for await (const e of antigravityAdapter.parse(src)) out.push(e); return out; }
 
@@ -31,8 +33,11 @@ describe("antigravity adapter", () => {
     expect(c.args[c.args.indexOf("--model") + 1]).toBe("gemini-test-pro-high");
   });
   it("leaves the id alone for models without an effort suffix and prepends the system prompt", () => {
-    const c = antigravityAdapter.buildCommand(cfg, opus, { model: "antigravity-claude-opus", stream: true, messages: [{ role: "system", text: "S" }, { role: "user", text: "q" }] });
-    expect(c.args[c.args.indexOf("--model") + 1]).toBe("claude-opus-4-6-thinking");
+    const c = antigravityAdapter.buildCommand(cfg, fixed, { model: "antigravity-gemini-argon-high", stream: true, effort: "low", messages: [{ role: "system", text: "S" }, { role: "user", text: "q" }] });
+    expect(c.args[c.args.indexOf("--model") + 1]).toBe("gemini-4-argon-high");
+    // Claude through Antigravity is listed with its level in the id, as Gemini is.
+    const o = antigravityAdapter.buildCommand(cfg, opus, { model: "antigravity-claude-opus", stream: true, effort: "high", messages: [{ role: "user", text: "q" }] });
+    expect(o.args[o.args.indexOf("--model") + 1]).toBe("claude-opus-5-5-high");
     expect(JSON.parse(c.stdin).message.content).toBe("System instructions:\nS\n\nq");
   });
   it("puts the standing preamble in front of every text run, and in front of the client's own system prompt", () => {
@@ -152,8 +157,8 @@ describe("antigravity adapter", () => {
   });
   it("adds the effort flag as well when the provider declares one", () => {
     const withFlag = { ...cfg, effort_flag: "--effort" };
-    const c = antigravityAdapter.buildCommand(withFlag, opus, { model: "antigravity-claude-opus", stream: true, effort: "low", messages: [{ role: "user", text: "q" }] });
-    expect(c.args.slice(cfg.args.length)).toEqual(["--model", "claude-opus-4-6-thinking", "--effort", "low"]);
+    const c = antigravityAdapter.buildCommand(withFlag, fixed, { model: "antigravity-gemini-argon-high", stream: true, effort: "low", messages: [{ role: "user", text: "q" }] });
+    expect(c.args.slice(cfg.args.length)).toEqual(["--model", "gemini-4-argon-high", "--effort", "low"]);
   });
   it("leaves a suffixed model with one carrier of the effort even when a flag is declared", () => {
     // The level is already inside the model id, so the flag added to the file

@@ -64,8 +64,17 @@ prices:
     antigravity-gemini-flash-high:   { input: 0.75, cached_input: 0.075, output: 3.75 }
     antigravity-gemini-flash-medium: { input: 0.75, cached_input: 0.075, output: 3.75 }
     antigravity-gemini-flash-low:    { input: 0.75, cached_input: 0.075, output: 3.75 }
-    antigravity-claude-opus:   { input: 5, cached_input: 0.50, output: 25 }
-    antigravity-claude-sonnet: { input: 3, cached_input: 0.30, output: 15 }
+    # Gemini 4 Argon, read on 2026-10-14: one rate across the whole context,
+    # no explicit caching. They double on 2026-12-01 (input 4, cached 0.20,
+    # output 20): reread them then.
+    antigravity-gemini-argon:        { input: 2, cached_input: 0.10, output: 10 }
+    antigravity-gemini-argon-high:   { input: 2, cached_input: 0.10, output: 10 }
+    antigravity-gemini-argon-medium: { input: 2, cached_input: 0.10, output: 10 }
+    antigravity-gemini-argon-low:    { input: 2, cached_input: 0.10, output: 10 }
+    # Opus 5.5 and Sonnet 5.5, the models claude-opus and claude-sonnet reach
+    # today: the same vendor price.
+    antigravity-claude-opus:   { input: 4, cached_input: 0.20, output: 20 }
+    antigravity-claude-sonnet: { input: 2, cached_input: 0.20, output: 10 }
 
 providers:
   claude:
@@ -321,11 +330,20 @@ providers:
     quota: { args: [--output-format, json, -p, /usage] }
     models:
       # effort is part of the model id: <base>-<effort>
-      # The one Gemini the listing has held since 2026-10-13, when Gemini 3.1
-      # Pro and the 3.6 and 3.7 Flash models left it. Gemini 4 Argon reaches
-      # plans in stages (on 2026-10-18 the picker read "available to Ultra and
-      # paid Pro plan subscribers"); a newer one the subscription gains is
-      # exposed by discovery as antigravity-<id>, with nothing to configure.
+      # Gemini 4 Argon, at the three levels `agy models` lists it at. It
+      # reaches plans in stages (on 2026-10-18 the picker read "available to
+      # Ultra and paid Pro plan subscribers"): where the listing does not hold
+      # it yet, the daily catalog retires these four names by itself, and
+      # serves them again the day it appears. The fixed levels are the same
+      # aliases as Flash's below, for the same reasons.
+      antigravity-gemini-argon:        { cli_model: gemini-4-argon, effort_suffix: true }
+      antigravity-gemini-argon-high:   { cli_model: gemini-4-argon-high,   effort_suffix: false }
+      antigravity-gemini-argon-medium: { cli_model: gemini-4-argon-medium, effort_suffix: false }
+      antigravity-gemini-argon-low:    { cli_model: gemini-4-argon-low,    effort_suffix: false }
+      # Gemini 3.8 Flash, in the listing since 2026-10-13, when Gemini 3.1 Pro
+      # and the 3.6 and 3.7 Flash models left it. A newer Gemini the
+      # subscription gains is exposed by discovery as antigravity-<id>, with
+      # nothing to configure.
       antigravity-gemini-flash:     { cli_model: gemini-3.8-flash, effort_suffix: true }
       # The same model with the reasoning level fixed in the id rather than
       # chosen per request (effort_suffix: false): what a rung of a capability
@@ -339,15 +357,20 @@ providers:
       antigravity-gemini-flash-medium: { cli_model: gemini-3.8-flash-medium, effort_suffix: false }
       antigravity-gemini-flash-low:    { cli_model: gemini-3.8-flash-low,    effort_suffix: false }
       # Seated in no council since 2026-10-18: it leaves Antigravity on
-      # 2026-11-02, with the two Claude models below leaving the plans that do
-      # not include them, and the catalog retires all three that day by
-      # itself. Until then they answer when asked by name. `agy models` lists
-      # this family at one effort only (gpt-oss-120b-medium), so `efforts` pins it: with the
+      # 2026-11-02, and the catalog retires it that day by itself. Until then
+      # it answers when asked by name. `agy models` lists this family at one
+      # effort only (gpt-oss-120b-medium), so `efforts` pins it: with the
       # provider's whole table open, a request asking for `high` would build
       # the model id `gpt-oss-120b-high`, which the CLI does not know.
       antigravity-gpt-oss:          { cli_model: gpt-oss-120b,     effort_suffix: true, efforts: [medium] }
-      antigravity-claude-sonnet:    { cli_model: claude-sonnet-4-6 }
-      antigravity-claude-opus:      { cli_model: claude-opus-4-6-thinking }
+      # Claude Opus 5.5 and Sonnet 5.5, listed at the same three levels as the
+      # Gemini models, on the paid plans that include them; the 4.6 models
+      # these two names reached before left the listing. Not seated in a
+      # council: the same opinion as the Anthropic seat, through another
+      # channel (council section). They draw on Antigravity's other quota
+      # group, not on the Gemini one.
+      antigravity-claude-sonnet:    { cli_model: claude-sonnet-5-5, effort_suffix: true }
+      antigravity-claude-opus:      { cli_model: claude-opus-5-5,   effort_suffix: true }
       # kind: image → served by /v1/images/generations and the generate_image MCP tool
       antigravity-image:            { cli_model: gemini-3.8-flash-low, kind: image, timeout_s: 240 }
       # gpt-oss-120b-medium is not repeated here: `antigravity-gpt-oss` above is pinned
@@ -447,8 +470,9 @@ council:
     # subscriptions' limits, and a synthesis by Fable has not been measured to
     # be better than one by Opus. The rest of the chain answers when no Claude
     # can: OpenAI's models, neither of them in a seat. Opus 4.6 through the
-    # Google subscription stood second until 2026-10-18, and leaves the plans
-    # that do not include it on 2026-11-02.
+    # Google subscription stood second until 2026-10-18 and has since left
+    # Antigravity's listing; antigravity-claude-opus now reaches Opus 5.5
+    # there, and is not in the chain.
     #
     # Not used, although they sit in no seat: claude-opus-1m and its siblings
     # are the same model as a seated one with a wider context, and would add
