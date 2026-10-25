@@ -56,7 +56,7 @@ procedure below, which a person runs.
 | Claude Code (`claude`) | 2.1.309 | 2026-10-23 | updated from 2.1.302 with scripts/update-cli.sh, right after the runner's login was renewed; smoke test passed |
 | Claude Code (`claude`) | 2.1.310 | 2026-10-25 | updated from 2.1.309 with scripts/update-cli.sh; smoke test passed. The first attempt was rolled back because Codex, out of its weekly limit, failed the same smoke test; since then only the updated CLI's model decides it |
 | Antigravity CLI (`agy`) | 1.4.7 | 2026-10-25 | updated from 1.4.2 with `scripts/update-cli.sh`, once the gateway admitted the image hand-off in its new shape (below); three check images passed, a command request is still refused, self-update still off. `agy models` adds Gemini 4 Argon and Claude Opus 5.5 and Sonnet 5.5, each at three levels, and drops Claude Opus 4.6 and Sonnet 4.6 |
-| Codex CLI (`codex`) | 0.163.0 | 2026-10-25 | 0.164.0 not installed: the subscription's weekly limit was used up, and the update's checks need Codex to answer |
+| Codex CLI (`codex`) | 0.164.0 | 2026-10-25 | once the subscription answered again; the script stopped the first attempt: three features newly on by default (`bedrock_setup_wizard`, `incremental_tools`, `mcp_oauth_refresh_coordination`), none a tool of `codex exec`, all now switched off in `providers.codex.args`; second attempt passed, three images and the tool probe included; `codex debug models` lists the same models, one in another place |
 
 Add a row for every update, newest last.
 

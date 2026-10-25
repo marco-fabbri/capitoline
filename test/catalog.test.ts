@@ -40,7 +40,8 @@ const agyListed = (): ListedModel[] => antigravityAdapter.listModels!(AGY_LISTIN
 describe("reading the listings", () => {
   it("reads `codex debug models`: slugs, what the CLI hides, and the levels each serves", () => {
     const listed = codexListed();
-    expect(listed.map((m) => m.id)).toEqual(["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-reserve", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "codex-auto-review"]);
+    // In the CLI's own order, which moved gpt-6-luna behind gpt-reserve with 0.164.0.
+    expect(listed.map((m) => m.id)).toEqual(["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-reserve", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "codex-auto-review"]);
     // gpt-5.5 left the listing with Codex 0.163.0, after its retirement on 2026-10-14.
     expect(listed.filter((m) => m.hidden).map((m) => m.id)).toEqual(["gpt-reserve", "codex-auto-review"]);
     expect(listed.find((m) => m.id === "gpt-6-luna")!.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
