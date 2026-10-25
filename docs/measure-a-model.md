@@ -154,7 +154,8 @@ valid as the model tables change.
 
    It keeps every full response and appends each run's calls, tokens and wall
    time to `results/run.log`. The Cloudflare Access headers come from
-   `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`.
+   `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`, and a gateway key
+   from `CAPITOLINE_API_KEY`.
 3. **Score them.** For each rung and each question: correct, partial or
    wrong, against the registered answer. The 2026-09-23 `score.py` scores its
    three mechanically checkable questions and is a template for yours. For the

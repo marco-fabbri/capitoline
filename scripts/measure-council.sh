@@ -23,7 +23,8 @@
 # run.log in the output directory: the response itself does not carry the
 # time, and a measurement's reading counts it.
 #
-# The Cloudflare Access headers come from the same variables smoke.sh reads.
+# The Cloudflare Access headers and the gateway key come from the same
+# variables smoke.sh reads.
 set -euo pipefail
 [[ $# -ge 4 ]] || { echo "usage: $0 <base-url> <questions.json> <out-dir> <council>..." >&2; exit 2; }
 BASE="$1"; QUESTIONS="$2"; OUT="$3"; shift 3
@@ -31,6 +32,11 @@ mkdir -p "$OUT"
 HDR=()
 if [[ -n "${CF_ACCESS_CLIENT_ID:-}" ]]; then
   HDR=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET:?set both}")
+fi
+# A key the gateway issued, as smoke.sh takes it: what a host that requires
+# keys asks for, on loopback as through the tunnel.
+if [[ -n "${CAPITOLINE_API_KEY:-}" ]]; then
+  HDR+=(-H "Authorization: Bearer $CAPITOLINE_API_KEY")
 fi
 # Which real model each Claude alias resolved to at the start of the run:
 # the gateway names aliases, and a measurement read months later has to know
