@@ -270,6 +270,17 @@ describe("CliProvider.generateImage", () => {
       await vi.waitFor(() => expect(spy.captures).toHaveLength(3));
       expect(spy.captures.map((c) => c.args)).toEqual([[PARENT], ["forget", PARENT], ["forget", CHILD]]);
     });
+    // The same hand-off as the service has announced it since 2026-10-22: a
+    // tool step first, then the subagent step (antigravity.test.ts).
+    it("admits the hand-off announced as an invoke_subagent tool step", async () => {
+      const spy = spyRunner();
+      const run = join(process.cwd(), "test/fixtures/antigravity/image-subagent-tool-step.jsonl");
+      const parent = "06652d19-b0a0-41e4-9d8e-45b3b040e260", child = "f153151f-d203-4f3d-9f04-bb29b60642e8";
+      const ev = await generate(imageProvider(run, { ...today, forget: FORGET_OK }, spy));
+      expect(ev.map((e) => e.type)).toEqual(["image", "done"]);
+      await vi.waitFor(() => expect(spy.captures).toHaveLength(3));
+      expect(spy.captures.map((c) => c.args)).toEqual([[parent], ["forget", parent], ["forget", child]]);
+    });
     it("runs a request again, once, when the run made nothing, and never after a quota refusal", async () => {
       // Each attempt is its own CLI process: the spy counts them by their collect calls.
       const count = (spy: ReturnType<typeof spyRunner>) => spy.captures.filter((c) => c.args[0] !== "forget").length;
@@ -314,9 +325,12 @@ describe("CliProvider.generateImage", () => {
       expect(await run([init, sub("image-generator", "ACTIVE"), sub("image-generator", "DONE"), sub("image-generator", "ACTIVE", 4), result]))
         .toEqual([{ type: "error", kind: "bad_output", detail: "tool called more than once: subagent:image-generator" }]);
       // What the agent reached for under the old prompt, one request in two.
-      for (const tool of ["schedule", "manage_task", "invoke_subagent"]) {
+      for (const tool of ["schedule", "manage_task"]) {
         expect(await run([init, toolStep(tool, "ACTIVE"), result]), tool).toEqual([{ type: "error", kind: "bad_output", detail: `unexpected tool call: ${tool}` }]);
       }
+      // invoke_subagent is named after the subagent its parameters ask for;
+      // one that names none is no subagent the list admits.
+      expect(await run([init, toolStep("invoke_subagent", "ACTIVE"), result])).toEqual([{ type: "error", kind: "bad_output", detail: "unexpected tool call: subagent:" }]);
     });
     it("lets the agent wait for the subagent with a timer and a look at its list, and with nothing else", async () => {
       const spy = spyRunner();

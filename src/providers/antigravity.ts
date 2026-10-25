@@ -131,7 +131,7 @@ export const antigravityAdapter: Adapter = {
         const id = o.conversation_id ?? init.conversation_id;
         if (isConversationId(id) && !conversationId) { conversationId = id; yield { type: "meta", conversationId }; }
       } else if (event === "step_update") {
-        const su = o.step_update as { step_type?: string; text_delta?: string; state?: string; step_index?: unknown; tool_name?: unknown; tool_info?: { name?: unknown; parameters?: { Action?: unknown } };
+        const su = o.step_update as { step_type?: string; text_delta?: string; state?: string; step_index?: unknown; tool_name?: unknown; tool_info?: { name?: unknown; parameters?: { Action?: unknown; TypeName?: unknown } };
           subagent_info?: { subagents?: { type_name?: unknown; conversation_id?: unknown }[] } } | undefined;
         const deltaChars = typeof su?.text_delta === "string" ? su.text_delta.length : 0;
         if (shape.length < SHAPE_CAP) shape.push({ event, step_type: su?.step_type, step_index: su?.step_index, state: su?.state, deltaChars });
@@ -160,7 +160,15 @@ export const antigravityAdapter: Adapter = {
           // it (`manage_subagents:list`), so looking can be admitted alone.
           const plain = String(su.tool_name ?? su.tool_info?.name ?? "");
           const action = plain === "manage_subagents" ? `:${typeof su.tool_info?.parameters?.Action === "string" ? su.tool_info.parameters.Action.toLowerCase() : ""}` : "";
-          const name = subagents ? `subagent:${subagents.map((s) => String(s.type_name ?? "")).join(",")}` : plain + action;
+          // Since 2026-10-22 the service announces the hand-off first as a
+          // plain tool step, invoke_subagent with the subagent's type in its
+          // parameters (Role, TypeName), and only the step's DONE update is a
+          // subagent step. The type is read from there too, one string or
+          // nothing, so the guard sees the same name in either shape.
+          const asked = su.tool_info?.parameters?.TypeName;
+          const name = subagents ? `subagent:${subagents.map((s) => String(s.type_name ?? "")).join(",")}`
+            : plain === "invoke_subagent" ? `subagent:${typeof asked === "string" ? asked : ""}`
+            : plain + action;
           const conversations = (subagents ?? []).map((s) => s.conversation_id).filter(isConversationId);
           const opened = conversations.length ? { conversations } : {};
           const raw = JSON.stringify(su);

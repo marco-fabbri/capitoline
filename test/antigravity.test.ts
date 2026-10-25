@@ -62,6 +62,27 @@ describe("antigravity adapter", () => {
     expect(ev.find((e) => e.type === "meta")).toEqual({ type: "meta", conversationId: "e0405ad8-9fe1-45e8-9eea-b05629b4c775" });
     expect(ev.at(-1)).toMatchObject({ type: "done" });
   });
+  // Since 2026-10-22 (seen with 1.4.2 and 1.4.7 alike, so a change on the
+  // service's side) the hand-off is announced as a plain tool step,
+  // invoke_subagent with the subagent's type in its parameters, and only the
+  // DONE update of the same step is a subagent step. The guard judges a step
+  // at its first sighting, so the type must be read from the parameters too.
+  it("names an invoke_subagent tool step after the subagent its parameters ask for", async () => {
+    const ev = await events(linesOf("test/fixtures/antigravity/image-subagent-tool-step.jsonl"));
+    const tools = ev.filter((e) => e.type === "tool") as { phase: string; name: string; conversations?: string[] }[];
+    expect(tools.map((e) => `${e.phase}:${e.name}`)).toEqual(["call:subagent:image-generator", "done:subagent:image-generator"]);
+    expect(tools[0].conversations).toBeUndefined();
+    expect(tools[1].conversations).toEqual(["f153151f-d203-4f3d-9f04-bb29b60642e8"]);
+    expect(ev.find((e) => e.type === "meta")).toEqual({ type: "meta", conversationId: "06652d19-b0a0-41e4-9d8e-45b3b040e260" });
+    expect(ev.at(-1)).toMatchObject({ type: "done" });
+    // Anything but one type named as a string is no subagent the list admits.
+    const step = (parameters: unknown) => JSON.stringify({ event: "step_update", step_update: { step_index: 2, state: "ACTIVE", step_type: "tool", tool_name: "invoke_subagent", tool_info: { name: "invoke_subagent", parameters } } });
+    const name = async (parameters: unknown) => ((await events((async function* () { yield step(parameters); })())).find((e) => e.type === "tool") as { name: string }).name;
+    expect(await name({ Role: "Browser", TypeName: "browser" })).toBe("subagent:browser");
+    expect(await name({ TypeName: ["image-generator"] })).toBe("subagent:");
+    expect(await name({})).toBe("subagent:");
+    expect(await name(undefined)).toBe("subagent:");
+  });
   // The same request, a run where the agent waited: a timer the subagent's
   // report cancelled, and two looks at the list of its subagents.
   it("names manage_subagents with its action, so looking can be told from acting", async () => {
