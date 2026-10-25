@@ -293,6 +293,18 @@ providers:
       - features.api_key_cyber_access_programs=false
       - -c
       - features.code_mode_interrupt=false
+      # Enabled by default from Codex 0.164.0, read in codex-rs
+      # (features/src/lib.rs) and none a tool of `codex exec`: the first offers
+      # Amazon Bedrock during the interactive sign-in; the second changes how
+      # tool definitions are carried in the model's context, adding no tool;
+      # the third coordinates OAuth refresh for MCP servers, and none is
+      # configured. Switched off anyway, so a run behaves as it did on 0.163.0.
+      - -c
+      - features.bedrock_setup_wizard=false
+      - -c
+      - features.incremental_tools=false
+      - -c
+      - features.mcp_oauth_refresh_coordination=false
     args_extra: []            # what this host adds; only an overlay ever sets it
     system_preamble: null     # this CLI's tools are switched off by flag, so there is nothing to tell it
     system_prompt_flag: developer_instructions       # passed as -c developer_instructions="<text>"

@@ -555,7 +555,8 @@ describe("config", () => {
       "browser_use_full_cdp_access", "in_app_browser", "computer_use", "sleep_tool", "tool_call_mcp_elicitation",
       "collaboration_modes", "shell_tool", "daemon_auto_start", "write_stdin_approval",
       "api_key_model_discovery", "browser_annotation_api", "in_app_voice", "instant_interrupt", "ultrafast_mode",
-      "cli_daybreak", "api_key_cyber_access_programs", "code_mode_interrupt"];
+      "cli_daybreak", "api_key_cyber_access_programs", "code_mode_interrupt",
+      "bedrock_setup_wizard", "incremental_tools", "mcp_oauth_refresh_coordination"];
     for (const file of BOTH_FILES) {
       const args = loadConfig(file).providers.codex.args;
       for (const f of MUST_BE_OFF) {
