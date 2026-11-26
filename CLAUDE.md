@@ -29,4 +29,10 @@ subscriptions.
   call `spawn` from a provider adapter.
 - Anything that depends on a CLI's flags, model aliases or output format lives
   in `config/capitoline.yaml`, not in code.
-- Design spec: `docs/superpowers/specs/2026-09-19-capitoline-design.md`.
+- Design spec: `docs/specs/2026-09-19-capitoline-design.md`.
+
+## Designs and plans
+
+Designs live in `docs/specs/`, plans in `docs/plans/` (owner, 2026-11-26), never in a folder
+named after a tool. Until that day both sat in `docs/superpowers/`, named after a Claude Code
+plugin the owner has turned off; no document here asks for a skill of that plugin.

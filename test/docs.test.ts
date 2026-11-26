@@ -185,7 +185,7 @@ describe("the shipped councils, as documented", () => {
 });
 
 describe("the spec, §12", () => {
-  const s = section(readFileSync("docs/superpowers/specs/2026-09-19-capitoline-design.md", "utf8"), "## 12. ");
+  const s = section(readFileSync("docs/specs/2026-09-19-capitoline-design.md", "utf8"), "## 12. ");
 
   it("carries the naming rule the three model names follow", () => {
     expect(s).toMatch(/shape word/);

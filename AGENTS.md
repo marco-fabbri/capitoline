@@ -21,4 +21,4 @@ subscriptions.
   call `spawn` from a provider adapter.
 - Anything that depends on a CLI's flags, model aliases or output format lives
   in `config/capitoline.yaml`, not in code.
-- Design spec: `docs/superpowers/specs/2026-09-19-capitoline-design.md`.
+- Design spec: `docs/specs/2026-09-19-capitoline-design.md`.

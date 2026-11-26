@@ -3,7 +3,7 @@
 Target: a Debian/Ubuntu host. Where that host lives does not matter to this
 document: a virtual machine on any hypervisor, an unprivileged LXC on
 Proxmox, or bare metal. Every command is run as root on the host unless the
-prompt says otherwise. "Design §n" is `docs/superpowers/specs/2026-09-19-capitoline-design.md`.
+prompt says otherwise. "Design §n" is `docs/specs/2026-09-19-capitoline-design.md`.
 
 The result is one systemd service (`capitoline`, user `capitoline`) that
 runs the CLIs through `sudo` as a second user (`runner`), which is the only
